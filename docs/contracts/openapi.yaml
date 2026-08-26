@@ -1,0 +1,391 @@
+openapi: 3.1.0
+info:
+  title: Flōr IDP integration API
+  version: 0.1.0-draft
+  description: |
+    Draft contract for Schoolium's integration with the Flōr IDP. Only Authorization
+    Code with PKCE S256 is supported. The `identity.invite` workflow is intentionally
+    absent until open decisions N3 and N4 are accepted.
+servers:
+  - url: https://id.example.invalid
+tags:
+  - name: oidc
+  - name: groups
+paths:
+  /.well-known/openid-configuration:
+    get:
+      tags: [oidc]
+      summary: Publish OpenID Provider metadata
+      operationId: getOpenIdConfiguration
+      responses:
+        '200':
+          description: OpenID Provider metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issuer, authorization_endpoint, token_endpoint, jwks_uri]
+                additionalProperties: true
+  /.well-known/jwks.json:
+    get:
+      tags: [oidc]
+      summary: Publish JSON Web Key Set
+      operationId: getJwks
+      responses:
+        '200':
+          description: Current and overlapping signing keys
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keys]
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      required: [kty, kid, use]
+                      additionalProperties: true
+  /authorize:
+    get:
+      tags: [oidc]
+      summary: Start authorization-code flow
+      operationId: authorize
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - name: response_type
+          in: query
+          required: true
+          schema: { type: string, const: code }
+        - name: redirect_uri
+          in: query
+          required: true
+          description: Must exactly match a registered URI.
+          schema: { type: string, format: uri }
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, pattern: '(^| )openid( |$)' }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string, minLength: 16 }
+        - name: nonce
+          in: query
+          required: true
+          schema: { type: string, minLength: 16 }
+        - name: code_challenge
+          in: query
+          required: true
+          schema: { type: string, minLength: 43, maxLength: 128 }
+        - name: code_challenge_method
+          in: query
+          required: true
+          schema: { type: string, const: S256 }
+      responses:
+        '302': { description: Redirect to the exact registered callback URI with a one-time code and supplied state }
+        '400': { $ref: '#/components/responses/OAuthError' }
+  /token:
+    post:
+      tags: [oidc]
+      summary: Exchange a code or rotate a refresh token
+      operationId: token
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/AuthorizationCodeGrant'
+                - $ref: '#/components/schemas/RefreshTokenGrant'
+      responses:
+        '200':
+          description: Token set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenSet' }
+        '400': { $ref: '#/components/responses/OAuthError' }
+  /userinfo:
+    get:
+      tags: [oidc]
+      summary: Return claims covered by granted scopes
+      operationId: userInfo
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Claims for the authenticated subject
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserInfo' }
+        '401': { $ref: '#/components/responses/OAuthError' }
+  /revoke:
+    post:
+      tags: [oidc]
+      summary: Revoke a refresh-token family or token
+      operationId: revoke
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+                token_type_hint: { type: string, enum: [access_token, refresh_token] }
+      responses:
+        '200': { description: Revocation processed; response is intentionally non-enumerating }
+  /introspect:
+    post:
+      tags: [oidc]
+      summary: Introspect a token for an exceptional server-side use case
+      operationId: introspect
+      description: Not permitted on each product request; consumers validate JWTs locally through JWKS.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties: { token: { type: string } }
+      responses:
+        '200':
+          description: Token activity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [active]
+                properties: { active: { type: boolean } }
+  /end-session:
+    get:
+      tags: [oidc]
+      summary: End the browser SSO session
+      operationId: endSession
+      responses:
+        '204': { description: Session ended }
+  /groups:
+    post:
+      tags: [groups]
+      summary: Create a group owned by the calling client
+      operationId: createGroup
+      security: [{ bearerAuth: [groups:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateGroup' }
+      responses:
+        '201':
+          description: Group created; audience defaults to caller only
+          content: { application/json: { schema: { $ref: '#/components/schemas/Group' } } }
+        '403': { $ref: '#/components/responses/OAuthError' }
+  /groups/{group_id}:
+    parameters: [{ $ref: '#/components/parameters/GroupId' }]
+    get:
+      tags: [groups]
+      summary: Read an audience-visible group
+      operationId: getGroup
+      security: [{ bearerAuth: [groups:read] }]
+      responses:
+        '200': { description: "Group including memberships visible to the caller", content: { application/json: { schema: { $ref: '#/components/schemas/Group' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [groups]
+      summary: Dissolve a group
+      operationId: dissolveGroup
+      description: Only the creating client may call this operation.
+      security: [{ bearerAuth: [groups:write] }]
+      responses:
+        '204': { description: Group dissolved }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /groups/{group_id}/audience:
+    parameters: [{ $ref: '#/components/parameters/GroupId' }]
+    patch:
+      tags: [groups]
+      summary: Replace explicit additional readers
+      operationId: updateGroupAudience
+      description: Only the creating client may call this operation.
+      security: [{ bearerAuth: [groups:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audience]
+              properties:
+                audience:
+                  type: array
+                  minItems: 1
+                  items: { type: string, minLength: 1 }
+      responses:
+        '200': { description: Audience changed, content: { application/json: { schema: { $ref: '#/components/schemas/Group' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /groups/{group_id}/members:
+    parameters: [{ $ref: '#/components/parameters/GroupId' }]
+    post:
+      tags: [groups]
+      summary: Invite an existing identity to a group
+      operationId: createMembershipInvitation
+      description: Ownership/delegation rule is pending decision; do not implement until accepted.
+      security: [{ bearerAuth: [groups:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identity_id, role]
+              properties:
+                identity_id: { $ref: '#/components/schemas/IdentityId' }
+                role: { type: string, minLength: 1, description: Opaque product value }
+      responses:
+        '202':
+          description: Confirmation created; membership is pending
+          content: { application/json: { schema: { $ref: '#/components/schemas/MembershipInvitation' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /groups/{group_id}/members/{identity_id}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - name: identity_id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/IdentityId' }
+    delete:
+      tags: [groups]
+      summary: Revoke a membership
+      operationId: revokeMembership
+      description: Ownership/delegation rule is pending decision; do not implement until accepted.
+      security: [{ bearerAuth: [groups:write] }]
+      responses:
+        '204': { description: Membership revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /identities/{identity_id}/groups:
+    parameters:
+      - name: identity_id
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/IdentityId' }
+    get:
+      tags: [groups]
+      summary: List groups visible to the calling client for an identity
+      operationId: listIdentityGroups
+      security: [{ bearerAuth: [groups:read] }]
+      responses:
+        '200':
+          description: Audience-filtered groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Group' } }
+components:
+  parameters:
+    ClientId:
+      name: client_id
+      in: query
+      required: true
+      schema: { type: string, minLength: 1 }
+    GroupId:
+      name: group_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    OAuthError:
+      description: OAuth or API error without personal or sensitive values
+      content: { application/json: { schema: { $ref: '#/components/schemas/OAuthError' } } }
+    NotFound:
+      description: Resource does not exist or is not visible to this client
+      content: { application/json: { schema: { $ref: '#/components/schemas/OAuthError' } } }
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    IdentityId: { type: string, format: uuid }
+    AuthorizationCodeGrant:
+      type: object
+      required: [grant_type, code, redirect_uri, client_id, code_verifier]
+      properties:
+        grant_type: { type: string, const: authorization_code }
+        code: { type: string }
+        redirect_uri: { type: string, format: uri }
+        client_id: { type: string }
+        code_verifier: { type: string, minLength: 43, maxLength: 128 }
+    RefreshTokenGrant:
+      type: object
+      required: [grant_type, refresh_token, client_id]
+      properties:
+        grant_type: { type: string, const: refresh_token }
+        refresh_token: { type: string }
+        client_id: { type: string }
+    TokenSet:
+      type: object
+      required: [access_token, id_token, token_type, expires_in]
+      properties:
+        access_token: { type: string }
+        id_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, minimum: 1 }
+        scope: { type: string }
+    UserInfo:
+      type: object
+      required: [sub]
+      properties:
+        sub: { $ref: '#/components/schemas/IdentityId' }
+        family_name: { type: string }
+        given_name: { type: string }
+        middle_name: { type: string }
+        birthdate: { type: string, format: date }
+        locale: { type: string }
+        email: { type: string, format: email }
+        email_verified: { type: boolean }
+        phone_number: { type: string }
+        phone_number_verified: { type: boolean }
+    CreateGroup:
+      type: object
+      required: [tag]
+      properties:
+        tag: { type: string, minLength: 1, description: Opaque product value }
+        audience:
+          type: array
+          items: { type: string, minLength: 1 }
+    Group:
+      type: object
+      required: [id, tag, created_by_client_id, audience, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        tag: { type: string }
+        created_by_client_id: { type: string }
+        audience: { type: array, items: { type: string } }
+        status: { type: string, enum: [active, dissolved] }
+        created_at: { type: string, format: date-time }
+        memberships:
+          type: array
+          items: { $ref: '#/components/schemas/Membership' }
+    Membership:
+      type: object
+      required: [id, identity_id, role, status]
+      properties:
+        id: { type: string, format: uuid }
+        identity_id: { $ref: '#/components/schemas/IdentityId' }
+        role: { type: string }
+        status: { type: string, enum: [pending, active, rejected, revoked] }
+        joined_at: { type: string, format: date-time }
+    MembershipInvitation:
+      type: object
+      required: [membership_id, status]
+      properties:
+        membership_id: { type: string, format: uuid }
+        status: { type: string, const: pending }
+        confirmation_uri: { type: string, format: uri }
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        error_description: { type: string, description: Safe, non-enumerating diagnostic }

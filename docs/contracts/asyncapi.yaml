@@ -1,0 +1,88 @@
+asyncapi: 2.6.0
+info:
+  title: Flōr IDP event contract
+  version: 0.1.0-draft
+  description: |
+    Draft webhook event contract. Delivery is at-least-once and consumers must deduplicate
+    on `event_id`. Signing, retry, dead-letter, and reconciliation details remain blocked
+    until an Accepted ADR defines them.
+servers:
+  webhook:
+    url: '{consumerCallbackHost}'
+    protocol: https
+    variables:
+      consumerCallbackHost:
+        description: Registered consumer webhook host
+        default: consumer.example.invalid
+channels:
+  identityStatus:
+    description: Identity lifecycle events delivered to each registered consumer.
+    publish:
+      operationId: receiveIdentityStatus
+      message:
+        oneOf:
+          - $ref: '#/components/messages/IdentityBlocked'
+          - $ref: '#/components/messages/IdentityUnblocked'
+          - $ref: '#/components/messages/IdentityArchived'
+          - $ref: '#/components/messages/IdentityDeleted'
+  groupChanges:
+    description: Audience-filtered group events.
+    publish:
+      operationId: receiveGroupChange
+      message:
+        oneOf:
+          - $ref: '#/components/messages/MembershipChanged'
+          - $ref: '#/components/messages/GroupDissolved'
+components:
+  messages:
+    IdentityBlocked:
+      name: identity.blocked.v1
+      payload: { $ref: '#/components/schemas/IdentityEvent' }
+    IdentityUnblocked:
+      name: identity.unblocked.v1
+      payload: { $ref: '#/components/schemas/IdentityEvent' }
+    IdentityArchived:
+      name: identity.archived.v1
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/IdentityEvent'
+          - type: object
+            required: [retention_until]
+            properties: { retention_until: { type: string, format: date-time } }
+    IdentityDeleted:
+      name: identity.deleted.v1
+      payload: { $ref: '#/components/schemas/IdentityEvent' }
+    MembershipChanged:
+      name: group.membership.changed.v1
+      payload: { $ref: '#/components/schemas/MembershipEvent' }
+    GroupDissolved:
+      name: group.dissolved.v1
+      payload: { $ref: '#/components/schemas/GroupDissolvedEvent' }
+  schemas:
+    EventEnvelope:
+      type: object
+      required: [event_id, occurred_at]
+      properties:
+        event_id: { type: string, format: uuid }
+        occurred_at: { type: string, format: date-time }
+    IdentityEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [identity_id]
+          properties: { identity_id: { type: string, format: uuid } }
+    MembershipEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [group_id, identity_id, status]
+          properties:
+            group_id: { type: string, format: uuid }
+            identity_id: { type: string, format: uuid }
+            status: { type: string, enum: [active, revoked, rejected] }
+    GroupDissolvedEvent:
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          required: [group_id]
+          properties: { group_id: { type: string, format: uuid } }

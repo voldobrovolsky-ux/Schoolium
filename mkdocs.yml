@@ -1,0 +1,50 @@
+site_name: Schoolium
+site_description: Schoolium architecture documentation
+docs_dir: docs
+nav:
+  - Overview: index.md
+  - Context: 01-context.md
+  - Containers: 02-containers.md
+  - Runtime: 03-runtime.md
+  - Quality: 04-quality.md
+  - Data: 05-data.md
+  - Security: 06-security.md
+  - Reliability: 07-reliability.md
+  - Change management: 08-change.md
+  - Testing: 09-testing.md
+  - Operations: 10-operations.md
+  - Onboarding: 11-onboarding.md
+  - Glossary: glossary.md
+  - Risks: risks.md
+  - Decisions:
+      - Register: decisions/index.md
+      - ADR-0001: decisions/ADR-0001-authorization-code-pkce.md
+      - ADR-0002: decisions/ADR-0002-refresh-token-rotation.md
+      - ADR-0003: decisions/ADR-0003-argon2id.md
+      - ADR-0004: decisions/ADR-0004-hot-cold-path.md
+      - ADR-0005: decisions/ADR-0005-product-authorization-boundary.md
+      - ADR-0006: decisions/ADR-0006-generic-groups.md
+      - ADR-0007: decisions/ADR-0007-no-group-tenant.md
+      - ADR-0008: decisions/ADR-0008-group-audience.md
+      - ADR-0009: decisions/ADR-0009-confirmation-mechanism.md
+      - ADR-0010: decisions/ADR-0010-crypto-shredding.md
+      - ADR-0011: decisions/ADR-0011-admin-webauthn.md
+      - ADR-0012: decisions/ADR-0012-defer-advanced-protocols.md
+  - Contracts:
+      - OpenAPI: contracts/openapi.yaml
+      - AsyncAPI: contracts/asyncapi.yaml
+      - Consumer contracts: contracts/pacts/README.md
+  - Runbooks:
+      - Database unavailable: runbooks/database-unavailable.md
+      - Session store unavailable: runbooks/session-store-unavailable.md
+      - Signing key compromise: runbooks/signing-key-compromise.md
+      - Refresh-token reuse: runbooks/refresh-token-reuse.md
+      - Error budget exhausted: runbooks/error-budget-exhausted.md
+      - Release rollback: runbooks/release-rollback.md
+  - Reference materials:
+      - Architecture standard (Russian): ARCHITECTURE-STANDARD.ru.md
+      - Architecture standard (English): ARCHITECTURE-STANDARD.en.md
+      - IDP target specification: IDP-SPEC.md
+      - Schoolium and IDP mechanics: SCHOOLIUM-IDP-MECHANICS.md
+      - IDP research: idp-research.md
+      - Flōrus IDP research: Building_an_IDP_and_SSO_for_Flōrus_Architecture,_Standards,_and.md

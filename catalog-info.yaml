@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: schoolium
+  title: Schoolium
+  description: School workspace product integrated with the Flōr Identity Provider.
+  annotations:
+    flor.group/tier: "1"
+    backstage.io/techdocs-ref: dir:.
+  tags: [education, workspace, oidc]
+spec:
+  type: service
+  lifecycle: experimental
+  owner: schoolium-architecture
+  system: florus
+  consumesApis: [idp-oidc, idp-groups, idp-events]
+  dependsOn: [component:idp, resource:idp-db, resource:idp-session-store]
