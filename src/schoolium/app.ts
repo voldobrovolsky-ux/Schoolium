@@ -1,12 +1,13 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import type { HealthDependencies } from "../infrastructure/runtime.js";
 import { registerErrorHandler, requireTextHeader } from "../shared/http.js";
 import { WorkspaceService, type WorkspaceRole } from "./workspaces.js";
 
-export const buildSchooliumApp = (service = new WorkspaceService()): FastifyInstance => {
+export const buildSchooliumApp = (service = new WorkspaceService(), dependencies?: HealthDependencies): FastifyInstance => {
   const app = Fastify({ logger: true });
   registerErrorHandler(app);
 
-  app.get("/health", async () => ({ status: "ok" }));
+  app.get("/health", async () => ({ status: "ok", dependencies: await dependencies?.check() }));
 
   app.post<{ Body: { title?: string } }>("/workspaces", async (request, reply) => {
     const identityId = requireTextHeader(reply, request.headers["x-identity-id"], "x-identity-id");

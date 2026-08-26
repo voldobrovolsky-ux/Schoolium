@@ -16,4 +16,10 @@ npm run dev:schoolium  # Schoolium API on :3000
 npm test
 ```
 
+## Full local system
+
+With Docker Desktop installed, run `docker compose up --build`. It starts PostgreSQL,
+Redis, database migrations, the OIDC provider (`:4000`), the group API (`:4001`), and
+Schoolium (`:3000`) as one development system.
+
 The runnable services are intentionally development-only until the unresolved owner decisions in [docs/risks.md](docs/risks.md) are accepted. Production startup is refused instead of silently using in-memory identities, headers, or keys.

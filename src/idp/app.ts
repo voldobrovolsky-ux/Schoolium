@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import { registerErrorHandler, requireTextHeader } from "../shared/http.js";
+import type { HealthDependencies } from "../infrastructure/runtime.js";
 import { GroupService } from "./groups.js";
 
 const requireScope = (scopeHeader: string | string[] | undefined, scope: string): boolean =>
@@ -10,7 +11,7 @@ const requireScope = (scopeHeader: string | string[] | undefined, scope: string)
  * refuses to start outside a local development/test process. Production must
  * replace this with verified OIDC access-token middleware.
  */
-export const buildIdpApi = (groups = new GroupService()): FastifyInstance => {
+export const buildIdpApi = (groups = new GroupService(), dependencies?: HealthDependencies): FastifyInstance => {
   const app = Fastify({ logger: true });
   registerErrorHandler(app);
 
@@ -23,7 +24,7 @@ export const buildIdpApi = (groups = new GroupService()): FastifyInstance => {
     if (!clientId) return;
   });
 
-  app.get("/health", async () => ({ status: "ok", mode: "development" }));
+  app.get("/health", async () => ({ status: "ok", mode: process.env.NODE_ENV ?? "development", dependencies: await dependencies?.check() }));
 
   app.post<{ Body: { tag?: string; audience?: string[] } }>("/groups", async (request, reply) => {
     const clientId = requireTextHeader(reply, request.headers["x-client-id"], "x-client-id");
