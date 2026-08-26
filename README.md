@@ -7,4 +7,13 @@ Schoolium — продукт экосистемы Flōr для управлен�
 - Documentation: [docs/index.md](docs/index.md)
 - Local setup: [docs/11-onboarding.md](docs/11-onboarding.md)
 
-На текущем этапе репозиторий содержит архитектурную базу. Реализация не начинается, пока не будут приняты решения, перечисленные в [docs/risks.md](docs/risks.md).
+## Local development
+
+```bash
+npm install
+npm run dev:idp        # OIDC discovery on :4000, group API on :4001
+npm run dev:schoolium  # Schoolium API on :3000
+npm test
+```
+
+The runnable services are intentionally development-only until the unresolved owner decisions in [docs/risks.md](docs/risks.md) are accepted. Production startup is refused instead of silently using in-memory identities, headers, or keys.
