@@ -26,3 +26,7 @@ Schoolium does not store passwords, authenticate users, issue ecosystem tokens, 
 ## Status
 
 This is a documentation baseline. The IDP contract is not accepted until the open nodes in [risks.md](risks.md) are resolved by their owners.
+
+## Product domain
+
+Schoolium's first product-domain slice is [12-utc-schedule.md](12-utc-schedule.md) — schedule generation and the завуч/moderator cabinet that feeds it ([ADR-0013](decisions/ADR-0013-utc-schedule-cabinet-scope.md)). It does not depend on the IDP-contract nodes above.

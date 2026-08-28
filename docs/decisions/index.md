@@ -22,5 +22,6 @@ last_reviewed: 2026-08-27
 | [ADR-0010](ADR-0010-crypto-shredding.md) | Delete identity data through crypto-shredding | Proposed | 2026-08-27 |
 | [ADR-0011](ADR-0011-admin-webauthn.md) | Require phishing-resistant admin authentication | Proposed | 2026-08-27 |
 | [ADR-0012](ADR-0012-defer-advanced-protocols.md) | Defer advanced protocols and access graph | Proposed | 2026-08-27 |
+| [ADR-0013](ADR-0013-utc-schedule-cabinet-scope.md) | УТЦ (schedule block) and the завуч/moderator cabinet live in Schoolium | Accepted | 2026-08-27 |
 
-These records intentionally remain Proposed because `IDP-SPEC.md` remains Draft. They become Accepted only as part of the owner-approved resolution of the target specification.
+These records intentionally remain Proposed because `IDP-SPEC.md` remains Draft. They become Accepted only as part of the owner-approved resolution of the target specification. **ADR-0013 is the exception**: it does not depend on IDP-SPEC resolution — see its own text.
