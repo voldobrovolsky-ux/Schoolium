@@ -87,24 +87,41 @@ CREATE TABLE IF NOT EXISTS schoolium.school_class (
   group_count int NOT NULL DEFAULT 1 CHECK (group_count >= 1)
 );
 
+-- One row per (subject × class): the "subject card" in the cabinet. Priority
+-- and pairing are properties of the SUBJECT IN THIS CLASS, not of any one
+-- teacher — both stay here even when the subject below is split by group.
 CREATE TABLE IF NOT EXISTS schoolium.school_subject (
   id uuid PRIMARY KEY,
   workspace_id uuid NOT NULL REFERENCES schoolium.workspace(id),
-  name text NOT NULL
-);
-
--- one row per (subject × class): the cabinet's central input.
-CREATE TABLE IF NOT EXISTS schoolium.teacher_assignment (
-  id uuid PRIMARY KEY,
-  workspace_id uuid NOT NULL REFERENCES schoolium.workspace(id),
+  name text NOT NULL,
   class_id uuid NOT NULL REFERENCES schoolium.school_class(id),
-  subject_id uuid NOT NULL REFERENCES schoolium.school_subject(id),
-  teacher_identity_id uuid,              -- NULL = uncovered (COVER_MODE candidate, §5.5)
   year_hours int NOT NULL CHECK (year_hours > 0),
   priority int NOT NULL DEFAULT 3 CHECK (priority BETWEEN 1 AND 6),
   pairing int NOT NULL DEFAULT 5 CHECK (pairing BETWEEN 1 AND 6), -- derived default, §5.3; editable
-  methodical_day int,                    -- 0..4, nullable
-  UNIQUE (workspace_id, class_id, subject_id)
+  UNIQUE (workspace_id, name, class_id)
+);
+
+-- One row per (subject × teacher-or-group): the cabinet's central input for
+-- WHO teaches it. `scope = 'class'` covers the whole class in one row;
+-- `scope = 'group'` needs one row PER GROUP, because groups of the same
+-- subject can have DIFFERENT teachers — the exact case the reference model
+-- (quality.model.mjs, buildUnits) proves its properties on: "8 параллелей,
+-- английский по группам". A UNIQUE on (subject_id, group_no) — NOT on
+-- (class_id, subject_id) alone — is what makes that representable; the
+-- single-row-per-subject shape tried first here could not express it and
+-- was caught by re-checking against EduStore's real schema
+-- (`TeacherBinding`, apps/api/prisma/schema.prisma:1307) before any code
+-- was written against it.
+CREATE TABLE IF NOT EXISTS schoolium.teacher_binding (
+  id uuid PRIMARY KEY,
+  workspace_id uuid NOT NULL REFERENCES schoolium.workspace(id),
+  subject_id uuid NOT NULL REFERENCES schoolium.school_subject(id),
+  teacher_identity_id uuid,              -- NULL = uncovered (COVER_MODE candidate, §5.5)
+  scope text NOT NULL CHECK (scope IN ('class', 'group')),
+  group_no int,                          -- NULL when scope = 'class'; 1..N when 'group'
+  hours_per_week int NOT NULL CHECK (hours_per_week > 0), -- may differ from year_hours/weeks if this group's load differs
+  methodical_day int,                    -- 0..4, nullable — per teacher, not per subject
+  UNIQUE (workspace_id, subject_id, scope, group_no)
 );
 
 CREATE TABLE IF NOT EXISTS schoolium.day_skeleton (

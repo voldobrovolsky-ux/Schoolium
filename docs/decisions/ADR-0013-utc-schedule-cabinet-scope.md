@@ -63,9 +63,15 @@ from the EduStore source and re-verified standalone in this repository.
 ## Consequences
 
 - Schoolium gains its first real domain tables: `schoolium.school_class`,
-  `schoolium.school_subject`, `schoolium.teacher_assignment`,
+  `schoolium.school_subject`, `schoolium.teacher_binding`,
   `schoolium.calendar_term`, `schoolium.day_skeleton`,
-  `schoolium.schedule_template`, `schoolium.schedule_slot`.
+  `schoolium.schedule_template`, `schoolium.schedule_slot`,
+  `schoolium.hour_debt`, `schoolium.cover_mode`. `school_subject` and
+  `teacher_binding` are two tables, not one — the first draft collapsed them
+  and could not represent a subject taught to different groups by different
+  teachers, the reference model's own primary scenario ("английский по
+  группам"); caught and fixed against EduStore's real `TeacherBinding`
+  schema before any code was written against it.
 - The role enum in `workspaces.ts` gains `admin` distinct from `moderator`
   (AR-148 on the EduStore side; here it is the same decision, applied fresh).
 - EduStore's `claude/schedule-engine-implementation-utc` branch remains the

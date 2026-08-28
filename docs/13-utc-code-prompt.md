@@ -56,11 +56,14 @@ layer translating HTTP to it, raw SQL for persistence.
 
 ### Stage 1 — schema and role split
 
-- Add the eight `CREATE TABLE IF NOT EXISTS` statements from
+- Add the nine `CREATE TABLE IF NOT EXISTS` statements from
   `12-utc-schedule.md` §3 to the `migrations` array in
   `src/infrastructure/migrate.ts`, in dependency order (calendar_term and
-  school_class/school_subject before teacher_assignment, before
-  schedule_template/schedule_slot, before hour_debt/cover_mode).
+  school_class, then school_subject, then teacher_binding, then
+  schedule_template/schedule_slot, then hour_debt/cover_mode). Note
+  `school_subject` and `teacher_binding` are two tables, not one — see the
+  comment in §3 explaining why a single table cannot represent a subject
+  taught to different groups by different teachers.
 - Extend `WorkspaceRole` in `workspaces.ts` with `admin` and
   `deputy_academic`; update `PERMISSIONS` per §2. **Do not remove existing
   roles or their permissions** — `super_admin`, `director`, `psychologist`,
@@ -72,11 +75,16 @@ layer translating HTTP to it, raw SQL for persistence.
 ### Stage 2 — cabinet: curriculum and annual hours
 
 - A `CurriculumService` (new file, `src/schoolium/schedule/curriculum.ts`)
-  over `pg`: CRUD on `teacher_assignment` scoped by `workspace_id`, deriving
+  over `pg`: CRUD on `school_subject` (year_hours, priority, deriving
   `pairing` from `year_hours` via the formula in §5.3 when not explicitly
-  set by hand (track "hand-set" with a boolean column if you need it — name
-  the decision in your report if you add one, this is a small addition to
-  the schema in §3, not a deviation from it).
+  set by hand — track "hand-set" with a boolean column if you need it, name
+  the decision in your report if you add one) and on `teacher_binding` (who
+  teaches it — whole class or a named group, hours per week for that
+  binding), both scoped by `workspace_id`. **Note**: the `UNIQUE(...,
+  scope, group_no)` constraint on `teacher_binding` does not by itself stop
+  two `scope='class'` rows for the same subject — Postgres treats each NULL
+  `group_no` as distinct. Enforce "at most one class-scope row per subject"
+  in the service, not just in SQL.
 - Route `PUT /workspaces/:id/curriculum`, permission `curriculum:manage`.
 - Test: FF-U3 (monotone, level 6 never derived) and FF-U7 (permission
   separation) as `vitest` files under `test/utc/`.
@@ -90,8 +98,11 @@ layer translating HTTP to it, raw SQL for persistence.
   weights **exactly** as named in §4 — do not add an eighth rule, do not
   change a weight without a property-based justification in your report.
 - Generation: greedy placement to first admissible grid (reuse the model's
-  `generate()` logic, adapted for the real schema — subjects/classes/teacher
-  assignments come from `teacher_assignment`, not a synthetic fixture), then
+  `generate()` logic, adapted for the real schema — subjects come from
+  `school_subject`, who-teaches-what from `teacher_binding`; a subject with
+  two `scope='group'` rows is exactly `buildUnits`'s grouped case, atomic
+  unit spans both groups' teachers in one slot, AR-75 — not a synthetic
+  fixture), then
   `repair()` runs before the template is ever written to
   `schedule_template`/`schedule_slot`. **Order matters**: check invariants,
   then improve, then write — never write an unchecked grid.
@@ -116,12 +127,16 @@ layer translating HTTP to it, raw SQL for persistence.
 ### Stage 5 — cover mode (AR-146)
 
 - Listen for a `WorkspaceMembership` status change to `revoked` for a role
-  holding a `teacher_assignment` row with taught history (a
+  holding a `teacher_binding` row with taught history (a
   `schedule_slot.origin` referencing them, or — simplest for this stage — any
-  row in `teacher_assignment` with that `teacher_identity_id`). On that
-  transition: insert a `cover_mode` row, null out `teacher_assignment.teacher_identity_id`
-  for that subject×class, and re-run the fill-the-freed-slots pass (same
-  search as generation, restricted to that class's remaining subjects).
+  row in `teacher_binding` with that `teacher_identity_id`). Cover mode
+  applies **per binding, not per subject**: if English group 1's teacher
+  leaves and group 2's stays, only group 1 enters cover mode — the other
+  keeps running normally, because they are two separate `teacher_binding`
+  rows under the same `school_subject`. On that transition: insert a
+  `cover_mode` row, null out `teacher_binding.teacher_identity_id` for that
+  one binding, and re-run the fill-the-freed-slots pass (same search as
+  generation, restricted to that class's remaining subjects/bindings).
 - Route `GET /workspaces/:id/schedule/cover-mode`.
 - Test: FF-U4.
 
