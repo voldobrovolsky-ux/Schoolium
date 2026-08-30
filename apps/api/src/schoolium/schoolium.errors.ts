@@ -41,8 +41,11 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
   // приезжает в `details` и ставит ошибку на место, а в тексте его нет.
   TERM_REVERSED: () => 'Дата конца раньше даты начала',
   LOAD_EXCEEDS_SANPIN: (d) => `${n(d, 'classLabel')} класс: ${n(d, 'total')} часа при потолке ${n(d, 'cap')} — СанПиН 1.2.3685-21`,
+  // Разбор источника слотов приезжает деталью `breakdown`: без скелета —
+  // «6 уроков в день × 5 дней — потолок параллели», со скелетом (AR-178) —
+  // «урочные позиции скелета за 6 дней». Один шаблон, оба разбора честны.
   LOAD_EXCEEDS_GRID: (d) =>
-    `${n(d, 'classLabel')} класс: ${n(d, 'total')} часов при ${n(d, 'grid')} слотах недели (${n(d, 'perDay')} уроков в день × ${n(d, 'days')} дней — потолок параллели)`,
+    `${n(d, 'classLabel')} класс: ${n(d, 'total')} часов при ${n(d, 'grid')} слотах недели (${n(d, 'breakdown')})`,
   GROUP_HOURS_UNEQUAL: (d) => `${n(d, 'subject')}, ${n(d, 'classLabel')} класс: ${n(d, 'hours')}`,
   TEACHER_OVERBOOKED: (d) => `${n(d, 'teacher')}: ${n(d, 'hours')} часов при ${n(d, 'grid')} слотах недели`,
   SUBJECT_UNCOVERED: (d) => `${n(d, 'subject')}, ${n(d, 'classLabel')} класс: ${n(d, 'groups')} без педагога`,

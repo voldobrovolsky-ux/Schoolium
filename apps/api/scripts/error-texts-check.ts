@@ -57,7 +57,7 @@ const SAMPLE: Record<ErrorCode, Record<string, unknown>> = {
   // УТЦ v1.4 фаза IV (AR-175): ручная перестановка в черновике
   SWAP_CONFLICT: { teacher: 'Иванова М. И.' },
   LOAD_EXCEEDS_SANPIN: { classLabel: 5, total: 34, cap: 29 },
-  LOAD_EXCEEDS_GRID: { classLabel: 5, total: 40, grid: 30, perDay: 6, days: 5 },
+  LOAD_EXCEEDS_GRID: { classLabel: 5, total: 40, grid: 30, breakdown: '6 уроков в день × 5 дней — потолок параллели' },
   GROUP_HOURS_UNEQUAL: { subject: 'Английский', classLabel: 7, hours: 'группа 1 — 3 ч, группа 2 — 1 ч' },
   TEACHER_OVERBOOKED: { teacher: 'Иванова М. И.', hours: 48, grid: 35 },
   SUBJECT_UNCOVERED: { subject: 'Английский', classLabel: 7, groups: 'группа 2' },

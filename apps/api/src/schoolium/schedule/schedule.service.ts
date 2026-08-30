@@ -221,17 +221,23 @@ export class ScheduleService implements OnModuleInit {
     await this.state.checkVersion('schedule', dto.version);
     const ws = TenantContext.require();
     const classes = await this.contingent.classes();
-    // AR-114: число — верхняя граница школьного дня; отказ только когда оно выше
-    // потолка самой старшей параллели. День каждого класса генератор ограничит
-    // потолком его собственной параллели.
-    const cap = schoolDayCap(classes.map((c) => c.parallel));
-    if (classes.length > 0 && dto.slotsPerDay > cap) {
-      const senior = classes.reduce((a, c) => (DAY_SLOTS_CAP[c.parallel] > DAY_SLOTS_CAP[a.parallel] ? c : a), classes[0]);
-      throw new SchoolError('DAY_EXCEEDS_SANPIN', { classLabel: senior.label, slotsPerDay: dto.slotsPerDay, cap });
-    }
+    // AR-178 (школа полного дня): у школы со скелетом день судит сам скелет —
+    // его времена уже проверены при сохранении (`SKELETON_INVALID`), а параметры
+    // дня остаются фолбэком и потолками не судятся.
+    const hasSkeleton = (await this.prisma.skeletonPosition.count({ where: { workspaceId: ws } })) > 0;
     const minutes = dayLength(dto);
-    if (minutes > DAY_MINUTES_CAP) {
-      throw new SchoolError('DAY_TOO_LONG', { minutes, cap: DAY_MINUTES_CAP, breakdown: dayLengthBreakdown(dto) });
+    if (!hasSkeleton) {
+      // AR-114: число — верхняя граница школьного дня; отказ только когда оно
+      // выше потолка самой старшей параллели. День каждого класса генератор
+      // ограничит потолком его собственной параллели.
+      const cap = schoolDayCap(classes.map((c) => c.parallel));
+      if (classes.length > 0 && dto.slotsPerDay > cap) {
+        const senior = classes.reduce((a, c) => (DAY_SLOTS_CAP[c.parallel] > DAY_SLOTS_CAP[a.parallel] ? c : a), classes[0]);
+        throw new SchoolError('DAY_EXCEEDS_SANPIN', { classLabel: senior.label, slotsPerDay: dto.slotsPerDay, cap });
+      }
+      if (minutes > DAY_MINUTES_CAP) {
+        throw new SchoolError('DAY_TOO_LONG', { minutes, cap: DAY_MINUTES_CAP, breakdown: dayLengthBreakdown(dto) });
+      }
     }
     await this.prisma.$transaction(async (tx) => {
       await tx.schoolState.upsert({

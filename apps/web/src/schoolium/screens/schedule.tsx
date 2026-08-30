@@ -28,11 +28,14 @@ import { useSession } from "../session";
 import {
   addDays,
   buildDayRows,
+  calendarDays,
   DAY_NAMES,
   DayLessonList,
+  DayPicker,
   Days33,
-  DayStrip,
   dayMonth,
+  dayNoOf,
+  inTerms,
   mondayOf,
   weekRange,
   WeekStrip,
@@ -185,8 +188,17 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
     week && weeks.some((w) => w.monday === week)
       ? week
       : (weeks.find((w) => w.monday === mondayOf(todayIso)) ?? weeks.find((w) => !w.muted) ?? weeks[0]).monday;
+  const termList = terms.status === "ready" ? terms.data : [];
 
-  const [day, setDay] = useState((new Date().getUTCDay() + 6) % 7);
+  // Мобильный пикер живёт ДАТАМИ сквозной ленты календаря, а не днями недели:
+  // дефолт — сегодняшний учебный день либо ближайший следующий (31 августа до
+  // начала четверти в ленте отсутствует и открыться не может).
+  const days = useMemo(() => calendarDays(termList, todayIso), [terms, todayIso]);
+  const [openDate, setOpenDate] = useState<string | null>(null);
+  const openDay =
+    openDate && days.some((d) => d.date === openDate)
+      ? openDate
+      : (days.find((d) => d.date >= todayIso) ?? days[days.length - 1]).date;
 
   const cellsFor = (dayNo: number): Map<number, DayCell[]> => {
     const map = new Map<number, DayCell[]>();
@@ -251,25 +263,23 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
     </div>
   );
 
+  // пустота дня зависит только от дня недели: шаблон повторяется еженедельно
+  const dayEmpty = [0, 1, 2, 3, 4, 5, 6].map((d) => rowsFor(d).length === 0);
+
   if (mobile) {
     return (
       <div className="sch-stack">
         {filterBar}
-        <DayStrip
+        <DayPicker
           testId="S-40.daystrip"
-          days={[0, 1, 2, 3, 4, 5, 6].map((d) => ({
-            dayNo: d,
-            label: DAY_NAMES[d],
-            date: addDays(openWeek, d),
-            muted: rowsFor(d).length === 0,
-          }))}
-          open={day}
-          onOpen={setDay}
+          days={days.map((d) => ({ ...d, muted: dayEmpty[d.dayNo] }))}
+          open={openDay}
+          onOpen={setOpenDate}
         />
         {/* key: смена дня перезапускает раскрытие сверху вниз (`sch-unfold`) */}
         <DayLessonList
-          key={`${view}-${view === "class" ? current : curTeacher}-${day}`}
-          rows={rowsFor(day)}
+          key={`${view}-${view === "class" ? current : curTeacher}-${openDay}`}
+          rows={rowsFor(dayNoOf(openDay))}
           testId="S-40.grid.week"
           pairedTestId="S-40.cell.paired"
         />
@@ -285,7 +295,10 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
         testId="S-40.grid.week"
         dayNos={[0, 1, 2, 3, 4, 5]}
         header={(d) => `${DAY_NAMES[d]} · ${dayMonth(addDays(openWeek, d))}`}
-        render={(d) => <DayLessonList rows={rowsFor(d)} pairedTestId="S-40.cell.paired" />}
+        render={(d) => (
+          // день вне четвертей (31 августа, каникулы) уроков не несёт
+          <DayLessonList rows={inTerms(addDays(openWeek, d), termList) ? rowsFor(d) : []} pairedTestId="S-40.cell.paired" />
+        )}
       />
     </div>
   );

@@ -17,13 +17,15 @@ import {
   buildDayRows,
   DAY_NAMES,
   DayLessonList,
+  DayPicker,
   Days33,
-  DayStrip,
   dayMonth,
+  dayNoOf,
   mondayOf,
   weekRange,
   WeekStrip,
   type DayCell,
+  type PickerDay,
 } from "../schedule-view";
 
 const DAY_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
@@ -32,6 +34,9 @@ export function DiaryScreen() {
   const [children, setChildren] = useState<DiaryChildDto[] | null>(null);
   const [child, setChild] = useState<string | null>(null);
   const [week, setWeek] = useState<string | null>(null);
+  // Выбранный ДЕНЬ живёт здесь, а не в WeekView: лента пикера переезжает
+  // через границу недели, и перезагрузка недели не должна сбрасывать день.
+  const [selDate, setSelDate] = useState<string | null>(null);
   const [data, setData] = useState<DiaryWeekDto | null>(null);
   const [averages, setAverages] = useState<SubjectAverageDto[] | null>(null);
   const [tab, setTab] = useState<"week" | "averages">("week");
@@ -49,7 +54,8 @@ export function DiaryScreen() {
 
   useEffect(() => {
     if (!child) return;
-    setData(null);
+    // прежние данные не сбрасываются: лента пикера остаётся смонтированной,
+    // пока грузится соседняя неделя (день показывает скелетон, не прыжок)
     api
       .diaryWeek(child, week)
       .then(setData)
@@ -100,6 +106,8 @@ export function DiaryScreen() {
                   onClick={() => {
                     setChild(c.studentId);
                     setWeek(null);
+                    setSelDate(null);
+                    setData(null); // другой ученик — чужая неделя не показывается
                   }}
                 >
                   {c.name} · {c.classLabel}
@@ -125,7 +133,15 @@ export function DiaryScreen() {
             data === null ? (
               <Skeletons count={5} />
             ) : (
-              <WeekView data={data} onWeek={setWeek} />
+              <WeekView
+                data={data}
+                selected={selDate}
+                onPick={(date) => {
+                  setSelDate(date);
+                  const m = mondayOf(date);
+                  if (m !== data.monday) setWeek(m);
+                }}
+              />
             )
           ) : averages === null ? (
             <Skeletons count={5} />
@@ -141,19 +157,24 @@ export function DiaryScreen() {
 /**
  * Неделя дневника (AR-175, УТЦ v1.4 фаза II) — тем же общим модулем, что
  * расписание `S-40`: строка «N. Предмет» несёт отметку СРАЗУ после названия,
- * времена — из скелета дня (AR-171), без скелета — `slotTimes`. Мобайл — лента
- * дней с датой только под открытым; десктоп — лента недель и неделя 3+3.
+ * времена — из скелета дня (AR-171), без скелета — `slotTimes`. Мобайл —
+ * пикер дня (правка владельца 2026-08-31): слот неподвижен, лента учебных
+ * недель журнала едет под ним, переезд через границу недели догружает её;
+ * десктоп — лента недель и неделя 3+3.
  */
-function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) => void }) {
+function WeekView({
+  data,
+  selected,
+  onPick,
+}: {
+  data: DiaryWeekDto;
+  selected: string | null;
+  onPick: (date: string) => void;
+}) {
   const mobile = useIsMobile();
-  const idx = data.weeks.findIndex((w) => w.monday === data.monday);
-  const prev = idx > 0 ? data.weeks[idx - 1] : null;
-  const next = idx >= 0 && idx < data.weeks.length - 1 ? data.weeks[idx + 1] : null;
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [selected, setSelected] = useState<number | null>(null);
 
-  const cellsFor = (dayNo: number): Map<number, DayCell[]> => {
-    const date = addDays(data.monday, dayNo);
+  const cellsForDate = (date: string): Map<number, DayCell[]> => {
     const map = new Map<number, DayCell[]>();
     for (const l of data.days.find((d) => d.date === date)?.lessons ?? []) {
       const cells = map.get(l.slotNo) ?? [];
@@ -162,16 +183,34 @@ function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) =>
     }
     return map;
   };
-  const rowsFor = (dayNo: number) =>
-    buildDayRows({ skeleton: data.skeleton, grid: data.grid, dayNo, cellsByLesson: cellsFor(dayNo) });
+  const rowsForDate = (date: string) =>
+    buildDayRows({ skeleton: data.skeleton, grid: data.grid, dayNo: dayNoOf(date), cellsByLesson: cellsForDate(date) });
+  const rowsFor = (dayNo: number) => rowsForDate(addDays(data.monday, dayNo));
 
-  const firstBusy = data.days[0]?.date ? (new Date(`${data.days[0].date}T00:00:00.000Z`).getUTCDay() + 6) % 7 : 0;
-  const day =
-    selected ?? (mondayOf(todayIso) === data.monday ? (new Date(`${todayIso}T00:00:00.000Z`).getUTCDay() + 6) % 7 : firstBusy);
+  // Лента пикера — учебные дни всех недель журнала; пустоту знаем только у
+  // загруженной недели, о чужих не врём приглушением.
+  const pickerDays: PickerDay[] = data.weeks.flatMap((w) =>
+    [0, 1, 2, 3, 4, 5].map((d) => ({
+      date: addDays(w.monday, d),
+      dayNo: d,
+      muted: w.monday === data.monday ? rowsFor(d).length === 0 : false,
+    })),
+  );
+
+  const open =
+    selected && pickerDays.some((d) => d.date === selected)
+      ? selected
+      : (pickerDays.find((d) => d.date >= todayIso)?.date ?? pickerDays[pickerDays.length - 1]?.date ?? data.monday);
+  // День из соседней недели уже выбран, а её данные ещё едут — скелетон дня.
+  const loadingWeek = mondayOf(open) !== data.monday;
+  // Стрелки недель ходят от недели ОТКРЫТОГО дня — она может отличаться от загруженной.
+  const openIdx = data.weeks.findIndex((w) => w.monday === mondayOf(open));
+  const prev = openIdx > 0 ? data.weeks[openIdx - 1] : null;
+  const next = openIdx >= 0 && openIdx < data.weeks.length - 1 ? data.weeks[openIdx + 1] : null;
 
   return (
     <div className="sch-stack" data-testid="S-90.week">
-      {data.days.length === 0 ? (
+      {data.weeks.length === 0 && data.days.length === 0 ? (
         <EmptyState testId="S-90.emptyWeek" title="Уроков на этой неделе нет" />
       ) : mobile ? (
         <>
@@ -181,39 +220,33 @@ function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) =>
               data-testid="S-90.btn.prevWeek"
               disabled={!prev}
               aria-label="Предыдущая неделя"
-              onClick={() => prev && onWeek(prev.monday)}
+              onClick={() => prev && onPick(addDays(prev.monday, dayNoOf(open)))}
             >
               ‹
             </button>
             <span className="sch-weekrange" data-testid="S-90.weekRange">
-              {weekRange(data.monday, addDays(data.monday, 5))}
+              {weekRange(mondayOf(open), addDays(mondayOf(open), 5))}
             </span>
             <button
               className="sch-weeknav"
               data-testid="S-90.btn.nextWeek"
               disabled={!next}
               aria-label="Следующая неделя"
-              onClick={() => next && onWeek(next.monday)}
+              onClick={() => next && onPick(addDays(next.monday, dayNoOf(open)))}
             >
               ›
             </button>
           </div>
 
-          <DayStrip
-            testId="S-90.daystrip"
-            days={[0, 1, 2, 3, 4, 5, 6].map((d) => ({
-              dayNo: d,
-              label: DAY_NAMES[d],
-              date: addDays(data.monday, d),
-              muted: rowsFor(d).length === 0,
-            }))}
-            open={day}
-            onOpen={setSelected}
-          />
+          <DayPicker testId="S-90.daystrip" days={pickerDays} open={open} onOpen={onPick} />
 
-          <section aria-label={`${DAY_FULL[day]} ${dayMonth(addDays(data.monday, day))}`}>
+          <section aria-label={`${DAY_FULL[dayNoOf(open)]} ${dayMonth(open)}`}>
             {/* key: смена дня перезапускает раскрытие сверху вниз (`sch-unfold`) */}
-            <DayLessonList key={day} rows={rowsFor(day)} testId="S-90.day" />
+            {loadingWeek ? (
+              <Skeletons count={3} />
+            ) : (
+              <DayLessonList key={open} rows={rowsForDate(open)} testId="S-90.day" />
+            )}
           </section>
         </>
       ) : (
@@ -227,7 +260,7 @@ function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) =>
               muted: !w.hasLessons,
             }))}
             open={data.monday}
-            onOpen={onWeek}
+            onOpen={onPick}
           />
           <Days33
             testId="S-90.day"

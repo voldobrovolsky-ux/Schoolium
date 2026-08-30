@@ -3,8 +3,9 @@
  * день по скелету (AR-171) с фолбэком на арифметику `slotTimes`; дневник
  * добавляет отметку после названия предмета тем же компонентом, не копией.
  *
- * Правила владельца 2026-08-30:
- *   · мобайл — лента дней, дата ТОЛЬКО под открытым днём, листание со снапом;
+ * Правила владельца 2026-08-30/31:
+ *   · мобайл — ПИКЕР дня: неподвижный слот, лента дней учебного календаря едет
+ *     под ним со снапом; дата ТОЛЬКО под открытым днём;
  *   · десктоп — лента недель, вся неделя двумя колонками по три дня
  *     (ПН/ВТ/СР слева, ЧТ/ПТ/СБ справа);
  *   · строка урока: «N. Предмет (1|2)» + «HH:MM — HH:MM»; N — позиция в общей
@@ -220,42 +221,124 @@ export function DayLessonList({
 
 // ─────────────────────────── ленты ───────────────────────────
 
-/** Мобильная лента дней: дата — ТОЛЬКО под открытым днём; снап и автоподкрутка. */
-export function DayStrip({
+/** День сквозной ленты пикера: дата определяет и день недели, и содержимое. */
+export interface PickerDay {
+  date: string;
+  dayNo: number;
+  muted?: boolean;
+}
+
+export const dayNoOf = (iso: string): number => (new Date(`${iso}T00:00:00.000Z`).getUTCDay() + 6) % 7;
+
+/**
+ * Учебные дни (ПН…СБ) внутри четвертей календаря — сквозная лента для пикера:
+ * день до начала и после конца четверти в ленту не попадает и уроков не несёт
+ * (правка владельца 2026-08-31: 31 августа — не учебный день). Календарь не
+ * прочитался — одна текущая неделя, экран живёт.
+ */
+export function calendarDays(
+  terms: { dateFrom: string | null; dateTo: string | null }[],
+  todayIso: string,
+): PickerDay[] {
+  const filled = terms
+    .filter((t): t is { dateFrom: string; dateTo: string } => Boolean(t.dateFrom && t.dateTo))
+    .sort((a, b) => a.dateFrom.localeCompare(b.dateFrom));
+  if (!filled.length) {
+    const mon = mondayOf(todayIso);
+    return [0, 1, 2, 3, 4, 5].map((d) => ({ date: addDays(mon, d), dayNo: d }));
+  }
+  const out: PickerDay[] = [];
+  for (const t of filled) {
+    // предохранитель длины — учебный год ≈ 210 учебных дней
+    for (let d = t.dateFrom; d <= t.dateTo && out.length < 400; d = addDays(d, 1)) {
+      const dn = dayNoOf(d);
+      if (dn < 6) out.push({ date: d, dayNo: dn });
+    }
+  }
+  return out;
+}
+
+/** Дата внутри хотя бы одной четверти; календарь пуст — не судим. */
+export function inTerms(date: string, terms: { dateFrom: string | null; dateTo: string | null }[]): boolean {
+  const filled = terms.filter((t) => t.dateFrom && t.dateTo);
+  if (!filled.length) return true;
+  return filled.some((t) => t.dateFrom! <= date && date <= t.dateTo!);
+}
+
+/**
+ * Мобильный пикер дня (правка владельца 2026-08-31): СЛОТ выбранного дня
+ * неподвижен — второе место ленты, — а лента дней учебного календаря едет под
+ * ним со снапом; день, вставший в слот, и есть открытый. Дни сквозные по
+ * календарю, а не «7 текущей недели»; дата — только под открытым днём
+ * (правка 2026-08-30 действует).
+ */
+export function DayPicker({
   days,
   open,
   onOpen,
   testId,
 }: {
-  days: { dayNo: number; label: string; date?: string | null; muted?: boolean }[];
-  open: number;
-  onOpen: (dayNo: number) => void;
+  days: PickerDay[];
+  open: string;
+  onOpen: (date: string) => void;
   testId?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const settle = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Шаг ленты читается с DOM: ширину чипа задаёт CSS, дублировать её числом
+  // в коде значило бы завести второй источник (П-5).
+  const step = (): number => {
+    const a = ref.current?.children[0] as HTMLElement | undefined;
+    const b = ref.current?.children[1] as HTMLElement | undefined;
+    return a && b ? b.offsetLeft - a.offsetLeft || 60 : 60;
+  };
+  const daysKey = days.length ? `${days[0].date}·${days[days.length - 1].date}·${days.length}` : "";
+
+  // Программное позиционирование ВСЕГДА мгновенное: плавную подкрутку browser
+  // прерывает чем угодно (ресайз, подмена ленты, снап после layout) и лента
+  // замирает на чужом дне — найдено мобильным смоком. Плавность остаётся у
+  // нативного свайпа; тап отвечает мгновенным прыжком в слот.
   useEffect(() => {
-    ref.current
-      ?.querySelector<HTMLElement>('[data-open="1"]')
-      ?.scrollIntoView({ inline: "center", block: "nearest", behavior: scrollBehavior() });
-  }, [open]);
+    const i = days.findIndex((d) => d.date === open);
+    if (i < 0) return;
+    clearTimeout(settle.current); // таймер, взведённый до перестановки, судил бы старую ленту
+    ref.current?.scrollTo({ left: i * step(), behavior: "auto" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, daysKey]);
+  useEffect(() => () => clearTimeout(settle.current), []);
+
+  const onScroll = () => {
+    clearTimeout(settle.current);
+    // лента остановилась — открыт день, вставший в слот
+    settle.current = setTimeout(() => {
+      const el = ref.current;
+      if (!el || !days.length) return;
+      const i = Math.min(days.length - 1, Math.max(0, Math.round(el.scrollLeft / step())));
+      if (days[i].date !== open) onOpen(days[i].date);
+    }, 140);
+  };
+
   return (
-    <div className="sch-daystrip sch-daystrip--snap" ref={ref} data-testid={testId}>
-      {days.map((d) => (
-        <button
-          key={d.dayNo}
-          type="button"
-          data-open={d.dayNo === open ? "1" : undefined}
-          className={
-            "sch-daychip" +
-            (d.dayNo === open ? " sch-daychip--active" : "") +
-            (d.muted ? " sch-daychip--muted" : "")
-          }
-          onClick={() => onOpen(d.dayNo)}
-        >
-          <small>{d.label}</small>
-          {d.dayNo === open && d.date ? <span className="sch-daychip-date">{Number(d.date.slice(8))}</span> : null}
-        </button>
-      ))}
+    <div className="sch-daypicker" data-testid={testId}>
+      <div className="sch-daypicker-strip" ref={ref} onScroll={onScroll}>
+        {days.map((d) => (
+          <button
+            key={d.date}
+            type="button"
+            aria-pressed={d.date === open}
+            className={
+              "sch-daychip" +
+              (d.date === open ? " sch-daychip--active" : "") +
+              (d.muted ? " sch-daychip--muted" : "")
+            }
+            onClick={() => onOpen(d.date)}
+          >
+            <small>{DAY_NAMES[d.dayNo]}</small>
+            {d.date === open ? <span className="sch-daychip-date">{Number(d.date.slice(8))}</span> : null}
+          </button>
+        ))}
+      </div>
+      <span className="sch-daypicker-slot" aria-hidden="true" />
     </div>
   );
 }

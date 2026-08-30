@@ -45,7 +45,11 @@
 
 /* ─────────────────────────── оболочка (§2.1) ─────────────────────────── */
 
-.sch-shell { display: flex; min-height: 100vh; }
+/* Оболочка возит прокрутку САМА: глобальный `body{overflow:hidden}` легаси-слоя
+   (design/styles.css) делает переполнение body видимым, но не прокручиваемым —
+   тот же класс бага, что у `.sch-landing`/`.sch-auth`/`.sch-sidebar`. Скроллпорт
+   десктопа — `.sch-main`, мобайла — `.sch-content`; sticky-шапки живут в них. */
+.sch-shell { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
 
 .sch-sidebar {
   width: 240px;
@@ -55,9 +59,7 @@
   display: flex;
   flex-direction: column;
   padding: var(--sp-16) var(--sp-12);
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  height: 100%;
   /* Сайдбар ростом ровно в экран, а его содержимое может быть выше: на низком
      окне карточка пользователя внизу уходила за край и не доставалась ничем —
      ни колесом, ни перетаскиванием, потому что переполнение было видимым, но
@@ -108,7 +110,7 @@
 .sch-user-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); }
 .sch-user-roles { font-size: var(--fs-xs); color: var(--c-ink-secondary); }
 
-.sch-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.sch-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
 
 .sch-topbar {
   height: 64px; flex: 0 0 64px;
@@ -567,7 +569,7 @@
 @media (max-width: 767px) {
   /* ─── оболочка §2.2 ─── */
 
-  .sch-shell--mobile { display: flex; flex-direction: column; min-height: 100vh; }
+  .sch-shell--mobile { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
 
   .sch-header {
     height: 56px; flex: 0 0 56px;
@@ -600,9 +602,14 @@
 
   .sch-content { padding: var(--sp-16); flex: 1 1 auto; }
   /* Нижний отступ контента учитывает таб-бар и safe-area (§2.2): иначе
-     последняя карточка списка вечно наполовину под панелью. */
+     последняя карточка списка вечно наполовину под панелью. `min-height: 0` —
+     без него флекс-ребёнок не сжимается ниже содержимого и прокрутки нет. */
   .sch-shell--mobile .sch-content {
     padding-bottom: calc(64px + var(--sp-16) + env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
   .sch-page { max-width: none; }
 
@@ -839,9 +846,29 @@
 .sch-break { text-align: center; color: var(--c-ink-muted); font-size: var(--fs-xs); padding: var(--sp-4) 0; }
 
 /* ─── УТЦ v1.4 фаза II (AR-175): ленты дней и недель, неделя 3+3, строки по скелету ─── */
-/* Лента дней листается со снапом; дата — ТОЛЬКО под открытым днём (правка владельца 2026-08-30). */
-.sch-daystrip--snap { scroll-snap-type: x proximity; }
-.sch-daystrip--snap .sch-daychip { scroll-snap-align: center; flex: none; }
+/* Пикер дня (правка владельца 2026-08-31): слот открытого дня НЕПОДВИЖЕН —
+   второе место ленты, — а лента учебных дней едет под ним со снапом. Вся
+   геометрия держится на одном шаге: `padding-left`, `scroll-padding-left` и
+   рамка слота равны «чип + зазор», поэтому чип с индексом i встаёт в слот
+   ровно на scrollLeft = i × шаг. `padding-right` дотягивает последний день. */
+.sch-daypicker { position: relative; --daychip-w: 52px; --daypicker-slot: calc(var(--daychip-w) + var(--sp-8)); }
+.sch-daypicker-strip {
+  display: flex; gap: var(--sp-8); align-items: flex-start;
+  overflow-x: auto; scrollbar-width: none;
+  scroll-snap-type: x mandatory;
+  scroll-padding-left: var(--daypicker-slot);
+  padding: 2px 0 var(--sp-4);
+  padding-left: var(--daypicker-slot);
+  padding-right: calc(100% - var(--daypicker-slot) - var(--daychip-w));
+}
+.sch-daypicker-strip::-webkit-scrollbar { display: none; }
+.sch-daypicker-strip .sch-daychip { flex: 0 0 var(--daychip-w); scroll-snap-align: start; }
+.sch-daypicker-slot {
+  position: absolute; top: 0; bottom: 2px;
+  left: var(--daypicker-slot); width: var(--daychip-w);
+  border: 2px solid var(--c-brand-violet-500); border-radius: var(--r-lg);
+  pointer-events: none;
+}
 .sch-daychip-date { font-weight: var(--fw-bold); }
 .sch-daychip--muted { opacity: 0.55; }
 
