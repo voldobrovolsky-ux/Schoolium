@@ -82,6 +82,24 @@ jobs:
             docker compose -f docker-compose.prod.yml --env-file .env.prod --profile caddy up -d --build
             docker compose -f docker-compose.prod.yml --env-file .env.prod ps'
 
+      # Идемпотентно: если .env.prod правили руками или база осталась от более
+      # раннего прогона с другим паролем — api падает с P1000 (пароль не совпадает
+      # с тем, что реально в базе). Эта команда выставляет базе тот пароль, что
+      # сейчас в .env.prod, через локальный сокет внутри контейнера postgres
+      # (доверенное соединение, без пароля) — таблицы и данные не трогает.
+      - name: Синхронизировать пароль БД с .env.prod (данные не трогает)
+        if: inputs.action == 'deploy'
+        run: |
+          $SSH_CMD bash -s <<'REMOTE'
+          set -e
+          cd ~/schoolium
+          set -a; . ./.env.prod; set +a
+          docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T postgres \
+            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+            -c "ALTER USER \"$POSTGRES_USER\" WITH PASSWORD '$POSTGRES_PASSWORD';"
+          docker compose -f docker-compose.prod.yml --env-file .env.prod restart api
+          REMOTE
+
       - name: Проверка изнутри (API отвечает)
         if: inputs.action == 'deploy'
         run: |
