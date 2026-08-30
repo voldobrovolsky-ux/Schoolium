@@ -1,0 +1,129 @@
+/* Летучка — раздел рабочего пространства. Токены — из design/styles.css. */
+
+.bt-wrap { flex: 1; display: flex; gap: 16px; padding: 16px; min-width: 0; overflow: hidden; }
+.bt-col-lessons { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 2px; }
+.bt-col-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+
+.bt-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow); padding: var(--pad-card);
+  animation: bt-rise calc(280ms * var(--am)) cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes bt-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.bt-h { font-size: 15px; font-weight: 650; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.bt-sub { font-size: 12.5px; color: var(--ink2); }
+
+.bt-lesson {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--panel); transition: border-color calc(140ms*var(--am)) ease, background calc(140ms*var(--am)) ease, transform calc(120ms*var(--am)) ease;
+}
+.bt-lesson:hover { border-color: var(--line-strong); transform: translateX(2px); }
+.bt-lesson.is-active { border-color: var(--accent); background: var(--accent-softer); }
+.bt-lesson .t { flex: 1; min-width: 0; }
+.bt-lesson .t .topic { font-size: 13.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-lesson .t .date { font-size: 11.5px; color: var(--ink2); margin-top: 2px; }
+.bt-state { font-size: 10.5px; font-weight: 650; padding: 3px 8px; border-radius: 999px; flex-shrink: 0; text-transform: lowercase; }
+.bt-state.idle { color: var(--ink2); background: var(--line2); }
+.bt-state.running { color: var(--accent); background: var(--accent-soft); }
+.bt-state.done { color: var(--g-good-ink); background: var(--g-good-bg); }
+
+/* шаги */
+.bt-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bt-step { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--ink3); }
+.bt-step .n {
+  width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; background: var(--line2); color: var(--ink3);
+  transition: background calc(200ms*var(--am)) ease, color calc(200ms*var(--am)) ease, transform calc(200ms*var(--am)) ease;
+}
+.bt-step.is-on { color: var(--ink); }
+.bt-step.is-on .n { background: var(--accent); color: #fff; transform: scale(1.06); }
+.bt-step.is-done .n { background: var(--g-good-bg); color: var(--g-good-ink); }
+.bt-step-sep { width: 26px; height: 1px; background: var(--line-strong); }
+
+.bt-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.bt-btn {
+  height: 40px; padding: 0 16px; border-radius: var(--r-sm); font-size: 13.5px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #fff;
+  transition: background calc(140ms*var(--am)) ease, transform calc(110ms*var(--am)) ease, opacity .15s ease;
+}
+.bt-btn:hover { background: var(--accent-2); }
+.bt-btn:active { transform: scale(.97); }
+.bt-btn:disabled { opacity: .5; cursor: default; transform: none; }
+.bt-btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line-strong); }
+.bt-btn.ghost:hover { background: var(--accent-soft); }
+
+.bt-empty { padding: 26px 10px; text-align: center; color: var(--ink3); font-size: 13px; }
+.bt-err { color: var(--red); font-size: 12.5px; background: color-mix(in srgb, var(--red) 9%, transparent); border-radius: 8px; padding: 8px 11px; }
+
+/* таблица проверки */
+.bt-check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.bt-code-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); padding: 9px 11px; background: var(--panel-2);
+  transition: border-color calc(140ms*var(--am)) ease;
+}
+.bt-code-row.rated { border-color: var(--line-strong); }
+.bt-code { font-family: ui-monospace, monospace; font-size: 13.5px; font-weight: 650; letter-spacing: .01em; }
+.bt-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 9px; overflow: hidden; }
+.bt-seg button {
+  width: 34px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700;
+  color: var(--ink3); background: var(--panel);
+  transition: background calc(120ms*var(--am)) ease, color calc(120ms*var(--am)) ease;
+}
+.bt-seg button + button { border-left: 1px solid var(--line); }
+.bt-seg button.v0.on { background: var(--g-bad-bg); color: var(--g-bad-ink); }
+.bt-seg button.v05.on { background: var(--g-mid-bg); color: var(--g-mid-ink); }
+.bt-seg button.v1.on { background: var(--g-good-bg); color: var(--g-good-ink); }
+
+.bt-summary { display: flex; align-items: center; gap: 16px; }
+.bt-score-big { font-size: 34px; font-weight: 700; color: var(--accent); }
+
+/* ─── печатный лист ─── */
+.bt-print-backdrop {
+  position: fixed; inset: 0; background: rgba(10, 14, 22, .55); backdrop-filter: blur(4px);
+  z-index: 60; display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 26px 16px;
+  animation: bt-fade calc(160ms*var(--am)) ease both;
+}
+@keyframes bt-fade { from { opacity: 0 } to { opacity: 1 } }
+.bt-print-frame { max-width: 760px; width: 100%; }
+.bt-print-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
+
+.bt-sheet {
+  background: #fff; color: #111; border-radius: 10px; padding: 34px 38px;
+  box-shadow: var(--shadow-lg); font-family: 'Golos Text', system-ui, sans-serif;
+  animation: bt-rise calc(240ms*var(--am)) cubic-bezier(.22,1,.36,1) both;
+}
+.bt-sheet-head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #111; padding-bottom: 10px; }
+.bt-sheet-head h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+.bt-sheet-head .m { font-size: 12.5px; color: #444; }
+.bt-sheet-meta { display: flex; gap: 22px; font-size: 12.5px; color: #333; margin: 10px 0 4px; flex-wrap: wrap; }
+.bt-sheet-meta b { color: #111; }
+.bt-sheet-note { font-size: 11.5px; color: #666; margin: 4px 0 16px; }
+.bt-sheet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.bt-ticket { border: 1.4px solid #111; border-radius: 8px; padding: 12px 14px; break-inside: avoid; page-break-inside: avoid; }
+.bt-ticket .code { font-family: ui-monospace, monospace; font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+.bt-ticket .line { border-bottom: 1px dotted #888; height: 22px; }
+.bt-ticket .line + .line { margin-top: 2px; }
+.bt-sheet-foot { margin-top: 18px; font-size: 10.5px; color: #888; display: flex; justify-content: space-between; }
+
+/* ПЕЧАТЬ: на бумагу уходит ТОЛЬКО лист. Нейтрализуем зажимы предков (height:100vh + overflow:hidden
+   + flex у оболочки), иначе лист сплющивается в узкую колонку и режется первой страницей. */
+@media print {
+  html, body, #root, .viewport, .app, .middle, .middle-row, .bt-wrap, .bt-col-main, .bt-print-backdrop, .bt-print-frame {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    position: static !important;
+  }
+  body * { visibility: hidden !important; }
+  .bt-print-backdrop { background: none !important; padding: 0 !important; backdrop-filter: none !important; inset: auto !important; }
+  .bt-print-bar { display: none !important; }
+  .bt-sheet, .bt-sheet * { visibility: visible !important; }
+  .bt-sheet { box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; width: 100% !important; animation: none !important; }
+  .bt-print-frame { max-width: none !important; width: 100% !important; }
+  .bt-sheet-grid { grid-template-columns: 1fr 1fr !important; }
+}
+@page { margin: 14mm; }

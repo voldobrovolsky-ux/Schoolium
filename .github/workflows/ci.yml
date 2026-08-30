@@ -1,0 +1,134 @@
+name: CI
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install
+        run: npm install
+      - name: Prisma generate
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: Build API
+        run: npm --workspace apps/api run build
+      - name: Build Web
+        run: npm --workspace apps/web run build
+
+  # Фитнес-функции метода (docs/method/): реестры решений, линзы, линт спек.
+  # Бегут без БД и без зависимостей — самый дешёвый барьер в конвейере.
+  method-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: G-19 — протокол АР-реестров
+        run: node tools/method/lint-ar.mjs
+      - name: G-20 — протокол линз
+        run: node tools/method/lint-lenses.mjs
+      - name: G-21 — самопроверка линта спек
+        run: node tools/method/spec-lint.mjs --self-test
+      - name: Линт спек (P1…P7)
+        run: node tools/method/spec-lint.mjs
+      - name: G-37 — контраст дизайн-токенов
+        run: node tools/design/check-contrast.mjs
+      - name: G-38, G-39 — экраны и адаптация против спеки
+        run: node tools/method/lint-screens.mjs
+      - name: G-40 — инструкции агентов
+        run: node tools/method/lint-agents.mjs
+      - name: G-37 — CSS-переменные сверены с токенами
+        run: node tools/design/tokens-to-css.mjs --check
+      - name: G-52 — экранный реестр реализован поимённо
+        run: node tools/method/check-testids.mjs
+
+  # Сквозной поток «учебник → КТП → КПП → содержание уроков»:
+  # flow:check — интеграционные проверки на живом Postgres (25 шт.);
+  # e2e/smoke-textbook.mjs — живой Chromium-смок (owner → QR-вход → загрузка PDF →
+  # черновик КТП → утверждения → расписание с карточками), скриншоты — артефакт.
+  flow-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: edustore
+          POSTGRES_PASSWORD: edustore
+          POSTGRES_DB: edustore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U edustore"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://edustore:edustore@localhost:5432/edustore?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install
+        run: npm install
+      - name: Prisma generate + migrate
+        run: |
+          npx prisma generate --schema apps/api/prisma/schema.prisma
+          npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+      - name: Flow check (интеграционный, 25 проверок)
+        run: npm --workspace apps/api run flow:check
+      - name: Существующие проверки (парсер, пилот, тенант, RBAC, миноры, comm, каскад)
+        run: |
+          npm --workspace apps/api run seed
+          npm --workspace apps/api run parser:check
+          npm --workspace apps/api run pilot:check
+          npm --workspace apps/api run tenant:check
+          npm --workspace apps/api run authz:check
+          npm --workspace apps/api run minor:check
+          npm --workspace apps/api run comm:check
+          npm --workspace apps/api run cascade:demo
+          npm --workspace apps/api run events:check
+          npm --workspace apps/api run consent:check
+          npm --workspace apps/api run timetable:check
+      - name: Ворота Schoolium 1.1.1 (G-24, G-33…G-36, G-41…G-51, G-54)
+        run: npm --workspace apps/api run schoolium:check
+      - name: Chromium для смока
+        run: npx playwright install --with-deps chromium
+      - name: Build API + Web
+        run: |
+          npm --workspace apps/api run build
+          npm --workspace apps/web run build
+      - name: Смок-БД
+        run: PGPASSWORD=edustore psql -h localhost -U edustore -d edustore -c 'CREATE DATABASE edustore_smoke;'
+      - name: Chromium-смок сквозного потока
+        run: node e2e/smoke-textbook.mjs
+      - name: Смок-БД онбординга
+        run: PGPASSWORD=edustore psql -h localhost -U edustore -d edustore -c 'CREATE DATABASE edustore_onboarding;'
+      - name: G-53 — Chromium-смок полного онбординга школы (десктоп 1440×900)
+        run: npm --workspace apps/web run smoke:onboarding
+      - name: Смок-БД онбординга (мобайл)
+        run: PGPASSWORD=edustore psql -h localhost -U edustore -d edustore -c 'CREATE DATABASE edustore_onboarding_m;'
+      - name: G-55 — тот же смок в раскладке телефона (390×844)
+        env:
+          SMOKE_DATABASE_URL: postgresql://edustore:edustore@localhost:5432/edustore_onboarding_m?schema=public
+        run: npm --workspace apps/web run smoke:onboarding:mobile
+      - name: Скриншоты смоков — артефакт
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshots
+          path: |
+            e2e/screenshots/
+            e2e/screenshots-onboarding/
+            e2e/screenshots-onboarding-mobile/
+          if-no-files-found: ignore

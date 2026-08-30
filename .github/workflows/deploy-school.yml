@@ -1,0 +1,115 @@
+# Деплой стенда schoolium.store с раннера GitHub (ранбук specs/school-launch/30-event-runbook.md §1.1).
+#
+# Зачем так: агентная среда выпускает наружу только HTTPS через прокси — SSH к
+# VPS оттуда не ходит. Раннер GitHub ограничений не несёт: репозиторий
+# выкатывается rsync-ом (VPS не нужен доступ к GitHub), стек поднимает
+# docker compose, данные школы едут зашифрованным блобом из репо.
+#
+# Секреты (Settings → Secrets and variables → Actions):
+#   VPS_HOST     — IP или хост VPS
+#   VPS_USER     — пользователь SSH (root или sudo-пользователь с docker)
+#   VPS_SSH_KEY  — приватный ключ OpenSSH (содержимое файла целиком)
+#   DATA_KEY     — пароль расшифровки deploy/school-data.json.enc (нужен только action=import)
+#
+# .env.prod создаётся на VPS при первом деплое сам (пароль БД генерируется там
+# же и наружу не уходит). Одноразовая bootstrap-ссылка и креды оператора
+# печатаются в лог приватного репозитория — ссылка живёт 24 ч, пароль оператора
+# после события стоит перевыпустить с карточки.
+name: deploy-school
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Что сделать
+        required: true
+        default: deploy
+        type: choice
+        options: [deploy, bootstrap, import, status]
+      school:
+        description: 'bootstrap: название школы'
+        required: false
+        default: ''
+      phone:
+        description: 'bootstrap: телефон оператора (+7…)'
+        required: false
+        default: ''
+      opname:
+        description: 'bootstrap: Фамилия Имя оператора'
+        required: false
+        default: ''
+      workspace:
+        description: 'import: workspace id (печатает bootstrap)'
+        required: false
+        default: ''
+
+concurrency: deploy-school
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "SSH_CMD=ssh -i $HOME/.ssh/id_deploy ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Выкатить код (rsync — VPS не ходит в GitHub)
+        if: inputs.action == 'deploy'
+        run: |
+          $SSH_CMD 'mkdir -p ~/schoolium'
+          rsync -az --delete --exclude=.git -e "ssh -i $HOME/.ssh/id_deploy" ./ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~/schoolium/"
+
+      - name: Поднять стек (docker + swap + compose + Caddy авто-SSL)
+        if: inputs.action == 'deploy'
+        run: |
+          $SSH_CMD 'set -e
+            command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh
+            # сборка двух образов на 4 ГБ RAM без свопа иногда падает (docs/DEPLOY.md)
+            if [ ! -f /swapfile ]; then fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo "/swapfile none swap sw 0 0" >> /etc/fstab; fi
+            cd ~/schoolium
+            if [ ! -f .env.prod ]; then
+              PW=$(openssl rand -hex 16)
+              printf "POSTGRES_USER=schoolium\nPOSTGRES_PASSWORD=%s\nPOSTGRES_DB=schoolium\nSITE_DOMAIN=schoolium.store\nWEB_ORIGIN=https://schoolium.store\n" "$PW" > .env.prod
+              chmod 600 .env.prod
+              cp .env.prod ~/.env.prod.backup
+            fi
+            docker compose -f docker-compose.prod.yml --env-file .env.prod --profile caddy up -d --build
+            docker compose -f docker-compose.prod.yml --env-file .env.prod ps'
+
+      - name: Проверка изнутри (API отвечает)
+        if: inputs.action == 'deploy'
+        run: |
+          $SSH_CMD 'sleep 5; code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/v1/health || true);
+            echo "API /health: $code";
+            docker compose -f ~/schoolium/docker-compose.prod.yml --env-file ~/schoolium/.env.prod logs --tail=20 api'
+
+      - name: Завести школу и оператора (bootstrap)
+        if: inputs.action == 'bootstrap'
+        run: |
+          $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            npm run school:bootstrap -- --phone='${{ inputs.phone }}' --school='${{ inputs.school }}' --name='${{ inputs.opname }}'"
+
+      - name: Залить данные школы (import)
+        if: inputs.action == 'import'
+        run: |
+          test -f deploy/school-data.json.enc || { echo 'deploy/school-data.json.enc нет в репо'; exit 1; }
+          openssl enc -d -aes-256-cbc -pbkdf2 -in deploy/school-data.json.enc -out /tmp/school-data.json -k '${{ secrets.DATA_KEY }}'
+          scp -i ~/.ssh/id_deploy /tmp/school-data.json "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/school-data.json"
+          $SSH_CMD 'cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod cp /tmp/school-data.json api:/tmp/school-data.json'
+          $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            npm run school:import -- --workspace='${{ inputs.workspace }}' --data=/tmp/school-data.json"
+          # креды НЕ печатаются в лог — файл остаётся на VPS
+          $SSH_CMD 'cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod cp api:/tmp/school-import-creds.txt ./school-import-creds.txt && chmod 600 school-import-creds.txt && echo "Креды: ~/schoolium/school-import-creds.txt (на VPS)"'
+
+      - name: Статус стенда
+        if: inputs.action == 'status'
+        run: |
+          $SSH_CMD 'cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod ps;
+            curl -s -o /dev/null -w "https://schoolium.store → %{http_code}\n" https://schoolium.store || true;
+            docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail=30 api'

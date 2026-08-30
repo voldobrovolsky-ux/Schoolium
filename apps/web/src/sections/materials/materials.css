@@ -1,0 +1,73 @@
+/* Материалы — загрузка учебников + разбор парсера. Токены — из design/styles.css. */
+
+.mt-wrap { flex: 1; display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0; overflow-y: auto; }
+
+.mt-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow); padding: var(--pad-card);
+  animation: mt-rise calc(280ms * var(--am)) cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes mt-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.mt-h { font-size: 15px; font-weight: 650; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; }
+.mt-sub { font-size: 12.5px; color: var(--ink2); }
+.mt-err { color: var(--red); font-size: 12.5px; background: color-mix(in srgb, var(--red) 9%, transparent); border-radius: 8px; padding: 8px 11px; }
+.mt-warn { color: var(--amber); font-size: 12.5px; background: color-mix(in srgb, var(--amber) 11%, transparent); border-radius: 8px; padding: 8px 11px; }
+
+/* дроп-зона */
+.mt-drop {
+  border: 1.6px dashed var(--line-strong); border-radius: var(--r); padding: 30px 20px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+  color: var(--ink2); cursor: pointer; background: var(--panel-2);
+  transition: border-color calc(160ms*var(--am)) ease, background calc(160ms*var(--am)) ease, transform calc(160ms*var(--am)) ease;
+}
+.mt-drop:hover { border-color: var(--accent); }
+.mt-drop.is-over { border-color: var(--accent); background: var(--accent-softer); transform: scale(1.005); }
+.mt-drop .big { font-size: 14px; font-weight: 600; color: var(--ink); }
+.mt-drop .small { font-size: 12px; color: var(--ink3); }
+
+.mt-progress { height: 8px; border-radius: 999px; background: var(--line2); overflow: hidden; margin-top: 12px; }
+.mt-progress i {
+  display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width calc(180ms*var(--am)) ease;
+}
+.mt-stage { font-size: 12px; color: var(--ink2); margin-top: 7px; display: flex; align-items: center; gap: 7px; }
+.mt-spin { width: 13px; height: 13px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: mt-spin .8s linear infinite; }
+@keyframes mt-spin { to { transform: rotate(360deg) } }
+
+/* список учебников */
+.mt-file {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px 13px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel);
+  transition: border-color calc(140ms*var(--am)) ease, transform calc(120ms*var(--am)) ease;
+}
+.mt-file:hover { border-color: var(--line-strong); transform: translateX(2px); }
+.mt-file.is-open { border-color: var(--accent); }
+.mt-file .ico {
+  width: 38px; height: 38px; border-radius: 10px; background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.mt-file .t { flex: 1; min-width: 0; }
+.mt-file .t .name { font-size: 13.5px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-file .t .meta { font-size: 11.5px; color: var(--ink3); margin-top: 2px; }
+.mt-badge { font-size: 10.5px; font-weight: 650; padding: 3px 9px; border-radius: 999px; flex-shrink: 0; }
+.mt-badge.pending { color: var(--amber); background: color-mix(in srgb, var(--amber) 13%, transparent); }
+.mt-badge.raw { color: var(--accent); background: var(--accent-soft); }
+.mt-badge.enriched { color: var(--g-good-ink); background: var(--g-good-bg); }
+
+/* разбор */
+.mt-parse { animation: mt-rise calc(240ms*var(--am)) cubic-bezier(.22,1,.36,1) both; }
+.mt-topic { border: 1px solid var(--line); border-radius: var(--r-sm); margin-bottom: 8px; overflow: hidden; }
+.mt-topic > button {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 13px; text-align: left;
+  font-size: 13.5px; font-weight: 600; background: var(--panel-2);
+  transition: background calc(120ms*var(--am)) ease;
+}
+.mt-topic > button:hover { background: var(--line2); }
+.mt-topic .chev { margin-left: auto; transition: transform calc(180ms*var(--am)) ease; color: var(--ink3); }
+.mt-topic.is-open .chev { transform: rotate(90deg); }
+.mt-cards { padding: 6px 13px 11px; display: flex; flex-direction: column; gap: 6px; }
+.mt-cardrow { font-size: 12.5px; padding: 8px 11px; border-left: 3px solid var(--accent-soft); background: var(--panel-2); border-radius: 0 8px 8px 0; }
+.mt-cardrow b { display: block; font-size: 12.5px; }
+.mt-cardrow span { color: var(--ink2); font-size: 11.5px; display: block; margin-top: 2px; white-space: pre-line; }
+.mt-count { font-size: 11px; color: var(--ink3); font-weight: 500; }

@@ -1,0 +1,94 @@
+/*
+ * СГЕНЕРИРОВАННЫЙ ФАЙЛ — НЕ ПРАВИТЬ РУКАМИ.
+ * Источник: docs/design/tokens.json · генератор: tools/design/tokens-to-css.mjs
+ * Правка цвета/размера/радиуса/тени делается в токенах, иначе проверка контраста
+ * G-37 перестаёт что-либо доказывать.
+ */
+:root {
+  /* color.brand */
+  --c-brand-violet-900: #3B1B6E;
+  --c-brand-violet-700: #6427C9;
+  --c-brand-violet-600: #7B3AED;
+  --c-brand-violet-500: #8B5CF6;
+  --c-brand-violet-100: #EDE6FC;
+  --c-brand-violet-050: #F7F3FE;
+  --c-brand-pink-700: #C2186B;
+  --c-brand-pink-600: #DB2777;
+  --c-brand-pink-500: #EC4899;
+  --c-brand-pink-100: #FCE7F3;
+  --c-brand-pink-050: #FDF2F8;
+  /* color.surface */
+  --c-surface-page: #FFFFFF;
+  --c-surface-canvas: #FAF8FE;
+  --c-surface-card: #FFFFFF;
+  --c-surface-overlay-blur: rgba(23,16,38,0.60);
+  /* color.ink */
+  --c-ink-primary: #221833;
+  --c-ink-secondary: #5B5470;
+  --c-ink-muted: #8A83A0;
+  --c-ink-on-violet: #FFFFFF;
+  --c-ink-on-pink: #FFFFFF;
+  /* color.border */
+  --c-border-default: #E7E2F2;
+  --c-border-focus: #7B3AED;
+  /* color.sex */
+  --c-sex-boy-bg: #E8F4FD;
+  --c-sex-boy-ink: #175E8F;
+  --c-sex-girl-bg: #FDEDF5;
+  --c-sex-girl-ink: #A61E62;
+  /* color.mark */
+  --c-mark-m5-ink: #1B7A3D;
+  --c-mark-m5-bg: #E7F6EC;
+  --c-mark-m4-ink: #3D6B12;
+  --c-mark-m4-bg: #F0F7E6;
+  --c-mark-m3-ink: #8F5A08;
+  --c-mark-m3-bg: #FBF3E0;
+  --c-mark-m2-ink: #B3261E;
+  --c-mark-m2-bg: #FCEAE8;
+  --c-mark-n-ink: #5B5470;
+  --c-mark-n-bg: #F1EFF6;
+  --c-mark-b-ink: #175E8F;
+  --c-mark-b-bg: #E8F4FD;
+  /* color.state */
+  --c-state-success: #1B7A3D;
+  --c-state-warning: #8F5A08;
+  --c-state-danger: #B3261E;
+  --c-state-stale-bg: #FBF3E0;
+  --c-state-disabled-ink: #8A83A0;
+  --c-state-disabled-bg: #F1EFF6;
+  /* font */
+  --font-family: 'Inter', 'SF Pro Text', system-ui, sans-serif;
+  --font-display: 'Manrope', 'Inter', system-ui, sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 14px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-h2: 28px;
+  --fs-h1: 34px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  /* space */
+  --sp-4: 4px;
+  --sp-8: 8px;
+  --sp-12: 12px;
+  --sp-16: 16px;
+  --sp-20: 20px;
+  --sp-24: 24px;
+  --sp-32: 32px;
+  --sp-40: 40px;
+  --sp-56: 56px;
+  /* radius */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-card: 20px;
+  --r-pill: 999px;
+  /* shadow */
+  --sh-card: 0 1px 3px rgba(34,24,51,0.06), 0 4px 16px rgba(123,58,237,0.07);
+  --sh-modal: 0 8px 40px rgba(59,27,110,0.22);
+  /* tap */
+  --tap-min: 44px;
+}

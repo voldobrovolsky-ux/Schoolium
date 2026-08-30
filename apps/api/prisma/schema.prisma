@@ -1,0 +1,1661 @@
+// EduStore — кабинет учителя. Схема БД (PostgreSQL + Prisma).
+// Мультитенантность (§3.6, канон Флёра): ЕДИНИЦА ИЗОЛЯЦИИ = школа = Workspace.
+// Ключ тенанта — workspaceId на КАЖДОЙ доменной сущности. Organization = платформа
+// EduStore (одна), Worknet = сеть школ. Изоляция принудительна tenant-guard'ом (Prisma
+// $use middleware, common/tenant): каждый запрос доменной модели фильтруется workspaceId
+// из ALS. RLS на БД (ключ — workspaceId) — следующий слой усиления.
+// Границы доменов: связи по id; межмодульных жёстких зависимостей в запросах избегаем.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── enums ───────────────────────────
+enum LessonType {
+  LESSON
+  TEST
+  CONTROL
+}
+
+enum GradeSource {
+  MANUAL
+  VOICE
+}
+
+enum MaterialType {
+  LESSON_PLAN
+  GRAPHIC_NOTES
+  PRESENTATION
+  TEST
+  CONTROL
+  BRIEF_TEST
+}
+
+enum NotificationType {
+  URGENT
+  NORMAL
+  INFO
+}
+
+// Согласие 152-ФЗ (§6). Профилирование — ОТДЕЛЬНАЯ цель (не общая галочка).
+enum ConsentPurpose {
+  data_processing
+  predictive_profiling
+  comms
+  media
+}
+
+enum ConsentSource {
+  self
+  guardian
+  school_admin // минор: школьный админ грузит бумажное согласие с датой + evidence
+}
+
+// Entitlements (§5.2): гейт загрузки модуля = активный entitlement тенанта.
+enum SkuKind {
+  module
+  seat
+  bundle
+}
+
+enum EntitlementStatus {
+  active
+  trial
+  expired
+}
+
+// Движок планирования (Phase 1). КТП/КПП — статусы утверждения; Lesson FSM — состояния.
+enum KtpStatus {
+  draft
+  approved
+}
+
+enum KppStatus {
+  scheduled
+  approved
+}
+
+enum LessonMode {
+  auto
+  hybrid
+  manual
+}
+
+enum LessonState {
+  idle
+  running
+  done
+}
+
+// ─────────────────────────── identity ───────────────────────────
+// Пользователь принадлежит платформе (florus_user_id), организация приглашает его.
+model User {
+  id          String   @id // = florus_user_id (семантика развязывается вместе с AR-58)
+  firstName   String
+  lastName    String
+  displayName String
+  email       String?
+  // Schoolium 1.2.0 (AR-154, заменяет AR-46/47): идентичность — юзернейм по
+  // правилам Флёруса, область уникальности — вся инсталляция, принадлежность
+  // школе выражается членством. Телефон опционален и ключом не является.
+  phone        String?  @unique
+  username     String?  @unique
+  // Пароль — резервный вход (AR-156): bcrypt cost 12, байт-в-байт совместим с
+  // bcryptjs Флёруса — при миграции хэш переносится, пароль не спрашивается.
+  passwordHash String?
+  middleName   String?
+  avatarUrl    String?
+  teacher      Teacher?
+  createdAt    DateTime @default(now())
+}
+
+// Организация = САМА ПЛАТФОРМА EduStore (арендатор у Флёра, flor_owned, org_type=platform).
+// Одна на всю инсталляцию. Доменные данные на неё НЕ ключуются — ключ тенанта = Workspace.
+model Organization {
+  id          String      @id @default(cuid())
+  florusOrgId String?     @unique // Flör Organization id (платформа EduStore)
+  name        String
+  type        String      @default("platform")
+  status      String      @default("active")
+  workspaces  Workspace[]
+  worknets    Worknet[]
+  createdAt   DateTime    @default(now())
+}
+
+// Worknet = сеть школ (латеральная группа внутри платформы). Канон Флёра §2.5.
+// Сущность заводим сейчас; синк членства школ в сеть — стаб до Phase 1 Флёра.
+model Worknet {
+  id              String       @id @default(cuid())
+  florusWorknetId String?      @unique // зеркало Flör worknet id (синк — стаб)
+  orgId           String
+  organization    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name            String
+  status          String       @default("active")
+  workspaces      Workspace[]
+  createdAt       DateTime     @default(now())
+
+  @@unique([id, orgId]) // цель композитного FK от Workspace (инвариант канона)
+}
+
+// Workspace = ШКОЛА = ЕДИНИЦА ИЗОЛЯЦИИ ТЕНАНТА. Ключ всех доменных данных = workspaceId.
+// florusWorkspaceId — из claim workspace_id логин-токена (flor:workspace, доступен сейчас).
+model Workspace {
+  id                String       @id @default(cuid())
+  florusWorkspaceId String?      @unique // зеркало Flör workspace_id (источник ключа тенанта)
+  orgId             String // → платформа (immutable)
+  organization      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  worknetId         String? // nullable: школа максимум в одной сети (контейнер, не many-to-many)
+  worknet           Worknet?     @relation(fields: [worknetId], references: [id])
+  name              String
+  sector            String       @default("private") // §3.7 private | state (152-ФЗ §6.5)
+  status            String       @default("active")
+  memberships       Membership[]
+  devices           Device[]
+  createdAt         DateTime     @default(now())
+
+  @@index([orgId])
+  @@index([worknetId])
+}
+
+// Членство пользователя в ШКОЛЕ (Workspace) + доменная EduStore-роль. florusRole из Флёруса
+// (доменная роль: teacher|student|parent|staff); subRole (staff → завуч|методист|психолог).
+model Membership {
+  id            String    @id @default(cuid())
+  florusUserId  String // = User.id (sub) — остаётся до чистки florus*-полей (AR-58)
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  florusRole    String // teacher | student | parent | staff (admin/owner — tenancy, не в токене)
+  subRole       String? // zavuch | methodist | psychologist
+  // Schoolium 1.1.1 (AR-60, AR-104): роли СОВМЕСТИМЫ, поэтому носитель — массив, а
+  // не строка. `florusRole` со словарём teacher|student|parent|staff шести ролей
+  // версии не выражает, и ни совмещение (AR-61), ни `LAST_ROLE` (AR-102) на нём не
+  // строятся. `userId` заводится параллельно `florusUserId` по правилу
+  // expand → migrate → contract: сжатие — отдельный инкремент AR-58.
+  userId        String?
+  roles         String[]  @default([])
+  deactivatedAt DateTime? // AR-92: деактивация закрывает доступ и отзывает сессии
+  // 1.2.0 (AR-161): учётка заведена модератором целиком, «активирован» = у
+  // членства появился верифицированный носитель (первая сессия). Отзыв
+  // активации (AR-153) возвращает NULL — карточка снова в «Не авторизованных».
+  activatedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([florusUserId, workspaceId])
+  @@index([userId])
+}
+
+// Серверная сессия RP (BFF): cookie flor_sid → эта запись. Токены — server-only.
+model Session {
+  sid               String   @id
+  florusUserId      String
+  florusSid         String? // sid сессии Флёруса (для back-channel logout)
+  workspaceId       String? // активный тенант (= школа) — ключ изоляции запроса
+  florusWorkspaceId String? // claim workspace_id из токена
+  florusOrgId       String? // платформенная org (flor:org) — не тенант
+  role              String
+  subRole           String?
+  name              String
+  accessToken       String?  @db.Text
+  refreshToken      String?  @db.Text
+  idToken           String?  @db.Text
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([florusUserId])
+  @@index([florusSid])
+}
+
+// Привязанное устройство-киоск (главная страница, режим «вход на школьном компьютере»).
+// Регистрируется по QR через Device Authorization Flow (purpose=kiosk); deviceToken
+// хранится в localStorage киоска и определяет показ экрана входа (режим 3).
+model Device {
+  id            String    @id @default(cuid())
+  workspaceId   String // тенант = школа (Workspace)
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name          String
+  deviceToken   String    @unique
+  boundByUserId String? // User.id того, кто подтвердил привязку с телефона
+  lastSeenAt    DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+
+  @@index([workspaceId])
+}
+
+// ─────────────────────────── teacher ───────────────────────────
+model Teacher {
+  id             String               @id // = florus_user_id (FK → User)
+  user           User                 @relation(fields: [id], references: [id], onDelete: Cascade)
+  workspaceId    String // тенант = школа (Workspace)
+  isCurator      Boolean              @default(false)
+  curatorClassId String?
+  assignments    TeachingAssignment[]
+  notes          TeacherNote[]
+  notifications  Notification[]
+
+  @@index([workspaceId])
+}
+
+// Один «флажок»: учитель ведёт предмет в классе (опц. — в конкретной подгруппе).
+model TeachingAssignment {
+  id          String    @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  teacherId   String
+  teacher     Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  classId     String
+  class       Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subjectId   String
+  subject     Subject   @relation(fields: [subjectId], references: [id])
+  subGroupId  String?
+  subGroup    SubGroup? @relation(fields: [subGroupId], references: [id])
+
+  @@unique([teacherId, classId, subjectId])
+  @@index([teacherId])
+  @@index([workspaceId])
+}
+
+// ─────────────────────────── academic structure ───────────────────────────
+// Доменные таблицы ключуются на workspaceId (школу). Связи к Organization нет —
+// Organization теперь платформа, изоляция идёт через tenant-guard по workspaceId.
+model Subject {
+  id           String               @id @default(cuid())
+  workspaceId  String // тенант = школа (Workspace)
+  name         String
+  fgosDocUrl   String?
+  textbookUrl  String?
+  color        String               @default("#2563EB")
+  departmentId String?
+  assignments  TeachingAssignment[]
+  lessons      Lesson[]
+
+  @@index([workspaceId])
+}
+
+model Class {
+  id          String               @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  parallel    Int
+  letter      String
+  label       String // "8А"
+  students    Student[]
+  subGroups   SubGroup[]
+  lessons     Lesson[]
+  assignments TeachingAssignment[]
+
+  @@index([workspaceId])
+}
+
+model SubGroup {
+  id          String               @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  classId     String
+  class       Class                @relation(fields: [classId], references: [id], onDelete: Cascade)
+  name        String
+  members     Student[]
+  assignments TeachingAssignment[]
+
+  @@index([workspaceId])
+}
+
+model Student {
+  id          String          @id @default(cuid())
+  workspaceId String // тенант = школа (денормализация ключа на дочерние для guard/RLS)
+  classId     String
+  class       Class           @relation(fields: [classId], references: [id], onDelete: Cascade)
+  subGroupId  String?
+  subGroup    SubGroup?       @relation(fields: [subGroupId], references: [id])
+  number      Int
+  firstName   String
+  lastName    String
+  displayName String // "Иванов Артём"
+  profile     StudentProfile?
+  notes       TeacherNote[]
+
+  @@index([classId])
+  @@index([workspaceId])
+}
+
+// lesson = и «станция метро» (контент), и исполняемый экземпляр (Lesson FSM, Техспека §2).
+// kppLessonId связывает с планом; гейт старта открыт только при kpp.approved (Архстандарт §7).
+model Lesson {
+  id           String              @id @default(cuid())
+  workspaceId  String // тенант = школа (Workspace)
+  subjectId    String // = disciplineId
+  subject      Subject             @relation(fields: [subjectId], references: [id])
+  classId      String
+  class        Class               @relation(fields: [classId], references: [id], onDelete: Cascade)
+  kppLessonId  String? // → план (KppLesson); null для демо/незапланированных
+  kppLesson    KppLesson?          @relation(fields: [kppLessonId], references: [id])
+  teacherId    String? // identity ведущего
+  topic        String
+  shortTitle   String
+  unit         String? // "Глава 3 · Квадратные уравнения"
+  goals        String[]
+  lessonNumber Int
+  date         DateTime
+  type         LessonType          @default(LESSON)
+  mode         LessonMode          @default(manual) // auto | hybrid | manual
+  state        LessonState         @default(idle) // FSM: idle | running | done
+  phase        String? // текущая фаза урока
+  t0           DateTime? // якорь тайминга (старт)
+  bloomLevel   Int?
+  pageStart    Int?
+  pageEnd      Int?
+  homework     String?
+  materials    GeneratedMaterial[]
+  notes        TeacherNote[]
+
+  @@index([classId, subjectId, date])
+  @@index([workspaceId, teacherId, date])
+  @@index([kppLessonId])
+}
+
+// ─────────────────────────── materials / profile / notes ───────────────────────────
+model GeneratedMaterial {
+  id          String       @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  lessonId    String
+  lesson      Lesson       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  type        MaterialType
+  title       String
+  fileUrl     String
+  format      String // DOCX | PDF | PPTX
+  meta        String? // "6 страниц"
+  generatedAt DateTime     @default(now())
+
+  @@index([workspaceId])
+}
+
+model StudentProfile {
+  studentId    String   @id
+  workspaceId  String // тенант = школа (профиль = ПДн ученика)
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  interests    String[]
+  strengths    String[]
+  weaknesses   String[]
+  inclinations String[]
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId])
+}
+
+model TeacherNote {
+  note_id       String   @id @default(cuid()) @map("id")
+  workspaceId   String // тенант = школа (Workspace)
+  teacherId     String
+  teacher       Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  studentId     String?
+  student       Student? @relation(fields: [studentId], references: [id])
+  lessonId      String?
+  lesson        Lesson?  @relation(fields: [lessonId], references: [id])
+  audioUrl      String?
+  transcription String
+  processed     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([teacherId])
+  @@index([workspaceId])
+}
+
+model Notification {
+  id          String           @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  teacherId   String
+  teacher     Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  type        NotificationType
+  category    String // journal | ktp | ...
+  title       String
+  message     String
+  icon        String?
+  read        Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([teacherId, read])
+  @@index([workspaceId])
+}
+
+// ═══════════════════════════ EVENT INFRASTRUCTURE (shared kernel) ═══════════════════════════
+// Transactional outbox + idempotent inbox — основа каскадов между параметрами (см. docs/PARAMETERS.md §3).
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED // = DLQ после исчерпания попыток
+}
+
+model OutboxEvent {
+  id            String       @id // = DomainEvent.id (идемпотентный ключ / Nats-Msg-Id)
+  type          String
+  workspaceId   String // тенант события = школа (Workspace)
+  correlationId String // весь каскад
+  causationId   String? // событие-причина
+  depth         Int          @default(0) // защита от петель
+  actor         String?
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  createdAt     DateTime     @default(now())
+  publishedAt   DateTime?
+
+  @@index([status, createdAt])
+  @@index([correlationId])
+}
+
+model ProcessedEvent {
+  eventId     String
+  consumer    String
+  processedAt DateTime @default(now())
+
+  @@id([eventId, consumer])
+}
+
+// ═══════════════════════════ ПАРАМЕТРЫ (демо-каскад «зачисление ученика») ═══════════════════════════
+model ChannelMembership {
+  // Communitoria
+  id          String   @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  classId     String
+  studentId   String
+  createdAt   DateTime @default(now())
+
+  @@unique([classId, studentId])
+}
+
+model MealOrder {
+  // Питательный
+  id          String   @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  studentId   String
+  status      String   @default("DEFAULT")
+  createdAt   DateTime @default(now())
+}
+
+// ═══════════════════════════ AUTHZ: ПРАВА КАК ДАННЫЕ (§5.1) ═══════════════════════════
+// Каталог прав Раздел→Экран→Действие + пакеты ролей. Резолв доступа = пакет роли × каталог
+// (из БД, не из кода). Глобальная reference-data — НЕ под тенант-изоляцией (см. tenant-models).
+model Permission {
+  id       String                  @id @default(cuid())
+  code     String                  @unique // "journal.grades.edit"
+  section  String // "journal"
+  screen   String // "grades"
+  action   String // "edit" | "view" | "manage" | ...
+  label    String
+  packages RolePackagePermission[]
+}
+
+// Пакет роли: какой кабинет открывается и какие права даёт. key = роль/суб-роль EduStore.
+model RolePackage {
+  id          String                  @id @default(cuid())
+  key         String                  @unique // owner|admin|teacher|parent|student|zavuch|methodist|psychologist
+  cabinet     String // CabinetKey фронта
+  label       String
+  permissions RolePackagePermission[]
+}
+
+model RolePackagePermission {
+  rolePackageId String
+  rolePackage   RolePackage @relation(fields: [rolePackageId], references: [id], onDelete: Cascade)
+  permissionId  String
+  permission    Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([rolePackageId, permissionId])
+}
+
+// ═══════════════════════════ CONSENT 152-ФЗ (§6) ═══════════════════════════
+// Объект согласия на обработку ПДн (НЕ oidc-scope). Append-only: каждый grant/revoke —
+// новая строка (версия/дата/источник). Актуальное согласие = последняя строка по
+// (subject, purpose). Минор: source=school_admin + дата бумажного + evidenceRef (скан).
+model Consent {
+  id            String         @id @default(cuid())
+  workspaceId   String // тенант = школа (ПДн в контексте школы)
+  subjectUserId String // чьи ПДн (User.id или Student.id для минора)
+  purpose       ConsentPurpose
+  granted       Boolean
+  grantedAt     DateTime // дата согласия (для минора — дата бумажного носителя)
+  version       String         @default("1.0")
+  source        ConsentSource
+  evidenceRef   String? // ссылка на скан бумажного согласия (минор)
+  createdAt     DateTime       @default(now())
+
+  @@index([workspaceId, subjectUserId, purpose])
+}
+
+// ═══════════════════════════ AUDIT-ЛЕДЖЕР (§4.8) ═══════════════════════════
+// Append-only иммутабельный журнал «документооборот-как-протоколы» + требование 152-ФЗ.
+// Пишется из событий с касанием ПДн (audit-подписчик). Не правится/не чистится (в отличие
+// от OutboxEvent). Проекции в ClickHouse — слот (не Фаза 0).
+model AuditLog {
+  id                 String   @id @default(cuid()) // audit_id
+  eventId            String // = DomainEvent.id (идемпотентность записи)
+  workspaceId        String // тенант = школа (Workspace)
+  actor              String? // кто инициировал
+  subjectUserId      String? // чьи ПДн затронуты
+  action             String // = тип события
+  occurredAt         DateTime
+  persDataCategories String[] // категории затронутых ПДн
+  createdAt          DateTime @default(now())
+
+  @@unique([eventId, action]) // идемпотентность аудита (повторная доставка не дублирует)
+  @@index([workspaceId, occurredAt])
+}
+
+// ═══════════════════════════ ENTITLEMENTS / SKU (§5.2) ═══════════════════════════
+// Слой авторизации поверх каталога прав: entitlement (модуль на тенант) → пакет роли ×
+// каталог (§5.1) → ABAC [слот]. Гейт загрузки модуля = активный entitlement. Глобальные
+// Sku/PromoCode — reference-data; Entitlement — тенант-scoped.
+model Sku {
+  id           String        @id @default(cuid())
+  key          String        @unique // "lms.core" | "param.nutrition" | ...
+  kind         SkuKind
+  label        String
+  entitlements Entitlement[]
+  promoCodes   PromoCode[]
+}
+
+model Entitlement {
+  id          String            @id @default(cuid())
+  workspaceId String // тенант = школа (Workspace)
+  skuId       String
+  sku         Sku               @relation(fields: [skuId], references: [id])
+  status      EntitlementStatus @default(active)
+  validFrom   DateTime          @default(now())
+  validTo     DateTime? // null = бессрочно
+  seats       Int? // для kind=seat
+  source      String            @default("manual") // manual | purchase | promo | trial
+  createdAt   DateTime          @default(now())
+
+  @@index([workspaceId])
+}
+
+model PromoCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  skuId     String
+  sku       Sku      @relation(fields: [skuId], references: [id])
+  redeemed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ═══════════════════════════ ДВИЖОК ПЛАНИРОВАНИЯ (Phase 1, Техспека §2 / Движок §2) ═══════════
+// Движок — ЕДИНСТВЕННЫЙ писатель КТП/Timetable/КПП (Архстандарт §8). Два ритма РАЗДЕЛЬНЫ:
+// Timetable (геометрия, термовый) + Kpp (поурочный план, недельный), мост KppMapping.
+// Пед-правка КПП не дёргает геометрию Timetable. Всё на workspaceId → tenant-guard.
+
+// КТП — тематическое планирование (термовое). Утверждает завуч → ktp.approved (гейт Solver).
+model Ktp {
+  id           String     @id @default(cuid())
+  workspaceId  String
+  classId      String
+  disciplineId String // = Subject.id
+  status       KtpStatus  @default(draft)
+  approvedBy   String? // identity (завуч)
+  topics       KtpTopic[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([workspaceId, classId, disciplineId])
+}
+
+model KtpTopic {
+  id          String         @id @default(cuid())
+  workspaceId String
+  ktpId       String
+  ktp         Ktp            @relation(fields: [ktpId], references: [id], onDelete: Cascade)
+  order       Int
+  fgosHours   Int // часов по теме (ФГОС) — Solver раскладывает столько уроков
+  hoursSource String? // 'estimated' — оценка парсера (ceil(карт/N)); null — руками (правка завуча снимает флаг)
+  arCodes     String[] // ФГОС АР-коды темы (ключ ИОМ)
+  title       String
+  lessons     KppLesson[]
+  cards       TextbookCard[] // карты парсера, прикреплённые к теме КТП (наполнение уроков)
+
+  @@index([workspaceId, ktpId, order])
+}
+
+// Timetable — геометрия сетки (термовый ритм). source=engine; утверждает завуч.
+model Timetable {
+  id          String          @id @default(cuid())
+  workspaceId String
+  classId     String
+  source      String          @default("engine")
+  approvedBy  String?
+  slots       TimetableSlot[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([workspaceId, classId])
+}
+
+model TimetableSlot {
+  id          String       @id @default(cuid())
+  workspaceId String
+  timetableId String
+  timetable   Timetable    @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+  day         Int // 1..7
+  position    Int
+  durationMin Int
+  mappings    KppMapping[]
+
+  @@index([workspaceId, timetableId, day, position])
+}
+
+// КПП — поурочный план (недельный ритм). Solver кладёт уроки тем в слоты → kpp.scheduled;
+// завуч утверждает → kpp.approved (разблокировка проведения, Архстандарт §7).
+model Kpp {
+  id           String      @id @default(cuid())
+  workspaceId  String
+  classId      String
+  disciplineId String
+  status       KppStatus   @default(scheduled)
+  approvedBy   String?
+  lessons      KppLesson[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([workspaceId, classId, disciplineId])
+}
+
+model KppLesson {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  kppId          String
+  kpp            Kpp             @relation(fields: [kppId], references: [id], onDelete: Cascade)
+  topicId        String
+  topic          KtpTopic        @relation(fields: [topicId], references: [id])
+  sequenceNo     Int
+  plannedContent Json?
+  mapping        KppMapping?
+  instances      Lesson[] // исполняемые экземпляры (Lesson FSM)
+  contents       LessonContent[] // карты парсера, разложенные по урокам (kpp.approved)
+
+  @@index([workspaceId, kppId, sequenceNo])
+}
+
+// Содержание урока: карты парсера, равномерно разложенные по урокам темы после kpp.approved.
+// Идемпотентно (повторный kpp.approved пересобирает без дублей — @@unique).
+model LessonContent {
+  id          String       @id @default(cuid())
+  workspaceId String
+  kppLessonId String
+  kppLesson   KppLesson    @relation(fields: [kppLessonId], references: [id], onDelete: Cascade)
+  cardId      String
+  card        TextbookCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  order       Int // порядок карты внутри урока (сохраняет порядок парсера)
+
+  @@unique([kppLessonId, cardId])
+  @@index([workspaceId, kppLessonId, order])
+}
+
+// Мост двух ритмов: урок плана (KppLesson) ↔ слот геометрии (TimetableSlot).
+model KppMapping {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  kppLessonId     String        @unique
+  kppLesson       KppLesson     @relation(fields: [kppLessonId], references: [id], onDelete: Cascade)
+  timetableSlotId String
+  timetableSlot   TimetableSlot @relation(fields: [timetableSlotId], references: [id])
+
+  @@index([workspaceId, timetableSlotId])
+}
+
+// ═══════════════════════════ ИОМ-ГРАФ (Phase 1, Техспека §4 / Движок §4) ═══════════════════════
+// Единственный аккумулятор сигналов (Архстандарт §8). Хранит ПО studentId внутри; наружу к ИИ —
+// только studentCode (гейт §3). Read-model: подписан на сигналы, сам ничего не эмитит.
+model CompetencyNode {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  fgosArCode   String // ключ ИОМ (ФГОС АР-код)
+  disciplineId String
+  label        String
+  masteryEdges MasteryEdge[]
+
+  @@unique([workspaceId, fgosArCode, disciplineId])
+  @@index([workspaceId])
+}
+
+model InterestNode {
+  id            String         @id @default(cuid())
+  workspaceId   String
+  label         String
+  interestEdges InterestEdge[]
+
+  @@index([workspaceId])
+}
+
+// score: null = unknown (cold-start); confidence 0..1 = min(1, n_сигналов/3). Формула v1 — Движок §4.
+model MasteryEdge {
+  id               String         @id @default(cuid())
+  workspaceId      String
+  studentId        String // РЕАЛЬНЫЙ id (не уходит на ИИ)
+  competencyNodeId String
+  competencyNode   CompetencyNode @relation(fields: [competencyNodeId], references: [id], onDelete: Cascade)
+  score            Float? // null = unknown
+  confidence       Float          @default(0)
+  signalRefs       Json? // компоненты формулы (летучка/темы/присутствие) + ссылки
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([workspaceId, studentId, competencyNodeId])
+  @@index([workspaceId, studentId])
+  @@index([workspaceId, competencyNodeId])
+}
+
+model InterestEdge {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  studentId      String
+  interestNodeId String
+  interestNode   InterestNode @relation(fields: [interestNodeId], references: [id], onDelete: Cascade)
+  weight         Float
+
+  @@unique([workspaceId, studentId, interestNodeId])
+  @@index([workspaceId, studentId])
+}
+
+// ═══════════════════════════ ЛЕТУЧКА / ОЦЕНИВАНИЕ (Phase 1, Движок §5 / Техспека §3) ═══════════
+// Петля летучки: печать по КОДАМ → сбор → Tesseract (0 ИИ, локально) → assessment.checked(code) → ИОМ.
+// Сканы НЕ в docs/ (Кабинеты_ТЗ §2). Журнал НЕ слушает assessment.checked — только grade.posted.
+model BriefTest {
+  id                  String             @id @default(cuid())
+  workspaceId         String
+  lessonId            String
+  type                String // летучка | бриф-тест | контрольная
+  itemMatrix          Json? // матрица заданий
+  presentStudentCodes String[] // КОДЫ присутствующих (НЕ studentId)
+  status              String             @default("generated") // generated|printed|collected|checked|done
+  generatedAt         DateTime           @default(now())
+  codes               BriefTestCode[]
+  results             AssessmentResult[]
+
+  @@index([workspaceId, lessonId])
+}
+
+// Гейт идентичности §3: карта код↔реальный id. Живёт у движка/админ-гейта (НЕ профиль ученика).
+// Заполняется при печати (id→code), резолвится при записи оценки/ингесте ИОМ (code→id).
+model BriefTestCode {
+  id          String    @id @default(cuid())
+  workspaceId String
+  briefTestId String
+  briefTest   BriefTest @relation(fields: [briefTestId], references: [id], onDelete: Cascade)
+  studentCode String
+  studentId   String // РЕАЛЬНЫЙ (не уходит на печать/ИИ)
+
+  @@unique([briefTestId, studentCode])
+  @@index([workspaceId, briefTestId])
+}
+
+model AssessmentResult {
+  id          String                 @id @default(cuid())
+  workspaceId String
+  briefTestId String
+  briefTest   BriefTest              @relation(fields: [briefTestId], references: [id], onDelete: Cascade)
+  checkedAt   DateTime               @default(now())
+  source      String                 @default("tesseract") // локальный OCR, 0 ИИ
+  items       AssessmentResultItem[]
+
+  @@index([workspaceId, briefTestId])
+}
+
+model AssessmentResultItem {
+  id                 String           @id @default(cuid())
+  workspaceId        String
+  assessmentResultId String
+  result             AssessmentResult @relation(fields: [assessmentResultId], references: [id], onDelete: Cascade)
+  studentCode        String // выход OCR; резолвится в studentId при grade.posted (журнал)
+  score              Float // нормализованный 0..1
+  perItem            Json?
+
+  @@index([workspaceId, assessmentResultId])
+}
+
+// ═══ КАБИНЕТЫ: методики/курсы (Phase 1, Кабинеты_ТЗ §2-3) — методист пишет, учитель читает ═══
+model Methodic {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  title        String
+  body         String? // текст методики / вики-конспект
+  disciplineId String?
+  authorId     String // identity методиста
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId, disciplineId])
+}
+
+model Course {
+  id           String             @id @default(cuid())
+  workspaceId  String
+  title        String
+  description  String?
+  disciplineId String?
+  authorId     String
+  assignments  CourseAssignment[]
+  createdAt    DateTime           @default(now())
+
+  @@index([workspaceId])
+}
+
+model CourseAssignment {
+  id          String   @id @default(cuid())
+  workspaceId String
+  courseId    String
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  teacherId   String // identity учителя
+  assignedBy  String
+  assignedAt  DateTime @default(now())
+
+  @@unique([courseId, teacherId])
+  @@index([workspaceId, teacherId])
+}
+
+// ═══ КОНТРАКТЫ ЗАВУЧА/МЕТОДИСТА (Phase 1, Техспека §3) — входные слоты движка/журнала ═══
+// Завуч пишет AssessmentPolicy/OrgStandards/FgosHours; методист — TimingProfile. Движок (Solver)
+// и журнал ЧИТАЮТ. Все workspace-scoped → tenant-guard. События — Архстандарт §6.
+model AssessmentPolicy {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  scope        String // школа | класс | дисциплина
+  classId      String?
+  disciplineId String?
+  items        Json? // что оценивается
+  coefficients Json? // веса
+  scale        Json? // шкала
+  updatedBy    String?
+  updatedAt    DateTime @updatedAt
+
+  @@index([workspaceId, scope])
+}
+
+model TimingProfile {
+  id          String   @id @default(cuid())
+  workspaceId String
+  lessonType  String // тип урока
+  thresholds  Json? // пороги летучки/бриф-теста
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, lessonType])
+}
+
+// Оргстандарты — школьный синглтон (один набор на workspace). Вход Solver: длина/спарки/порядок/физминутки.
+model OrgStandards {
+  id              String   @id @default(cuid())
+  workspaceId     String   @unique
+  lessonLengthMin Int      @default(45)
+  sparki          Json?
+  orderRules      Json?
+  fizminutki      Json?
+  updatedBy       String?
+  updatedAt       DateTime @updatedAt
+}
+
+// Настройки воркспейса (школьный синглтон, админка). Сейчас — провайдер парсера учебников.
+// apiKey хранится ШИФРОВАННЫМ (AES-256-GCM, ключ из ENV) и наружу не отдаётся (только маска).
+model WorkspaceSettings {
+  id                String   @id @default(cuid())
+  workspaceId       String   @unique
+  parserProvider    String   @default("regexp") // regexp | llm (выбор ParserProvider)
+  parserEndpointUrl String?
+  parserApiKeyEnc   String? // шифртекст (iv|tag|data, base64) — НЕ plaintext
+  parserModelName   String?
+  updatedBy         String?
+  updatedAt         DateTime @updatedAt
+}
+
+// ФГОС-часы — утв. завучем, по дисциплине/классу. Вход Solver (Архстандарт §7: fgos-hours.approved).
+model FgosHours {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  disciplineId String
+  classId      String
+  hours        Int
+  approvedBy   String?
+  approvedAt   DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([workspaceId, classId, disciplineId])
+  @@index([workspaceId])
+}
+
+// ═══════════════════════════ ЖУРНАЛ (Phase 1, Техспека §3) ═══════════════════════════
+// Ячейка журнала пишется ТОЛЬКО через grade.posted — явное человеко-авторское действие
+// (реальный studentId). assessment.checked сюда НЕ пишет (Архстандарт §8). Отдельно от
+// Phase-0 Grade (legacy демо-журнал кабинета).
+// ЕДИНСТВЕННЫЙ журнал оценок (AR-4): Phase-0 Grade мигрирован сюда и удалён.
+// Писатель один — engine/JournalService.postGrade (событие journal.grade.posted.v1).
+model JournalCell {
+  id           String      @id @default(cuid())
+  workspaceId  String
+  classId      String
+  disciplineId String
+  studentId    String // РЕАЛЬНЫЙ (человеко-авторское)
+  lessonId     String
+  grade        String // '5'|'4'|'3'|'2'|'н'
+  comment      String?
+  source       GradeSource @default(MANUAL)
+  workType     String?
+  period       String?
+  postedBy     String // identity учителя
+  postedAt     DateTime    @default(now())
+  updatedAt    DateTime    @default(now()) @updatedAt
+
+  @@unique([studentId, lessonId])
+  @@index([workspaceId, classId, disciplineId, period])
+  @@index([workspaceId, studentId])
+  @@index([lessonId])
+}
+
+// ═══════════════════════════ ДОКУМЕНТОХРАНИЛИЩЕ (Phase 1, Техспека §5) ═══════════════════════════
+// Единственный писатель файловых объектов. Namespace docs/ — управляемый контур (152-ФЗ: аудит,
+// retention). Кабинеты ссылаются по fileId, байты не дублируют. Летучка-сканы сюда НЕ попадают.
+// embedding (pgvector) — слот семантики; сейчас FTS по textExtract/имени.
+model File {
+  id           String       @id @default(cuid())
+  workspaceId  String
+  s3Key        String // docs/...
+  ownerId      String
+  scope        String       @default("личное") // личное | класс:id | кафедра:id | школа
+  audience     String       @default("staff") // staff | parents | students
+  kind         String       @default("file") // file | doc (EditorDoc)
+  mime         String?
+  size         Int?
+  textExtract  String? // OCR (обогащение)
+  state        String       @default("pending") // pending(до commit) | raw | enriched
+  status       String? // только school-scope: draft | review | official | archived
+  crdtState    Bytes? // если kind=doc
+  disciplineId String? // methodbank-линза
+  classId      String?
+  deletedAt    DateTime? // trash → purge
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  versions     DocVersion[]
+  tags         Tag[]
+  shares       ShareGrant[]
+
+  @@index([workspaceId, scope, audience])
+  @@index([workspaceId, disciplineId])
+}
+
+model DocVersion {
+  id          String   @id @default(cuid())
+  workspaceId String
+  fileId      String
+  file        File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  no          Int
+  s3Key       String
+  authorId    String
+  createdAt   DateTime @default(now())
+
+  @@unique([fileId, no])
+  @@index([workspaceId, fileId])
+}
+
+model Tag {
+  id          String @id @default(cuid())
+  workspaceId String
+  fileId      String
+  file        File   @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  dim         String // scope|audience|тип|предмет|класс|год|тема|free
+  value       String
+
+  @@index([workspaceId, fileId])
+  @@index([workspaceId, dim, value])
+}
+
+model Lens {
+  id          String  @id @default(cuid())
+  workspaceId String
+  ownerId     String?
+  shared      Boolean @default(false)
+  name        String
+  filter      Json
+
+  @@index([workspaceId])
+}
+
+model Collection {
+  id          String           @id @default(cuid())
+  workspaceId String
+  ownerId     String
+  name        String
+  files       CollectionFile[]
+  createdAt   DateTime         @default(now())
+
+  @@index([workspaceId, ownerId])
+}
+
+model CollectionFile {
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  fileId       String
+  workspaceId  String
+
+  @@id([collectionId, fileId])
+  @@index([workspaceId])
+}
+
+model ShareGrant {
+  id          String    @id @default(cuid())
+  workspaceId String
+  fileId      String
+  file        File      @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  granteeId   String? // userId
+  linkToken   String? // публичная ссылка
+  level       String // view | comment | edit
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, fileId])
+}
+
+// ─── Учебники (парсер: doc.file.enriched → textbook.parsed → КТП) ───
+// Material — загруженный учебник: ссылка на управляемый doc File (по fileId, без FK — модули
+// развязаны) + дисциплина. Производится edu/materials/commit → textbook.uploaded.
+model Material {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  fileId       String          @unique // → doc File (namespace docs/), ссылка по fileId
+  disciplineId String // = Subject.id
+  classId      String? // класс из TeachingAssignment загружавшего учителя (авто-контекст методкопилки)
+  uploadedBy   String? // identity (учитель)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  topics       TextbookTopic[]
+  cards        TextbookCard[]
+
+  @@index([workspaceId, disciplineId])
+  @@index([workspaceId, classId, disciplineId])
+}
+
+// Педагогический разбор учебника (кабинетная сущность, НЕ файловая). Источник тем для наполнения
+// КТП (KtpTopic) при формировании — связка отложена (человек выбирает, не автопривязка).
+model TextbookTopic {
+  id          String         @id @default(cuid())
+  workspaceId String
+  materialId  String
+  material    Material       @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  fileId      String // ссылка на учебник (по fileId, как договорено)
+  order       Int
+  title       String
+  cards       TextbookCard[]
+  createdAt   DateTime       @default(now())
+
+  @@index([workspaceId, materialId, order])
+}
+
+model TextbookCard {
+  id          String          @id @default(cuid())
+  workspaceId String
+  materialId  String
+  material    Material        @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  topicId     String?
+  topic       TextbookTopic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  ktpTopicId  String? // тема КТП, к которой карта прикреплена генератором КТП (наполнение уроков)
+  ktpTopic    KtpTopic?       @relation(fields: [ktpTopicId], references: [id], onDelete: SetNull)
+  fileId      String
+  order       Int
+  title       String
+  content     String? // фрагмент textExtract под картой (стаб-разбор)
+  createdAt   DateTime        @default(now())
+  lessons     LessonContent[]
+
+  @@index([workspaceId, materialId, order])
+  @@index([ktpTopicId])
+}
+
+// ─── Communitoria (comm/) — граф контактов + инварианты безопасности миноров ───
+// Контур comm/ изолирован от Документохранилища по умолчанию (вложения НЕ через doc-модуль).
+
+// Ребро родительства: взрослый ↔ КОНКРЕТНЫЙ ребёнок. Источник истины — директория Флёруса;
+// EduStore держит СИНХРОНИЗИРОВАННОЕ ЗЕРКАЛО (пишет provisioning/sync-стаб, домен только читает).
+// Разрешение приватного DM/звонка взрослый↔минор проверяется по НАЛИЧИЮ этого ребра — не по роли
+// 'parent' вообще, и не по «строжайшей» роли двойного лица (учитель-он-же-родитель).
+model Parenthood {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  parentUserId String // = User.id (florus_user_id) взрослого
+  studentId    String // = Student.id (конкретный ребёнок)
+  source       String   @default("florus") // зеркало директории Флёруса (не EduStore-authored)
+  createdAt    DateTime @default(now())
+
+  @@unique([parentUserId, studentId])
+  @@index([workspaceId, studentId])
+  @@index([workspaceId, parentUserId])
+}
+
+// Канал Communitoria. Инвариант: minorPresent=true (есть участник-минор) ⇒ участник role=external
+// не принимается (constraint на уровне добавления участника, ниже в ChannelService). Полная
+// аудируемость: нет исчезающих сообщений / секретных чатов (сообщения — следующий чанк).
+model Channel {
+  id           String               @id @default(cuid())
+  workspaceId  String
+  kind         String // class | subject | shmo | school | parents | students | external | dm
+  title        String?
+  scope        String? // RBAC-ref: class:{id} | subject:{id} | school | role:{role}
+  classId      String? // если kind=class (быстрый доступ к контингенту для audience)
+  moderators   String[]             @default([]) // florus_user_id модераторов (resource-level authz)
+  minorPresent Boolean              @default(false) // есть участник-минор → external запрещён
+  createdAt    DateTime             @default(now())
+  participants ChannelParticipant[]
+  messages     Message[]
+
+  @@index([workspaceId, kind])
+}
+
+// Участник канала: ЛИБО взрослый (userId), ЛИБО минор (studentId). role несёт «строжайшую»
+// применимую роль (external — внешний без membership; observer — назначенный наблюдатель-сотрудник).
+model ChannelParticipant {
+  id          String   @id @default(cuid())
+  workspaceId String
+  channelId   String
+  channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  userId      String? // взрослый (florus_user_id)
+  studentId   String? // минор (Student.id)
+  role        String // teacher | parent | staff | observer | external | student
+  isMinor     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, channelId])
+}
+
+// Сообщение канала. СЕКРЕТНОСТЬ (несущий принцип): нет исчезающих сообщений / TTL — всё персистится
+// и видно по scope канала; PATCH правки помечают edited=true, историю НЕ стирают. mode ЯВНЫЙ
+// (задаётся отправителем; модель режим не решает). Для mode=announcement — audience + ackDeadline.
+model Message {
+  id            String            @id @default(cuid())
+  workspaceId   String
+  channelId     String
+  channel       Channel           @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorId      String // florus_user_id отправителя
+  mode          String // chat | announcement (ЯВНЫЙ — без угадывания)
+  kind          String // text | voice | sticker | call | file
+  body          String?
+  replyToId     String?
+  replyTo       Message?          @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies       Message[]         @relation("MessageReplies")
+  edited        Boolean           @default(false)
+  attachmentIds String[]          @default([]) // ссылки на будущую сущность Attachment (contour comm/, чанк вложений)
+  audience      String? // только announcement: parents | staff | all (required-set акков)
+  ackDeadline   DateTime? // только announcement
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt // аудит правок: когда изменено (edited=true не стирает историю)
+  reactions     MessageReaction[]
+  acks          Ack[]
+
+  @@index([workspaceId, channelId, createdAt, id]) // keyset-пагинация ленты
+}
+
+model MessageReaction {
+  id          String   @id @default(cuid())
+  workspaceId String
+  messageId   String
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId      String
+  emoji       String
+  createdAt   DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([workspaceId, messageId])
+}
+
+// Реестр подтверждений объявления (required-set). FSM: sent→delivered→read→acknowledged; →overdue по
+// ackDeadline (вычисляется при чтении). Уход адресата из школы (нет Membership) → строка вычищается.
+model Ack {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  announcementId String // = Message.id (mode=announcement)
+  announcement   Message  @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  userId         String // florus_user_id адресата
+  state          String   @default("sent") // sent | delivered | read | acknowledged
+  updatedAt      DateTime @updatedAt
+
+  @@unique([announcementId, userId])
+  @@index([workspaceId, announcementId])
+}
+
+// ─── ВРЕМЕННЫЙ пилотный auth (AUTH_MODE=pilot-qr) ───
+// Разовый инструмент для контролируемого запуска: НЕ Флёр OIDC и НЕ dev-bypass x-florus-* заголовки.
+// PilotInvite = «Staff-запись» ДО входа сотрудника: Teacher/Membership требуют florus_user_id, которого
+// до входа ещё нет, поэтому нужна отдельная запись с одноразовым инвайт-токеном из QR. Резолв входа —
+// по token (НЕ по телефону: номер — только ярлык/подпись, без SMS — осознанный трейдофф пилота).
+model PilotInvite {
+  id          String   @id @default(cuid())
+  workspaceId String // = Workspace «Архимед» (постоянный florusWorkspaceId)
+  role        String // teacher | zavuch (домен-выбор владельца)
+  displayName String? // ярлык сотрудника (может быть пусто до входа)
+  token       String   @unique // одноразовый инвайт из QR
+  phone       String? // введён при входе — идентификация/подпись, НЕ идентификатор
+  userId      String? // сгенерированный florus_user_id при первом входе (= User/Teacher/Membership/Session)
+  status      String   @default("invited") // invited | active
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId])
+}
+
+// ═══════════════════════ Schoolium 1.1.1 — онбординг школы ═══════════════════════
+// Доменный контур версии — 11 моделей, у КАЖДОЙ `workspaceId` (AR-2, AR-44), без
+// исключений. Три доменных имени (`Student`, `Subject`, `Lesson`) заняты контуром
+// КТП/КПП, поэтому новые модели несут префикс `School*` (AR-104): Prisma не
+// допускает двух моделей с одним именем. Legacy-таблицы НЕ переименовываются и НЕ
+// удаляются — прецедент AR-83 (`JournalCell`) и AR-84 (`Timetable`): два контура
+// живут в одной базе, но не в одном сценарии. Миграция версии не содержит ни
+// одного `ALTER` по таблицам контура КТП/КПП (ворота G-47).
+
+/// Класс школы. `letter = null` — явный отказ «⌀ Без литер» мастера (AR-77);
+/// `groupCount = 0` — явный отказ «⌀ Без групп».
+model SchoolClass {
+  id              String          @id @default(cuid())
+  workspaceId     String // тенант = школа (Workspace)
+  parallel        Int
+  letter          String? // null — «без литер»
+  label           String // «5» либо «5А»
+  groupCount      Int             @default(0)
+  plannedStudents Int             @default(0)
+  createdAt       DateTime        @default(now())
+  students        SchoolStudent[]
+  groups          StudentGroup[]
+
+  @@unique([workspaceId, parallel, letter])
+  @@index([workspaceId])
+}
+
+/// Группа = именованное подмножество класса (AR-75). Ученик состоит ровно в одной.
+model StudentGroup {
+  id          String          @id @default(cuid())
+  workspaceId String
+  classId     String
+  class       SchoolClass     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  groupNo     Int
+  name        String // «Группа 1»
+  members     SchoolStudent[]
+
+  @@unique([classId, groupNo])
+  @@index([workspaceId])
+}
+
+/// Ученик — запись контингента, НЕ учётная запись (AR-70): входа у него нет.
+/// Профиль считается заполненным, когда есть фамилия, имя и пол (AR-78).
+model SchoolStudent {
+  id            String        @id @default(cuid())
+  workspaceId   String
+  classId       String
+  class         SchoolClass   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  groupId       String?
+  group         StudentGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  seq           Int // порядок создания мастером — до заполнения ФИО сортировать нечем
+  lastName      String        @default("")
+  firstName     String        @default("")
+  middleName    String? // опционально, «при наличии»
+  sex           String? // 'm' | 'f' — обязателен при заполнении профиля
+  deactivatedAt DateTime? // AR-78: ученик с отметками деактивируется, а не удаляется
+  // 1.2.0 (AR-155): у ученика может быть учётка (роль student, данные-минимум:
+  // ФИО уже здесь, новых ПДн-полей не заводится — G-69). NULL = входа нет,
+  // записи и журнал работают без него.
+  userId        String?
+  guardians     GuardianLink[]
+  createdAt     DateTime      @default(now())
+
+  @@index([workspaceId])
+  @@index([classId])
+  @@index([userId])
+}
+
+/// Карточка предмета заводится на ПАРУ «предмет × класс»: математика-5 и
+/// математика-6 — две карточки, у каждой свои привязки и свои часы.
+model SchoolSubject {
+  id          String           @id @default(cuid())
+  workspaceId String
+  name        String
+  classId     String // ссылка по ЗНАЧЕНИЮ: класс принадлежит контингенту, не предметам
+  priority    Boolean          @default(false) // экран 3 мастера: в начало дня
+  createdAt   DateTime         @default(now())
+  bindings    TeacherBinding[]
+
+  @@unique([workspaceId, name, classId])
+  @@index([workspaceId])
+}
+
+/// Привязка педагога к карточке предмета: весь класс либо перечисленные группы
+/// (взаимоисключаемы, Д6). `hoursPerWeek` — нагрузка экрана 2 мастера.
+model TeacherBinding {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  subjectId    String
+  subject      SchoolSubject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacherId    String // User.id
+  scope        String // 'class' | 'group'
+  groupNos     Int[] // пусто при scope='class'
+  hoursPerWeek Int           @default(0)
+  createdAt    DateTime      @default(now())
+
+  @@index([workspaceId])
+  @@index([subjectId])
+  @@index([teacherId])
+}
+
+/// Учебный период. Календарь — сервис-владелец дат (AR-68): ни расписание, ни
+/// журнал собственных дат периодов не хранят. В 1.1.1 четвертей ровно четыре.
+model Term {
+  id          String   @id @default(cuid())
+  workspaceId String
+  termNo      Int // 1…4
+  dateFrom    DateTime @db.Date
+  dateTo      DateTime @db.Date
+
+  @@unique([workspaceId, termNo])
+  @@index([workspaceId])
+}
+
+/// Шаблон недели — результат генератора (AR-84: единственный писатель сетки).
+/// `status`: draft (предложение) | confirmed (подтверждён человеком, AR-18) |
+/// stale (пройденный шаг изменён после генерации, AR-85).
+model ScheduleTemplate {
+  id            String         @id @default(cuid())
+  workspaceId   String
+  status        String         @default("draft")
+  seed          Int
+  days          Int
+  slotsPerDay   Int
+  lessonMin     Int
+  breakMin      Int
+  bigBreakAfter Int
+  bigBreakMin   Int
+  dayStartMin   Int            @default(540)
+  attempts      Int            @default(0) // в аудит вместе с зерном (AR-107)
+  durationMs    Int            @default(0)
+  generatedAt   DateTime       @default(now())
+  confirmedAt   DateTime?
+  slots         TemplateSlot[]
+
+  @@index([workspaceId])
+}
+
+/// Слот шаблона недели. `groupNo = 0` — весь класс (кодировка хранения: NULL в
+/// Postgres не участвует в уникальности, а ключ идемпотентности обязан работать).
+model TemplateSlot {
+  id          String           @id @default(cuid())
+  workspaceId String
+  templateId  String
+  template    ScheduleTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  dayNo       Int // 0…5
+  slotNo      Int // 1…N
+  classId     String
+  groupNo     Int              @default(0) // 0 = весь класс
+  subjectId   String
+  teacherId   String
+
+  @@unique([templateId, dayNo, slotNo, classId, groupNo])
+  @@index([workspaceId])
+}
+
+/// Материализованный урок. Ключ идемпотентности — дата + номер слота + класс +
+/// группа (AR-101): повторный прогон на тех же данных не создаёт ни одной записи,
+/// и потому триггеров материализации может быть три. `detachedAt` — урок, выпавший
+/// из шаблона при регенерации, но сохранивший отметки (AR-85): он остаётся
+/// колонкой журнала с пометкой «вне расписания» и никогда не удаляется.
+model SchoolLesson {
+  id          String    @id @default(cuid())
+  workspaceId String
+  date        DateTime  @db.Date
+  slotNo      Int
+  classId     String // ссылки по ЗНАЧЕНИЮ: границу модуля данные пересекают контрактом
+  groupNo     Int       @default(0) // 0 = весь класс
+  subjectId   String
+  teacherId   String
+  templateId  String?
+  detachedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, date, slotNo, classId, groupNo])
+  @@index([workspaceId, classId, date])
+  @@index([workspaceId, teacherId])
+}
+
+// ─── журнал: собственное хранилище модуля (AR-45, AR-74, красная линия 5) ───
+// Журнал ПРОИЗВОДЕН: колонки он строит подпиской на `schedule.lesson.materialized.v1`
+// и `schedule.lesson.detached.v1`, строки — подпиской на события контингента,
+// включая `contingent.student.deleted.v1` (AR-108). Читать чужие таблицы ему
+// запрещено, поэтому обе проекции лежат здесь, у него, и внешних FK у журнала нет:
+// связь с расписанием и контингентом идёт событием, а не ссылкой в БД.
+
+/// Колонка журнала = материализованный урок. Два урока в дату — две колонки под
+/// одним числом. `detachedAt` — «вне расписания» (AR-85): отметки читаются, любая
+/// запись отклоняется `LESSON_DETACHED`.
+model JournalColumn {
+  id          String       @id @default(cuid())
+  workspaceId String
+  lessonId    String       @unique // id урока расписания — ссылка по значению, не FK
+  date        DateTime     @db.Date
+  slotNo      Int
+  classId     String
+  groupNo     Int          @default(0)
+  subjectId   String
+  teacherId   String
+  detachedAt  DateTime?
+  marks       Mark[]
+  lessonTopic LessonTopic?
+
+  @@index([workspaceId, classId, subjectId])
+}
+
+/// Строка журнала = ученик. Появляется, обновляется, помечается и снимается
+/// ТОЛЬКО событиями контингента: без `contingent.student.deleted.v1` удалённый
+/// остался бы строкой-призраком либо журнал полез бы в чужую схему (AR-108).
+model JournalRow {
+  id          String   @id @default(cuid())
+  workspaceId String
+  studentId   String   @unique // ссылка по значению, не FK
+  classId     String
+  lastName    String
+  firstName   String
+  middleName  String?
+  sex         String?
+  groupNo     Int?
+  deactivated Boolean  @default(false)
+  marks       Mark[]
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId, classId])
+}
+
+/// Отметка. Канон 1.1.1 (AR-83): единственный писатель — модуль журнала.
+/// `postedBy` — историческая ссылка на человека, а не живая связь (AR-89):
+/// выставленные отметки переживают удаление их автора.
+model Mark {
+  id          String        @id @default(cuid())
+  workspaceId String
+  lessonId    String
+  column      JournalColumn @relation(fields: [lessonId], references: [lessonId], onDelete: Cascade)
+  studentId   String
+  row         JournalRow    @relation(fields: [studentId], references: [studentId], onDelete: Cascade)
+  value       String // '5' | '4' | '3' | '2' | 'н' | 'б' (AR-79)
+  postedBy    String
+  postedAt    DateTime      @default(now())
+
+  @@unique([lessonId, studentId])
+  @@index([workspaceId])
+}
+
+/// Тема урока. Снятия темы нет: пустая тема и отсутствие темы — одно состояние.
+model LessonTopic {
+  id          String        @id @default(cuid())
+  workspaceId String
+  lessonId    String        @unique
+  column      JournalColumn @relation(fields: [lessonId], references: [lessonId], onDelete: Cascade)
+  topic       String
+  setBy       String
+  setAt       DateTime      @default(now())
+
+  @@index([workspaceId])
+}
+
+/// Регистр школы. НЕ входит в одиннадцать доменных сущностей спеки и не
+/// претендует на это: здесь живут школьные скаляры, которым спека не дала другого
+/// дома, — параметры дня экрана 4 (AR-103), явный отказ от приоритетов (AR-77) и
+/// ВЕРСИИ АГРЕГАТОВ, без которых `CONCURRENT_EDIT` (AR-109) не на чём построить.
+/// Имя последнего редактора хранится здесь же: отказ обязан назвать человека.
+model SchoolState {
+  id                String   @id @default(cuid())
+  workspaceId       String   @unique
+  contingentVersion Int      @default(0) // POST /classes/bulk
+  scheduleVersion   Int      @default(0) // PUT load | PUT day-params | POST confirm
+  days              Int      @default(5)
+  slotsPerDay       Int      @default(0)
+  lessonMin         Int      @default(45)
+  breakMin          Int      @default(10)
+  bigBreakAfter     Int      @default(2)
+  bigBreakMin       Int      @default(20)
+  dayStartMin       Int      @default(540) // 9:00 — начало первого урока (правка владельца 2026-08-30: времена в дневнике)
+  dayParamsSet      Boolean  @default(false)
+  prioritiesSet     Boolean  @default(false)
+  lastEditorId      String?
+  lastEditorName    String?
+  updatedAt         DateTime @updatedAt
+}
+
+// ─────────────────── контур доступа 1.1.1 (AR-94, AR-99) ───────────────────
+// Пять НОВЫХ таблиц плюс три существующие (`User`, `Membership`, `Workspace`),
+// которым версия добавляет недостающие поля (AR-104). Legacy `Session` (OIDC:
+// accessToken/refreshToken/florusSid) и `Device` не расширяются и не
+// переиспользуются — они принадлежат вытесненному контуру и уходят вместе с ним.
+// SMS-контура нет НИГДЕ: ни таблицы, ни поля, ни конфига (AR-94).
+
+/// Карточка сотрудника экрана «Персонал» (`S-30`, `S-31`). До регистрации несёт
+/// только НАМЕЧЕННЫЕ роли и показывает замок; после регистрации ссылается на
+/// `User`, а действующие роли читаются из `Membership.roles` — единственного их
+/// носителя. Двух источников ролей у зарегистрированного человека нет.
+model StaffCard {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  section      Int // 1 учредители и директор · 2 заместители · 3 преподаватели
+  plannedRoles String[] // намеченные роли пустой карточки-слота
+  // 1.2.0 (AR-154): заполняется при заведении учётки модератором, а не сканом —
+  // ФИО и креды существуют до активации, над QR печатается ФИО из User.
+  userId       String?
+  seq          Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([workspaceId])
+}
+
+/// Карточка родителя (AR-155): заводится модератором в КПЦ (`S-14`),
+/// связи с детьми ведёт модератор вручную (решение владельца 2026-08-28).
+model GuardianCard {
+  id          String         @id @default(cuid())
+  workspaceId String
+  userId      String? // учётка родителя, заводится вместе с карточкой
+  seq         Int            @default(0)
+  links       GuardianLink[]
+  createdAt   DateTime       @default(now())
+
+  @@index([workspaceId])
+}
+
+/// Связь родитель → ребёнок. Открывает дневник и средние ребёнка (AR-158)
+/// и блок «Мои дети» у штатной роли с той же учёткой (AR-151).
+model GuardianLink {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  guardianCardId String
+  guardian       GuardianCard  @relation(fields: [guardianCardId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        SchoolStudent @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+
+  @@unique([guardianCardId, studentId])
+  @@index([workspaceId])
+  @@index([studentId])
+}
+
+/// Сессия 90 дней (httpOnly-cookie, AR-94). Несёт `workspaceId` активного
+/// тенанта: каждый маршрут входа называет школу сам, переключателя школ нет.
+/// ВНЕ tenant-guard осознанно: сессия читается ДО того, как тенант известен.
+model AppSession {
+  id            String    @id @default(cuid())
+  token         String    @unique
+  userId        String
+  workspaceId   String
+  roles         String[]
+  deviceHint    String    @default("")
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String? // deactivated | deleted | manual
+
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+/// Токен привязки устройства со страницы `/login` (паттерн Telegram, TTL 3 мин).
+/// До подтверждения анонимен — `workspaceId` проставляется в момент привязки
+/// (AR-99), поэтому таблица вне tenant-guard: её создаёт аноним.
+model DeviceLinkToken {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  workspaceId String?
+  state       String   @default("waiting") // waiting | approved | expired
+  approvedBy  String?
+  sessionId   String? // выданная сессия — страница входа забирает её поллингом
+  nextPath    String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+/// Одноразовый код входа с карточки сотрудника (AR-92): шесть цифр и QR
+/// одновременно, 5 минут. Это восстановление доступа, а не второй фактор.
+model LoginCode {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  code        String
+  usedAt      DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+  @@index([code])
+}
+
+/// Присутственный QR (AR-76, AR-87). Один объект на два предмета — инвентарь
+/// контура доступа остаётся из восьми таблиц (AR-99), а состояние живёт в БД, а
+/// не в памяти процесса: рестарт API не рвёт открытые на экранах коды.
+///   `purpose = staff_activation` — QR карточки сотрудника (`S-31`, 15 минут либо
+///     закрытие карточки), `targetId` = `StaffCard.id`, `roles` — намеченные роли;
+///   `purpose = subject_bind` — QR привязки педагога (`S-22`, 5 минут),
+///     `targetId` = `SchoolSubject.id`.
+/// Оба одноразовы: гасит токен первая успешная операция, вторая получает
+/// `TOKEN_USED` — половинной привязки не бывает (AR-109).
+model ActivationToken {
+  id          String    @id @default(cuid())
+  workspaceId String
+  token       String    @unique
+  purpose     String // staff_activation | subject_bind
+  targetId    String
+  roles       String[]
+  state       String    @default("waiting") // waiting | scanned | used | expired
+  scannedBy   String?
+  usedAt      DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+  @@index([targetId])
+}
+
+/// Одноразовая ссылка входа первого модератора (AR-93, 24 часа). Выпускается
+/// консольной операцией платформы; та же операция перевыпускает её, если
+/// единственный модератор остался без единой живой сессии.
+model BootstrapLink {
+  id          String    @id @default(cuid())
+  workspaceId String
+  token       String    @unique
+  userId      String
+  usedAt      DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId])
+}

@@ -1,0 +1,109 @@
+# EduStore — продакшн-стек на одном VPS.
+#
+# Фронт-дверь — на выбор:
+#   А) Внешний (хостовый) nginx/любой reverse-proxy на 80/443 (рекомендуется, если nginx
+#      уже стоит): проксирует на опубликованные ЛОКАЛЬНО порты — web (SPA+/api) 127.0.0.1:8080
+#      и/или api 127.0.0.1:3000. Caddy НЕ запускаем. См. deploy/nginx/edustore.conf и docs/DEPLOY.md.
+#        docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#   Б) Встроенный Caddy (443, авто-SSL) — для чистого VPS без своего nginx:
+#        docker compose -f docker-compose.prod.yml --env-file .env.prod --profile caddy up -d --build
+#
+# Порты api/web публикуются ТОЛЬКО на 127.0.0.1 — наружу их отдаёт reverse-proxy (TLS на нём).
+# Первый деплой — засеять демо-структуру: docker compose -f docker-compose.prod.yml exec api npm run seed
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Голосовой ввод вытесняемого контура. В 1.1.1 не участвует, а образ тянет
+  # faster-whisper — самая долгая сборка стека. Поднимается только явно:
+  #   docker compose ... --profile asr up -d
+  asr:
+    build: ./services/asr
+    profiles: ["asr"]
+    restart: unless-stopped
+    environment:
+      ASR_MODEL: ${ASR_MODEL:-small}
+      ASR_MOCK: ${ASR_MOCK:-0}
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    # Только на loopback: хостовый nginx достучится по localhost:3000, наружу порт закрыт.
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      PORT: "3000"
+      ASR_URL: http://asr:8001
+      # Публичный адрес стенда. От него зависит ссылка входа, которую печатает
+      # school:bootstrap: зашитый домен = мёртвая ссылка на чужом сервере.
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      AUTH_MODE: ${AUTH_MODE:-production}
+      # Снимает secure у cookie сессии — ТОЛЬКО для демо без TLS (бэр IP, до
+      # домена). Пусто по умолчанию: значение только объявлено в
+      # .env.prod.example, но раньше не пробрасывалось в контейнер вовсе —
+      # выставленный в .env.prod COOKIE_INSECURE=1 не долетал до api, и вход
+      # молча не сохранялся на голом HTTP.
+      COOKIE_INSECURE: ${COOKIE_INSECURE:-}
+      # Флёрус (ADR-0005) — заполнить в .env.prod
+      FLOR_ISSUER: ${FLOR_ISSUER}
+      FLOR_CLIENT_ID: ${FLOR_CLIENT_ID}
+      FLOR_CLIENT_SECRET: ${FLOR_CLIENT_SECRET}
+      FLOR_REDIRECT_URI: ${WEB_ORIGIN}/api/auth/flor/callback
+      FLOR_POST_LOGOUT_REDIRECT_URI: ${WEB_ORIGIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    # SPA + внутреннее проксирование /api → api:3000 (см. apps/web/nginx.conf).
+    # Один upstream для хостового nginx: проксируйте ВСЁ на 127.0.0.1:8080.
+    #
+    # WEB_BIND по умолчанию 127.0.0.1 — вариант А/Б, порт наружу отдаёт
+    # reverse-proxy. Для быстрого показа БЕЗ домена (демо по голому IP, ещё нет
+    # DNS) поставьте в .env.prod: WEB_BIND=0.0.0.0, WEB_PORT=80, и
+    # COOKIE_INSECURE=1 выше — иначе сайт недоступен снаружи, а вход не
+    # запоминается. Смените на 127.0.0.1 и настоящий домен, как только он будет.
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:80"
+    depends_on:
+      - api
+
+  # Встроенный reverse-proxy с авто-SSL. Только по запросу: --profile caddy
+  # (иначе конфликт за порты 80/443 с хостовым nginx).
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["caddy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

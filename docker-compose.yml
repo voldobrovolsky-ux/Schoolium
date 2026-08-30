@@ -1,0 +1,73 @@
+# EduStore — dev-стек одной командой: `docker compose up`.
+# postgres + asr(faster-whisper) + api(NestJS) + web(Vite). Bind-mount репозитория;
+# зависимости ставятся один раз сервисом `deps` (npm workspaces).
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: edustore
+      POSTGRES_PASSWORD: edustore
+      POSTGRES_DB: edustore
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edustore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  asr:
+    build: ./services/asr
+    environment:
+      ASR_MODEL: small
+      ASR_MOCK: "1" # dev: mock без скачивания модели; для реального распознавания → 0
+    ports:
+      - "8001:8001"
+
+  deps:
+    image: node:20-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: npm install
+
+  api:
+    image: node:20-slim
+    working_dir: /app/apps/api
+    volumes:
+      - .:/app
+    environment:
+      DATABASE_URL: postgresql://edustore:edustore@postgres:5432/edustore?schema=public
+      PORT: "3000"
+      AUTH_MODE: dev # локальная разработка: x-florus-* байпас (fail-closed — только явным dev/test/ci)
+      ASR_URL: http://asr:8001
+      WEB_ORIGIN: http://localhost:5173
+    command: >
+      sh -c "npx prisma generate &&
+             npx prisma migrate deploy &&
+             npm run seed &&
+             npm run start:dev"
+    ports:
+      - "3000:3000"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: node:20-slim
+    working_dir: /app/apps/web
+    volumes:
+      - .:/app
+    command: npm run dev -- --host
+    ports:
+      - "5173:5173"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

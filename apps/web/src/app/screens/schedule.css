@@ -1,0 +1,43 @@
+/* Расписание учителя (движок: schedule/me). Токены — design/styles.css. */
+
+.sch-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; padding: 18px 22px; gap: 14px; }
+.sch-head {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow); padding: var(--pad-card);
+  display: flex; align-items: center; gap: 12px;
+  animation: sch-rise calc(260ms*var(--am)) cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes sch-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.sch-head h2 { font-size: 17px; margin: 0; }
+.sch-head .sub { font-size: 12.5px; color: var(--ink2); }
+.sch-filters { margin-left: auto; display: flex; gap: 6px; }
+.sch-chip {
+  height: 32px; padding: 0 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  color: var(--ink2); background: var(--line2);
+  transition: background calc(130ms*var(--am)) ease, color calc(130ms*var(--am)) ease;
+}
+.sch-chip:hover { color: var(--ink); }
+.sch-chip.on { color: #fff; background: var(--accent); }
+
+.sch-day { animation: sch-rise calc(260ms*var(--am)) cubic-bezier(.22,1,.36,1) both; }
+.sch-day-h { font-size: 12px; font-weight: 700; color: var(--ink3); text-transform: uppercase; letter-spacing: .05em; margin: 6px 2px 8px; display: flex; gap: 8px; align-items: center; }
+.sch-day-h.today { color: var(--accent); }
+.sch-rows { display: flex; flex-direction: column; gap: 8px; }
+.sch-row {
+  display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 12px 14px; box-shadow: var(--shadow);
+  transition: transform calc(130ms*var(--am)) ease, border-color calc(130ms*var(--am)) ease;
+}
+.sch-row:hover { transform: translateX(3px); border-color: var(--line-strong); }
+.sch-class {
+  min-width: 46px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+  font-size: 13.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); flex-shrink: 0; padding: 0 8px;
+}
+.sch-row .t { flex: 1; min-width: 0; }
+.sch-row .t .topic { font-size: 13.5px; font-weight: 560; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sch-row .t .subj { font-size: 11.5px; color: var(--ink2); margin-top: 2px; }
+.sch-st { font-size: 10.5px; font-weight: 650; padding: 3px 9px; border-radius: 999px; flex-shrink: 0; }
+.sch-st.idle { color: var(--ink2); background: var(--line2); }
+.sch-st.running { color: var(--accent); background: var(--accent-soft); }
+.sch-st.done { color: var(--g-good-ink); background: var(--g-good-bg); }
+.sch-empty { text-align: center; color: var(--ink3); font-size: 13px; padding: 40px 0; }

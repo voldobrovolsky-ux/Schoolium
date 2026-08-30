@@ -1,0 +1,830 @@
+/*
+ * Schoolium 1.1.1 — визуальный слой (`60-design.md`, `75-adaptive.md`).
+ *
+ * Ни одного литерального цвета, размера, радиуса или тени: всё из
+ * `tokens.css`, сгенерированного из `docs/design/tokens.json`. Иначе проверка
+ * контраста G-37 доказывает пары токенов, которых на экране нет.
+ *
+ * Раскладок ДВЕ. Основная часть файла — десктопная (≥768px, этап 2);
+ * мобильная (<768px, этап 3) живёт отдельным блоком в конце файла, а не
+ * обрезкой десктопной. Порядок именно такой: мобильные правила обязаны
+ * перекрывать десктопные, а не наоборот.
+ */
+
+/* ─────────────────────────── основа ─────────────────────────── */
+
+.sch {
+  font-family: var(--font-family);
+  color: var(--c-ink-primary);
+  background: var(--c-surface-page);
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.sch *,
+.sch *::before,
+.sch *::after { box-sizing: border-box; }
+
+.sch h1, .sch h2, .sch h3 { font-family: var(--font-display); margin: 0; }
+.sch h1 { font-size: var(--fs-h1); font-weight: var(--fw-bold); }
+.sch h2 { font-size: var(--fs-h2); font-weight: var(--fw-semibold); }
+.sch h3 { font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+.sch p { margin: 0; }
+
+/* Видимая фокус-рамка на ВС�ём интерактивном (`70-screens.md` §0): человек,
+   работающий с клавиатуры, обязан видеть, где он находится. */
+.sch :focus-visible {
+  outline: 2px solid var(--c-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.sch-muted { color: var(--c-ink-secondary); font-size: var(--fs-sm); }
+.sch-danger-text { color: var(--c-state-danger); }
+.sch-success-text { color: var(--c-state-success); }
+.sch-warning-text { color: var(--c-state-warning); }
+
+/* ─────────────────────────── оболочка (§2.1) ─────────────────────────── */
+
+.sch-shell { display: flex; min-height: 100vh; }
+
+.sch-sidebar {
+  width: 240px;
+  flex: 0 0 240px;
+  background: var(--c-surface-canvas);
+  border-right: 1px solid var(--c-border-default);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-16) var(--sp-12);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  /* Сайдбар ростом ровно в экран, а его содержимое может быть выше: на низком
+     окне карточка пользователя внизу уходила за край и не доставалась ничем —
+     ни колесом, ни перетаскиванием, потому что переполнение было видимым, но
+     не прокручиваемым. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.sch-sidebar[data-collapsed='true'] { width: 72px; flex-basis: 72px; }
+.sch-sidebar[data-collapsed='true'] .sch-nav-label,
+.sch-sidebar[data-collapsed='true'] .sch-user-text { display: none; }
+
+.sch-logo {
+  display: flex; align-items: center; gap: var(--sp-8);
+  font-family: var(--font-display);
+  font-size: var(--fs-lg); font-weight: var(--fw-bold);
+  background: linear-gradient(90deg, var(--c-brand-violet-600), var(--c-brand-pink-500));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  padding: var(--sp-8); border: 0; cursor: pointer; text-align: left;
+}
+.sch-sidebar-sep { height: 1px; background: var(--c-border-default); margin: var(--sp-12) var(--sp-8); }
+
+.sch-nav { display: flex; flex-direction: column; gap: var(--sp-4); }
+.sch-nav-item {
+  display: flex; align-items: center; gap: var(--sp-12);
+  height: var(--tap-min); padding: 0 var(--sp-12);
+  border: 0; border-left: 3px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent; color: var(--c-ink-secondary);
+  font-size: var(--fs-md); font-family: inherit; cursor: pointer; text-align: left;
+}
+.sch-nav-item:hover { background: var(--c-brand-violet-050); }
+.sch-nav-item[aria-current='page'] {
+  background: var(--c-brand-violet-100);
+  color: var(--c-brand-violet-700);
+  border-left-color: var(--c-brand-violet-700);
+  font-weight: var(--fw-medium);
+}
+.sch-nav-icon { width: var(--sp-20); text-align: center; flex: 0 0 auto; }
+
+.sch-user {
+  margin-top: auto; display: flex; align-items: center; gap: var(--sp-12);
+  padding: var(--sp-8); border-radius: var(--r-md);
+  background: transparent; border: 0; cursor: pointer; font-family: inherit;
+  color: var(--c-ink-primary); text-align: left; width: 100%;
+}
+.sch-user:hover { background: var(--c-brand-violet-050); }
+.sch-user-text { min-width: 0; }
+.sch-user-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.sch-user-roles { font-size: var(--fs-xs); color: var(--c-ink-secondary); }
+
+.sch-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+
+.sch-topbar {
+  height: 64px; flex: 0 0 64px;
+  display: flex; align-items: center; gap: var(--sp-16);
+  padding: 0 var(--sp-32);
+  border-bottom: 1px solid var(--c-border-default);
+  background: var(--c-surface-page);
+  position: sticky; top: 0; z-index: 5;
+}
+.sch-topbar-title { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+.sch-breadcrumb { color: var(--c-ink-secondary); font-size: var(--fs-sm); }
+.sch-breadcrumb button {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--c-brand-violet-700); font: inherit;
+}
+.sch-topbar-spacer { flex: 1 1 auto; }
+
+/* Контент 1200px, сетка 12 колонок, gutter 24 (`60-design.md` §2). */
+.sch-content { padding: var(--sp-32); }
+.sch-page { max-width: 1200px; margin: 0 auto; }
+.sch-grid12 { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--sp-24); }
+
+.sch-page-head { display: flex; align-items: flex-start; gap: var(--sp-16); margin-bottom: var(--sp-24); }
+.sch-page-head h1 { flex: 1 1 auto; }
+
+/* ─────────────────────────── кнопки (§4) ─────────────────────────── */
+
+.sch-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-8);
+  height: var(--tap-min); padding: 0 var(--sp-20);
+  border-radius: var(--r-md); border: 1px solid transparent;
+  font-family: inherit; font-size: var(--fs-md); font-weight: var(--fw-medium);
+  cursor: pointer; transition: background-color 120ms, transform 80ms;
+  white-space: nowrap;
+}
+.sch-btn:active:not(:disabled) { transform: scale(0.98); }
+.sch-btn:disabled { cursor: not-allowed; background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); border-color: transparent; }
+
+.sch-btn--primary { background: var(--c-brand-violet-700); color: var(--c-ink-on-violet); }
+.sch-btn--primary:hover:not(:disabled) { background: var(--c-brand-violet-900); }
+
+/* Одна `B-accent` на экран — ключевое действие шага (AR-80). */
+.sch-btn--accent { background: var(--c-brand-pink-600); color: var(--c-ink-on-pink); }
+.sch-btn--accent:hover:not(:disabled) { background: var(--c-brand-pink-700); }
+
+.sch-btn--secondary { background: var(--c-surface-card); border-color: var(--c-border-default); color: var(--c-brand-violet-700); }
+.sch-btn--secondary:hover:not(:disabled) { background: var(--c-brand-violet-050); }
+
+.sch-btn--ghost { background: transparent; color: var(--c-ink-secondary); }
+.sch-btn--ghost:hover:not(:disabled) { background: var(--c-brand-violet-050); }
+
+.sch-btn--danger { background: transparent; color: var(--c-state-danger); }
+.sch-btn--danger:hover:not(:disabled) { background: var(--c-mark-m2-bg); }
+
+/* Явный отказ «⌀ Без литер» — выбранный получает заливку (AR-77). */
+.sch-btn--off { background: var(--c-surface-card); border-color: var(--c-border-default); color: var(--c-ink-primary); }
+.sch-btn--off:hover:not(:disabled) { background: var(--c-brand-violet-050); }
+.sch-btn--off[aria-pressed='true'] { background: var(--c-brand-violet-100); border-color: var(--c-brand-violet-500); color: var(--c-brand-violet-700); }
+
+.sch-btn--icon { width: 40px; height: 40px; padding: 0; border-radius: var(--r-md); background: transparent; color: var(--c-ink-secondary); }
+.sch-btn--icon:hover:not(:disabled) { background: var(--c-brand-violet-050); }
+
+.sch-btn--fab { width: 40px; height: 40px; padding: 0; border-radius: var(--r-pill); background: var(--c-brand-pink-600); color: var(--c-ink-on-pink); font-size: var(--fs-xl); }
+.sch-btn--fab:hover:not(:disabled) { background: var(--c-brand-pink-700); }
+
+.sch-btn--chip {
+  height: 32px; padding: 0 var(--sp-12); border-radius: var(--r-pill);
+  background: var(--c-surface-card); border-color: var(--c-border-default);
+  color: var(--c-ink-primary); font-size: var(--fs-sm); font-weight: var(--fw-regular);
+}
+.sch-btn--chip:hover:not(:disabled) { background: var(--c-brand-violet-050); }
+.sch-btn--chip[aria-pressed='true'] { background: var(--c-brand-violet-100); border-color: var(--c-brand-violet-500); color: var(--c-brand-violet-700); }
+.sch-btn--chip[data-warning='true'] { border-color: var(--c-state-warning); border-style: dashed; color: var(--c-state-warning); }
+
+/* Пара кнопок: десктоп — в ряд справа, primary СПРАВА от secondary (§4). */
+.sch-actions { display: flex; gap: var(--sp-12); justify-content: flex-end; align-items: center; }
+.sch-actions--start { justify-content: flex-start; }
+
+.sch-spinner {
+  width: 16px; height: 16px; border-radius: var(--r-pill);
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: sch-spin 700ms linear infinite;
+}
+@keyframes sch-spin { to { transform: rotate(360deg); } }
+
+/* ─────────────────────────── карточки (AR-77) ─────────────────────────── */
+
+.sch-card {
+  background: var(--c-surface-card);
+  border: 1px solid var(--c-border-default);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-card);
+  padding: var(--sp-20);
+  transition: box-shadow 120ms, transform 120ms;
+}
+.sch-card--clickable { cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; }
+.sch-card--clickable:hover { box-shadow: var(--sh-modal); transform: translateY(-2px); }
+.sch-card--locked { color: var(--c-ink-muted); }
+.sch-card-title { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+.sch-card-sub { color: var(--c-ink-secondary); font-size: var(--fs-sm); margin-top: var(--sp-4); }
+
+/* Карточки классов — 4 в ряд, предметов — 3 в ряд (`60-design.md` §2). */
+.sch-cards--4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-24); }
+.sch-cards--3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-24); }
+
+.sch-progress { height: 4px; border-radius: var(--r-pill); background: var(--c-state-disabled-bg); margin-top: var(--sp-12); overflow: hidden; }
+.sch-progress > span { display: block; height: 100%; background: var(--c-brand-violet-500); }
+
+/* ─────────────────────────── поля ввода ─────────────────────────── */
+
+.sch-field { display: flex; flex-direction: column; gap: var(--sp-4); margin-bottom: var(--sp-16); }
+.sch-field-label { font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-input {
+  height: 48px; padding: 0 var(--sp-12);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-card); color: var(--c-ink-primary);
+  font-family: inherit; font-size: var(--fs-md); width: 100%;
+}
+.sch-input:hover { border-color: var(--c-brand-violet-500); }
+.sch-input:focus { border-color: var(--c-border-focus); box-shadow: 0 0 0 3px var(--c-brand-violet-100); outline: none; }
+.sch-input:disabled { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
+.sch-input[aria-invalid='true'] { border-color: var(--c-state-danger); }
+.sch-field-error { color: var(--c-state-danger); font-size: var(--fs-sm); }
+.sch-radio { display: flex; gap: var(--sp-16); align-items: center; }
+.sch-radio label { display: flex; align-items: center; gap: var(--sp-8); cursor: pointer; }
+
+/* ─────────────────────────── модалки (§3, AR-82) ─────────────────────────── */
+
+.sch-overlay {
+  position: fixed; inset: 0; z-index: 40;
+  /* Сплошное затемнение без блюра (правка владельца 2026-08-30: «заблюрено
+     ужасно, всё просвечивается») — контент под слоем не читается. */
+  background: var(--c-surface-overlay-blur);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--sp-24);
+  animation: sch-fade 150ms ease-out;
+}
+@keyframes sch-fade { from { opacity: 0; } to { opacity: 1; } }
+.sch-modal {
+  background: var(--c-surface-card);
+  border-radius: var(--r-card);
+  box-shadow: var(--sh-modal);
+  width: 100%; max-height: 90vh; display: flex; flex-direction: column;
+  animation: sch-pop 150ms ease-out;
+}
+@keyframes sch-pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+.sch-modal-head { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-20) var(--sp-24); border-bottom: 1px solid var(--c-border-default); flex: 0 0 auto; }
+.sch-modal-head h2 { flex: 1 1 auto; font-size: var(--fs-xl); }
+/* `flex: 1 1 auto` + `min-height: 0` — иначе тело не сжимается ниже своего
+   содержимого (значение `min-height: auto` у флекс-элемента), карточка растёт
+   за свои `max-height`, а футер уезжает под контент и перестаёт нажиматься.
+   Найдено мобильным смоком: `S-31.btn.close` перекрывали кнопки тела. */
+.sch-modal-body { padding: var(--sp-24); overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+.sch-modal-foot { padding: var(--sp-16) var(--sp-24); border-top: 1px solid var(--c-border-default); flex: 0 0 auto; }
+
+/* Поповер — второй способ показать слой; ловушка фокуса та же (§3). */
+.sch-popover {
+  position: fixed; z-index: 45;
+  background: var(--c-surface-card);
+  border: 1px solid var(--c-border-default);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-modal);
+  padding: var(--sp-16);
+}
+
+/* ─────────────────────────── состояния экрана (§5) ─────────────────────────── */
+
+.sch-state { display: flex; flex-direction: column; align-items: center; gap: var(--sp-12); padding: var(--sp-56) var(--sp-24); text-align: center; }
+.sch-state-illustration {
+  width: 96px; height: 96px; border-radius: var(--r-card);
+  border: 2px dashed var(--c-brand-violet-100);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--c-brand-violet-500); font-size: var(--fs-h1);
+}
+.sch-state h2 { font-size: var(--fs-xl); }
+
+/* Скелетоны — блоки ТОЙ ЖЕ геометрии, а не спиннер по центру (§0). */
+.sch-skeleton { background: var(--c-state-disabled-bg); border-radius: var(--r-md); animation: sch-pulse 1.2s ease-in-out infinite; }
+@keyframes sch-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.sch-skeleton--card { height: 132px; border-radius: var(--r-card); }
+.sch-skeleton--row { height: 44px; margin-bottom: var(--sp-8); }
+.sch-skeleton--qr { width: 240px; height: 240px; }
+
+.sch-error-card {
+  border: 1px solid var(--c-state-danger); border-radius: var(--r-card);
+  background: var(--c-mark-m2-bg); color: var(--c-mark-m2-ink);
+  padding: var(--sp-20); display: flex; flex-direction: column; gap: var(--sp-12); align-items: flex-start;
+}
+
+.sch-banner {
+  background: var(--c-state-stale-bg); color: var(--c-state-warning);
+  border-radius: var(--r-lg); padding: var(--sp-16) var(--sp-20);
+  display: flex; align-items: center; gap: var(--sp-16); margin-bottom: var(--sp-24);
+}
+.sch-banner span { flex: 1 1 auto; }
+
+/* ─────────────────────────── таблицы ─────────────────────────── */
+
+/* Железное правило прокрутки: `body` не скроллится по горизонтали НИКОГДА —
+   широкое содержимое скроллится внутри собственного контейнера (§6). */
+.sch-tablewrap { overflow-x: auto; border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); }
+.sch-table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+.sch-table th, .sch-table td { padding: var(--sp-12); text-align: left; border-bottom: 1px solid var(--c-border-default); }
+.sch-table th { color: var(--c-ink-secondary); font-weight: var(--fw-medium); background: var(--c-surface-canvas); position: sticky; top: 0; z-index: 1; }
+.sch-table tbody tr { cursor: pointer; }
+.sch-table tbody tr:hover td { box-shadow: inset 0 0 0 999px var(--c-brand-violet-050); }
+
+/* Заливка строки по полу — и текст, и позиция строки, а не один оттенок (AR-80). */
+.sch-row--boy td { background: var(--c-sex-boy-bg); color: var(--c-sex-boy-ink); }
+.sch-row--girl td { background: var(--c-sex-girl-bg); color: var(--c-sex-girl-ink); }
+.sch-row--empty td { border-bottom: 1px dashed var(--c-border-default); color: var(--c-ink-muted); font-style: italic; }
+.sch-row--inactive td { opacity: 0.6; }
+
+.sch-badge {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 var(--sp-8);
+  border-radius: var(--r-pill); background: var(--c-brand-violet-100); color: var(--c-brand-violet-700);
+  font-size: var(--fs-xs); font-weight: var(--fw-medium);
+}
+.sch-badge--muted { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
+
+.sch-avatar {
+  width: 40px; height: 40px; border-radius: var(--r-pill);
+  background: var(--c-brand-violet-100); color: var(--c-brand-violet-700);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold); flex: 0 0 auto;
+  object-fit: cover;
+}
+.sch-avatar--lg { width: 120px; height: 120px; font-size: var(--fs-h1); }
+
+/* ─── строка календаря недель над журналом (S-50.weeks) ─── */
+
+.sch-weeks { margin-bottom: var(--sp-16); }
+/* Учебный год — 34+ недели: строка скроллится ВНУТРИ себя, `body` по
+   горизонтали не скроллится никогда (75-adaptive §6). */
+.sch-weeks-strip {
+  display: flex; gap: var(--sp-8);
+  overflow-x: auto; padding-bottom: var(--sp-8);
+  scroll-snap-type: x proximity;
+}
+.sch-week {
+  flex: 0 0 auto; scroll-snap-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-4);
+  min-width: 104px; min-height: var(--tap-min);
+  padding: var(--sp-8) var(--sp-12);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-card); color: var(--c-ink-primary);
+  font-family: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.sch-week:hover { background: var(--c-brand-violet-050); }
+.sch-week[aria-current='true'] {
+  background: var(--c-brand-violet-100);
+  border-color: var(--c-brand-violet-500);
+  color: var(--c-brand-violet-700);
+  font-weight: var(--fw-medium);
+}
+/* Неделя без уроков не скрывается — иначе после «14 сент.» шла бы сразу
+   «28 сент.» и человек не понял бы, куда делась неделя (§S-50). */
+.sch-week[data-empty] { color: var(--c-ink-muted); border-style: dashed; }
+.sch-week-range { white-space: nowrap; }
+.sch-week-term { font-size: var(--fs-xs); color: var(--c-ink-secondary); }
+.sch-week[aria-current='true'] .sch-week-term { color: var(--c-brand-violet-700); }
+
+/* ─────────────────────────── журнал (S-50) ─────────────────────────── */
+
+.sch-journal { overflow: auto; max-height: 70vh; border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); }
+.sch-journal table { border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.sch-journal th, .sch-journal td { border-bottom: 1px solid var(--c-border-default); border-right: 1px solid var(--c-border-default); padding: var(--sp-8); white-space: nowrap; }
+.sch-journal thead th { position: sticky; top: 0; z-index: 2; background: var(--c-surface-canvas); }
+.sch-journal .sch-j-name { position: sticky; left: 0; z-index: 1; background: var(--c-surface-card); min-width: 220px; text-align: left; }
+.sch-journal thead .sch-j-name { z-index: 3; background: var(--c-surface-canvas); }
+.sch-journal .sch-j-col--future { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
+.sch-journal .sch-j-col--detached { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
+.sch-journal .sch-j-cell { text-align: center; cursor: pointer; min-width: 56px; }
+.sch-journal .sch-j-cell:hover { box-shadow: inset 0 0 0 999px var(--c-brand-violet-050); }
+.sch-j-colhead { background: none; border: 0; font: inherit; cursor: pointer; color: inherit; padding: 0; }
+.sch-j-detach-note { font-size: var(--fs-xs); color: var(--c-state-warning); display: block; }
+/* Средний балл (AR-115) — только чтение, поэтому колонка отбита фоном канвы. */
+.sch-journal .sch-j-avg { background: var(--c-surface-canvas); text-align: center; font-weight: var(--fw-semibold); min-width: 72px; border-right: 0; }
+.sch-journal .sch-row--inactive th, .sch-journal .sch-row--inactive td { opacity: 0.6; }
+.sch-journal .sch-j-cell:focus-visible { outline: 2px solid var(--c-border-focus); outline-offset: -2px; }
+
+.sch-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--r-pill);
+  font-weight: var(--fw-semibold);
+}
+.sch-mark--m5 { background: var(--c-mark-m5-bg); color: var(--c-mark-m5-ink); }
+.sch-mark--m4 { background: var(--c-mark-m4-bg); color: var(--c-mark-m4-ink); }
+.sch-mark--m3 { background: var(--c-mark-m3-bg); color: var(--c-mark-m3-ink); }
+.sch-mark--m2 { background: var(--c-mark-m2-bg); color: var(--c-mark-m2-ink); }
+.sch-mark--n  { background: var(--c-mark-n-bg);  color: var(--c-mark-n-ink); }
+.sch-mark--b  { background: var(--c-mark-b-bg);  color: var(--c-mark-b-ink); }
+.sch-mark--btn { border: 2px solid transparent; cursor: pointer; font-size: var(--fs-md); }
+.sch-mark--btn.is-current { border-color: var(--c-ink-primary); }
+.sch-mark--btn:disabled { cursor: default; }
+.sch-markrow { display: flex; gap: var(--sp-8); }
+.sch-pop-form { min-width: 260px; }
+
+/* ─────────────────────────── расписание (S-40, S-42) ─────────────────────────── */
+
+.sch-week { overflow-x: auto; border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); }
+.sch-week table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+.sch-week th, .sch-week td { border: 1px solid var(--c-border-default); padding: var(--sp-8); vertical-align: top; min-width: 132px; }
+.sch-week th { background: var(--c-surface-canvas); color: var(--c-ink-secondary); font-weight: var(--fw-medium); }
+.sch-slot { display: block; }
+.sch-slot-subject { font-weight: var(--fw-medium); }
+.sch-slot-teacher { color: var(--c-ink-secondary); font-size: var(--fs-xs); }
+/* Спаренный групповой час — ячейка, разделённая по диагонали (`60-design.md`). */
+.sch-cell--paired { background: linear-gradient(to bottom right, var(--c-brand-violet-050) 0 49.5%, var(--c-border-default) 49.5% 50.5%, var(--c-surface-card) 50.5% 100%); }
+
+/* ─────────────────────────── контур входа (без оболочки, §2.3) ─────────────────────────── */
+
+.sch-auth { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-24); padding: var(--sp-24); background: var(--c-surface-page); }
+.sch-auth-card { width: 420px; max-width: 100%; }
+.sch-auth-card--wide { width: 480px; }
+.sch-qr { display: flex; flex-direction: column; align-items: center; gap: var(--sp-12); }
+.sch-qr-frame { padding: var(--sp-12); border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); }
+.sch-code-cells { display: flex; gap: var(--sp-8); justify-content: center; }
+.sch-code-cell {
+  width: 56px; height: 56px; text-align: center;
+  font-size: var(--fs-h2); font-family: inherit;
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-card); color: var(--c-ink-primary);
+}
+.sch-code-cell:focus { border-color: var(--c-border-focus); outline: none; box-shadow: 0 0 0 3px var(--c-brand-violet-100); }
+.sch-shake { animation: sch-shake 320ms ease-in-out; }
+@keyframes sch-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+
+.sch-hero { text-align: center; max-width: 1200px; }
+.sch-hero p { color: var(--c-ink-secondary); margin-top: var(--sp-12); }
+
+/* ─────────────────────────── мастера ─────────────────────────── */
+
+.sch-steps { display: flex; gap: var(--sp-8); justify-content: center; padding: var(--sp-16) 0; }
+.sch-step-dot { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--c-state-disabled-bg); }
+.sch-step-dot[data-done='true'] { background: var(--c-brand-violet-700); }
+.sch-preview { background: var(--c-brand-violet-050); border-radius: var(--r-lg); padding: var(--sp-16); margin-top: var(--sp-16); }
+.sch-accordion { border: 1px solid var(--c-border-default); border-radius: var(--r-lg); margin-bottom: var(--sp-12); overflow: hidden; }
+.sch-accordion > summary { padding: var(--sp-12) var(--sp-16); cursor: pointer; background: var(--c-surface-canvas); font-weight: var(--fw-medium); }
+.sch-accordion > div { padding: var(--sp-16); }
+.sch-terms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-16); }
+.sch-term-panel { border: 1px solid var(--c-border-default); border-radius: var(--r-lg); padding: var(--sp-16); }
+.sch-term-panel[data-valid='true'] { border-color: var(--c-state-success); }
+.sch-hours-row { display: flex; align-items: center; gap: var(--sp-12); margin-bottom: var(--sp-12); }
+.sch-hours-row label { flex: 1 1 auto; font-size: var(--fs-sm); }
+.sch-hours-row .sch-input { width: 88px; }
+.sch-chips { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+
+.sch-fullscreen {
+  position: fixed; inset: 0; z-index: 50; background: var(--c-surface-page);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-24);
+}
+
+/* ─────────────────────────── тосты (§5) ─────────────────────────── */
+
+.sch-toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--sp-32); z-index: 60;
+  background: var(--c-ink-primary); color: var(--c-ink-on-violet);
+  padding: var(--sp-12) var(--sp-20); border-radius: var(--r-pill);
+  box-shadow: var(--sh-modal); font-size: var(--fs-sm);
+}
+
+/* ─────────────────────────── мелочи ─────────────────────────── */
+
+.sch-list { display: flex; flex-direction: column; gap: var(--sp-12); }
+.sch-row { display: flex; align-items: center; gap: var(--sp-12); }
+.sch-row--between { justify-content: space-between; }
+.sch-stack { display: flex; flex-direction: column; gap: var(--sp-12); }
+.sch-sections { display: flex; flex-direction: column; gap: var(--sp-32); }
+.sch-section-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin-bottom: var(--sp-12); }
+.sch-canvas { background: var(--c-surface-canvas); border-radius: var(--r-lg); padding: var(--sp-20); }
+.sch-inline-avatars { display: flex; gap: calc(var(--sp-4) * -1); }
+.sch-card--link { cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: var(--sp-8); font: inherit; color: inherit; border: 1px solid var(--c-border-default); }
+.sch-card--link:hover { border-color: var(--c-brand-violet-500); }
+
+/* Видоискатель (`S-05`, `S-70`, `S-80`): камера во весь экран.
+   Это СОСТОЯНИЕ компонента, а не раскладка — `S-05` открывает камеру и на
+   десктопе, если она есть (реестр §S-05: «скрыта, если камеры нет»). Пока эти
+   правила жили в мобильном медиазапросе, на десктопе полосу с кнопкой
+   «Отмена» обрезал `overflow: hidden` контейнера, и выйти из сканера было
+   нечем. Найдено смоком. */
+.sch-viewfinder { position: relative; border-radius: var(--r-card); overflow: hidden; background: var(--c-ink-primary); aspect-ratio: 3 / 4; }
+.sch-viewfinder video { width: 100%; height: 100%; object-fit: cover; }
+.sch-viewfinder-frame {
+  position: absolute; inset: 18%; border: 3px solid var(--c-ink-on-violet); border-radius: var(--r-lg);
+}
+.sch-viewfinder--full { position: fixed; inset: 0; z-index: 50; border-radius: 0; aspect-ratio: auto; }
+.sch-viewfinder-bar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: var(--sp-16);
+  padding-bottom: calc(var(--sp-16) + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: var(--sp-12); align-items: center;
+  background: var(--c-surface-overlay-blur);
+  color: var(--c-ink-on-violet);
+  text-align: center;
+}
+.sch-viewfinder-bar .sch-btn { max-width: 320px; }
+
+.sch-toolbar { display: flex; gap: var(--sp-16); align-items: flex-end; margin-bottom: var(--sp-16); flex-wrap: wrap; }
+.sch-field--inline { min-width: 220px; margin-bottom: 0; }
+
+/* ═══════════════════════ МОБАЙЛ (<768px) — этап 3 ═══════════════════════
+ *
+ * Отдельный блок, а не обрезка десктопа (`75-adaptive.md`, правило номер один).
+ * Всё, что ниже, — из реестра: §2.2 оболочка, §3 формы слоёв, §4 размеры
+ * кнопок, §6 адаптация экранов, §7 ввод. Скрытие элемента допустимо, только
+ * если оно названо там; молчаливое «не поместилось» — дефект.
+ *
+ * Слои (`.sch-overlay[data-shape]`) описаны ВНЕ медиазапроса: форма выбрана
+ * раскладкой в React по точке останова (`useIsMobile`), и CSS обязан
+ * подчиниться этому выбору, а не спорить с ним из второго источника правды.
+ */
+
+/* ─── полноэкранный поток и нижний лист (§3) ─── */
+
+.sch-overlay[data-shape='fullscreen'] { padding: 0; align-items: stretch; justify-content: stretch; }
+.sch-modal[data-shape='fullscreen'] {
+  width: 100%; max-width: none; max-height: none; height: 100%;
+  border-radius: 0; box-shadow: none;
+  /* Появление БЕЗ `scale`: карточка по центру подскакивает, поток во весь
+     экран — нет, ему неоткуда подскакивать. Побочный эффект тот же по сути:
+     пока шёл `scale(0.97)`, все размеры внутри были на 3% меньше заявленных,
+     и мишень 44px мерилась как 43px. Проверка тап-мишеней это и поймала. */
+  animation: sch-fade 150ms ease-out;
+}
+/* Кнопки полноэкранного потока прижаты к низу над safe-area (§3). Прижимает
+   их флекс-колонка карточки, а не `position: sticky`: липкий футер лежит в
+   одном потоке с телом и перекрывается его содержимым — мобильный смок ловил
+   это как «клик по «Закрыть» перехватывает кнопка удаления». */
+.sch-modal[data-shape='fullscreen'] .sch-modal-foot {
+  background: var(--c-surface-card);
+  padding-bottom: calc(var(--sp-16) + env(safe-area-inset-bottom, 0px));
+}
+
+.sch-overlay[data-shape='sheet'] { padding: 0; align-items: flex-end; }
+.sch-modal[data-shape='sheet'] {
+  width: 100%; max-width: none; max-height: 90vh;
+  border-radius: var(--r-card) var(--r-card) 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  animation: sch-rise 150ms ease-out;
+}
+@keyframes sch-rise { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+/* Ручка-полоска 36×4 (§3): она же цель свайпа вниз — единственного жеста версии. */
+.sch-sheet-handle {
+  width: 36px; height: 4px; border-radius: var(--r-pill);
+  background: var(--c-border-default);
+  margin: var(--sp-8) auto 0;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 767px) {
+  /* ─── оболочка §2.2 ─── */
+
+  .sch-shell--mobile { display: flex; flex-direction: column; min-height: 100vh; }
+
+  .sch-header {
+    height: 56px; flex: 0 0 56px;
+    display: flex; align-items: center; gap: var(--sp-8);
+    padding: 0 var(--sp-16);
+    border-bottom: 1px solid var(--c-border-default);
+    background: var(--c-surface-page);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .sch-header-title {
+    font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sch-header-title--back {
+    background: none; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left;
+    min-height: var(--tap-min);
+  }
+  .sch-header-user {
+    width: var(--tap-min); height: var(--tap-min); flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: 0; padding: 0; cursor: pointer;
+  }
+
+  /* Кнопка во всю ширину (§4) не помещается рядом с заголовком: шапка экрана
+     и строки «заголовок + действие» складываются в колонку, а не распирают
+     страницу вбок. Найдено мобильным смоком на `S-20` и `S-30`. */
+  .sch-page-head { flex-direction: column; align-items: stretch; gap: var(--sp-12); }
+  .sch-row--between { flex-wrap: wrap; }
+  .sch-row { min-width: 0; }
+
+  .sch-content { padding: var(--sp-16); flex: 1 1 auto; }
+  /* Нижний отступ контента учитывает таб-бар и safe-area (§2.2): иначе
+     последняя карточка списка вечно наполовину под панелью. */
+  .sch-shell--mobile .sch-content {
+    padding-bottom: calc(64px + var(--sp-16) + env(safe-area-inset-bottom, 0px));
+  }
+  .sch-page { max-width: none; }
+
+  .sch-tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    display: flex;
+    background: var(--c-surface-page);
+    border-top: 1px solid var(--c-border-default);
+  }
+  /* Полноэкранный поток прячет таб-бар и возвращает по завершении (§2.2).
+     Признак ставит сам слой — оболочка о слое ничего не знает. */
+  body[data-sch-flow] .sch-tabbar { display: none; }
+  .sch-tab {
+    flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-4);
+    background: none; border: 0; cursor: pointer; font-family: inherit;
+    color: var(--c-ink-secondary);
+    padding: 0;
+  }
+  .sch-tab[aria-current='page'] { color: var(--c-brand-violet-700); }
+  .sch-tab-icon { font-size: var(--fs-lg); line-height: 1; }
+  .sch-tab-label { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+  /* ─── кнопки §4: высота 48, во всю ширину, кроме иконок, FAB и чипов ─── */
+
+  .sch-btn { height: 48px; width: 100%; }
+  /* `flex: 0 0 auto` и `min-*` — не украшение: иконка в шапке модалки и чип в
+     ряду это флекс-элементы, и без запрета сжатия соседний длинный заголовок
+     ужимал их до 37px при заявленных 44. Мишень меряется по МЕНЬШЕЙ стороне,
+     поэтому «высота 44» без ширины ничего не гарантирует. */
+  .sch-btn--icon, .sch-btn--fab {
+    width: var(--tap-min); height: var(--tap-min);
+    min-width: var(--tap-min); min-height: var(--tap-min);
+    flex: 0 0 auto;
+  }
+  .sch-btn--chip {
+    width: auto; height: var(--tap-min);
+    min-width: var(--tap-min); min-height: var(--tap-min);
+    flex: 0 0 auto;
+  }
+  /* Пара кнопок: колонкой, primary СВЕРХУ (§4). В разметке primary идёт
+     последним (десктоп ставит его справа), поэтому колонка развёрнутая. */
+  .sch-actions { flex-direction: column-reverse; align-items: stretch; gap: var(--sp-8); }
+  .sch-actions--start { flex-direction: column; }
+  /* Чипы и сегменты остаются рядами: это выбор из набора, а не действие. */
+  .sch-chips .sch-btn, .sch-markrow .sch-btn { width: auto; }
+
+  /* ─── чипы отметки 44px (§3, M-12) ─── */
+  .sch-mark--btn { width: var(--tap-min); height: var(--tap-min); }
+  .sch-markrow { flex-wrap: wrap; }
+
+  /* ─── экраны §6 ─── */
+
+  /* Карточки — одна колонка (S-10, S-20, S-30, S-60). */
+  .sch-cards--4, .sch-cards--3 { grid-template-columns: 1fr; gap: var(--sp-12); }
+  [data-testid='S-10.card.class'] { min-height: 88px; }
+  .sch-grid12 { grid-template-columns: 1fr; }
+  .sch-terms { grid-template-columns: 1fr; }
+  .sch-toolbar { flex-direction: column; align-items: stretch; }
+  .sch-field--inline { min-width: 0; }
+  .sch-auth-card, .sch-auth-card--wide { width: 100%; }
+  .sch-auth { padding: var(--sp-24); justify-content: flex-start; padding-top: var(--sp-40); }
+  .sch-avatar--lg { width: 96px; height: 96px; }               /* S-04 (§6) */
+  .sch-qr-frame svg { width: 100%; height: auto; max-width: 240px; }
+
+  /* Три широкие таблицы скроллятся ВНУТРИ контейнера — `body` по горизонтали
+     не скроллится никогда (§6). */
+  .sch-tablewrap, .sch-week, .sch-journal { max-width: 100%; }
+  .sch-journal { max-height: 60vh; }
+  /* S-12: закреплена колонка «Фамилия» (§6). Первая колонка — номер, вторая — фамилия. */
+  .sch-table--roster th:nth-child(2), .sch-table--roster td:nth-child(2) {
+    position: sticky; left: 0; z-index: 1; background: var(--c-surface-card);
+  }
+  .sch-table--roster tr.sch-row--boy td:nth-child(2) { background: var(--c-sex-boy-bg); }
+  .sch-table--roster tr.sch-row--girl td:nth-child(2) { background: var(--c-sex-girl-bg); }
+  .sch-table--roster th:first-child, .sch-table--roster td:first-child { display: none; }
+  /* Кнопки действий карточки класса — прилипающая панель снизу (§6). */
+  .sch-sticky-actions {
+    position: sticky; bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    background: var(--c-surface-page);
+    padding: var(--sp-12) 0;
+    border-top: 1px solid var(--c-border-default);
+    margin-top: var(--sp-16);
+    display: flex; flex-direction: column; gap: var(--sp-8);
+  }
+  /* S-50: ФИО закреплены и сокращены, даты скроллятся внутри контейнера (§6). */
+  .sch-journal .sch-j-name { min-width: 116px; }
+
+  /* ─── ввод §7: шаговые кнопки «−»/«+» рядом с числовым полем ─── */
+  .sch-stepper { display: flex; align-items: center; gap: var(--sp-8); }
+  .sch-stepper .sch-input { flex: 1 1 auto; min-width: 0; text-align: center; }
+  .sch-stepper .sch-btn { width: var(--tap-min); flex: 0 0 var(--tap-min); }
+
+  /* Тост — над таб-баром, а не под ним (§5). */
+  .sch-toast { bottom: calc(64px + var(--sp-16) + env(safe-area-inset-bottom, 0px)); }
+  body[data-sch-flow] .sch-toast { bottom: var(--sp-24); }
+
+  /* S-40 · закреплён столбец времени (§6). */
+  .sch-week-time {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--c-surface-canvas);
+    min-width: 56px;
+  }
+
+  /* S-30 · сворачиваемые секции (§6). */
+  .sch-section-toggle {
+    display: flex; align-items: center; gap: var(--sp-8);
+    min-height: var(--tap-min);
+    background: none; border: 0; padding: 0; cursor: pointer;
+    font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold);
+    color: var(--c-ink-primary);
+  }
+
+}
+
+/* Шаговые кнопки существуют только на мобайле (§7): на десктопе поле числовое
+   и правится с клавиатуры, лишняя пара кнопок там — шум. */
+@media (min-width: 768px) { .sch-stepper .sch-btn--stepper { display: none; } }
+
+/* ─────────────── S-11 · поклассная численность (M-01, шаг 5) ─────────────── */
+
+/* Таблица растёт с числом классов (11 параллелей × 4 литеры = 44 строки), а
+   модалка выше экрана не становится — прокрутка живёт здесь, а не у страницы. */
+.sch-headcount {
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  max-height: 40vh; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  padding: var(--sp-8);
+}
+.sch-headcount-head,
+.sch-headcount-row {
+  display: grid;
+  grid-template-columns: 4rem 1fr 1fr 3.5rem;
+  gap: var(--sp-8);
+  align-items: center;
+}
+.sch-headcount-head {
+  position: sticky; top: calc(var(--sp-8) * -1); z-index: 1;
+  background: var(--c-surface-canvas);
+  padding: var(--sp-4) 0;
+  font-size: var(--fs-sm); color: var(--c-ink-secondary);
+}
+.sch-headcount-label { font-weight: var(--fw-bold); }
+.sch-headcount-input {
+  height: var(--tap-min); min-width: 0; padding: 0 var(--sp-8);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-card); color: var(--c-ink-primary);
+  font: inherit; font-size: var(--fs-md);
+}
+.sch-headcount-input:focus-visible { outline: 2px solid var(--c-brand-violet-600); outline-offset: 1px; }
+.sch-headcount-row[data-bad='true'] .sch-headcount-input { border-color: var(--c-danger-600); }
+/* Второй пол не вводится — он разность, и показывать его полем значило бы
+   предложить ввести число, которое всё равно будет пересчитано. */
+.sch-headcount-rest { font-size: var(--fs-sm); color: var(--c-ink-secondary); text-align: right; }
+
+/* ─── 1.2.0: дневник (S-90/S-91) — переключатели-чипы ─── */
+.sch-chip {
+  border: 1px solid var(--c-border-default);
+  background: var(--c-surface-card);
+  color: var(--c-ink-primary);
+  border-radius: var(--r-lg);
+  padding: var(--sp-8) var(--sp-12);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  /* тап-мишень ≥44px (G-55) — правило одно на обе раскладки */
+  min-height: 44px;
+}
+.sch-chip--active {
+  border-color: var(--c-brand-violet-700);
+  background: var(--c-brand-violet-050);
+  font-weight: var(--fw-medium);
+}
+/* строки дневника — не кликабельные, курсор наследуется */
+[data-testid="S-90.day"] .sch-table tbody tr,
+[data-testid="S-91.table"] .sch-table tbody tr { cursor: default; }
+
+/* ─── S-00 · лендинг (правка владельца 2026-08-30: лендинг + модалка входа) ─── */
+.sch-landing { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: var(--sp-40); padding: var(--sp-24); background: var(--c-surface-page); }
+.sch-landing-top { width: 100%; max-width: 1200px; display: flex; align-items: center; justify-content: space-between; }
+.sch-landing .sch-hero { margin-top: var(--sp-40); }
+.sch-landing .sch-hero h1 { font-size: var(--fs-h1); }
+.sch-landing-cards { width: 100%; max-width: 1200px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-24); }
+.sch-landing-cards h3 { margin: 0 0 var(--sp-8); }
+.sch-landing-note { margin-top: auto; padding-bottom: var(--sp-24); text-align: center; }
+@media (max-width: 720px) {
+  .sch-landing { gap: var(--sp-24); }
+  .sch-landing-cards { grid-template-columns: 1fr; gap: var(--sp-12); }
+  .sch-landing .sch-hero { margin-top: var(--sp-12); }
+}
+
+/* ─── Премиальный минимум лендинга и дневника (правка владельца 2026-08-30) ─── */
+.sch-landing { justify-content: flex-start; background: linear-gradient(160deg, var(--c-brand-violet-050) 0%, #FFFFFF 45%, var(--c-brand-pink-050) 100%); }
+.sch-landing .sch-hero { margin: auto 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-20); }
+.sch-landing .sch-hero h1 { font-family: var(--font-display); font-size: clamp(44px, 8vw, 72px); line-height: 1.04; margin: 0; letter-spacing: -0.02em; }
+.sch-hero-accent { background: linear-gradient(90deg, var(--c-brand-violet-600), var(--c-brand-pink-500)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sch-landing .sch-hero p { margin: 0; font-size: var(--fs-lg); color: var(--c-ink-secondary); letter-spacing: 0.04em; }
+.sch-landing .sch-hero .sch-btn { min-width: 220px; min-height: 52px; font-size: var(--fs-lg); border-radius: var(--r-pill); box-shadow: 0 8px 24px rgba(123,58,237,0.35); }
+
+.sch-daystrip { display: flex; gap: var(--sp-8); align-items: center; overflow-x: auto; padding-bottom: var(--sp-4); }
+.sch-daychip {
+  min-width: 52px; min-height: 60px; border-radius: var(--r-lg);
+  border: 1px solid var(--c-border-default); background: var(--c-surface-card);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font: inherit; cursor: pointer; color: var(--c-ink-primary);
+}
+.sch-daychip small { color: var(--c-ink-muted); font-size: var(--fs-xs); text-transform: capitalize; }
+.sch-daychip--active { background: var(--c-brand-violet-600); border-color: var(--c-brand-violet-600); color: var(--c-ink-on-violet); box-shadow: 0 6px 16px rgba(123,58,237,0.30); }
+.sch-daychip--active small { color: rgba(255,255,255,0.75); }
+.sch-weeknav { min-width: var(--tap-min); min-height: 60px; border-radius: var(--r-lg); border: none; background: transparent; color: var(--c-ink-muted); font-size: var(--fs-xl); cursor: pointer; }
+.sch-weeknav:disabled { opacity: 0.3; cursor: default; }
+
+.sch-lesson { display: flex; align-items: center; gap: var(--sp-16); padding: var(--sp-16); border-radius: var(--r-card); background: var(--c-surface-card); box-shadow: var(--sh-card); }
+.sch-lesson-no {
+  width: 44px; height: 44px; border-radius: var(--r-md); flex: none;
+  background: var(--c-brand-violet-050); color: var(--c-brand-violet-700);
+  display: flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); font-size: var(--fs-lg);
+}
+.sch-lesson-body { flex: 1; min-width: 0; }
+.sch-lesson-body b { display: block; font-size: var(--fs-md); }
+.sch-lesson-body span { color: var(--c-ink-muted); font-size: var(--fs-sm); overflow: hidden; text-overflow: ellipsis; display: block; white-space: nowrap; }
+
+/* времена уроков и перемены (правка владельца 2026-08-30: как в референсе) */
+.sch-lesson-time { flex: none; width: 52px; display: flex; flex-direction: column; font-variant-numeric: tabular-nums; }
+.sch-lesson-time b { font-size: var(--fs-md); }
+.sch-lesson-time span { color: var(--c-ink-muted); font-size: var(--fs-sm); }
+.sch-weekbar { display: flex; align-items: center; justify-content: space-between; }
+.sch-weekrange { font-weight: var(--fw-semibold); }
+.sch-break { text-align: center; color: var(--c-ink-muted); font-size: var(--fs-xs); padding: var(--sp-4) 0; }

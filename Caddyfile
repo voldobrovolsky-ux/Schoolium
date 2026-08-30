@@ -1,0 +1,6 @@
+# Caddy — авто-HTTPS (Let's Encrypt). Терминирует TLS, проксирует на web.
+# Домен берётся из SITE_DOMAIN в .env.prod — файл не привязан к одному стенду.
+{$SITE_DOMAIN} {
+	encode gzip
+	reverse_proxy web:80
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Schoolium",
+  "short_name": "Schoolium",
+  "description": "Школа целиком: классы и контингент, предметы, персонал, расписание и журнал.",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#6427C9",
+  "icons": [
+    { "src": "/icons/schoolium-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/schoolium-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/schoolium-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
