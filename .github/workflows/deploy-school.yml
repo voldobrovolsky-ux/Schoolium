@@ -103,7 +103,7 @@ jobs:
       - name: Проверка изнутри (API отвечает)
         if: inputs.action == 'deploy'
         run: |
-          $SSH_CMD 'sleep 5; code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/v1/health || true);
+          $SSH_CMD 'sleep 5; code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/healthz || true);
             echo "API /health: $code";
             docker compose -f ~/schoolium/docker-compose.prod.yml --env-file ~/schoolium/.env.prod logs --tail=20 api'
 
