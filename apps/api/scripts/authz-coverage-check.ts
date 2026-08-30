@@ -89,14 +89,17 @@ async function main() {
         const basePath = Reflect.getMetadata(PATH_METADATA, ctor) ?? '';
         const route = `${M[method]} /${String(basePath)}/${String(path)}`.replace(/\/+/g, '/');
         const key = `${ctor.name}.${name}`;
-        const perm: string | undefined =
+        // Право роута — код ЛИБО список «любое из» (AR-174: нагрузка открыта и
+        // строителю расписания, и завучу); каждый код списка проверяется отдельно.
+        const permRaw: string | string[] | undefined =
           Reflect.getMetadata(REQUIRE_PERMISSION, handler) ?? Reflect.getMetadata(REQUIRE_PERMISSION, ctor);
+        const perms: string[] = permRaw === undefined ? [] : Array.isArray(permRaw) ? permRaw : [permRaw];
         const isPublic: boolean =
           (Reflect.getMetadata(IS_PUBLIC, handler) ?? Reflect.getMetadata(IS_PUBLIC, ctor)) === true;
 
-        if (perm) {
-          usedCodes.add(perm);
-          gated.push(`${route} → ${perm}`);
+        if (perms.length > 0) {
+          for (const p of perms) usedCodes.add(p);
+          gated.push(`${route} → ${perms.join(' | ')}`);
         } else if (WHITELIST[key]) {
           seenWhitelistKeys.add(key);
           whitelisted.push(`${route} — ${WHITELIST[key]}`);
