@@ -844,6 +844,16 @@ export interface AdminCabinetDto {
   audit: AuditEntryDto[];
 }
 
+// ─────────────────────────── витрина школ (S-92, AR-163) ───────────────────────────
+
+/** Карточка школы на публичном лендинге — ровно эти четыре поля, ничего сверх. */
+export interface SchoolDirectoryEntryDto {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  memberCount: number;
+}
+
 // ─────────────────────────── сессии и устройства ───────────────────────────
 
 export interface SessionDto {

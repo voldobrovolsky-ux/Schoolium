@@ -37,7 +37,7 @@ if (!fs.existsSync(WEB)) { console.log('Контура Schoolium на фронт
 // Ведётся руками намеренно: она и есть утверждение о том, где живёт экран.
 const HOME = {
   'S-00': ['screens/auth.tsx'], 'S-01': ['screens/auth.tsx'], 'S-03': ['screens/auth.tsx'],
-  'S-04': ['screens/auth.tsx'], 'S-05': ['screens/auth.tsx'],
+  'S-04': ['screens/auth.tsx'], 'S-05': ['screens/auth.tsx'], 'S-92': ['screens/auth.tsx'],
   'S-10': ['screens/classes.tsx'], 'S-11': ['screens/classes.tsx'],
   'S-12': ['screens/classes.tsx'], 'S-13': ['screens/classes.tsx'],
   'S-20': ['screens/subjects.tsx'], 'S-21': ['screens/subjects.tsx'], 'S-22': ['screens/subjects.tsx'],

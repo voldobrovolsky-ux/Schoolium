@@ -23,7 +23,7 @@ export interface Route {
 export const APP_PREFIXES = ["/classes", "/subjects", "/staff", "/guardians", "/schedule", "/journal", "/diary", "/admin", "/scan", "/settings", "/link", "/bind"];
 
 /** Публичные маршруты контура входа — показываются БЕЗ оболочки (§2.3). */
-export const PUBLIC_PATHS = ["/", "/login", "/login/code", "/join", "/bootstrap"];
+export const PUBLIC_PATHS = ["/", "/schools", "/login", "/login/code", "/join", "/bootstrap"];
 
 export function parse(pathname: string, search: string): Route {
   const query = new URLSearchParams(search);

@@ -213,6 +213,9 @@
 /* Карточки классов — 4 в ряд, предметов — 3 в ряд (`60-design.md` §2). */
 .sch-cards--4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-24); }
 .sch-cards--3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-24); }
+/* Витрина школ (`S-92`) — число карточек заранее не фиксировано, в отличие
+   от классов/предметов, поэтому колонки не заданы жёстко. */
+.sch-cards--auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-24); }
 
 .sch-progress { height: 4px; border-radius: var(--r-pill); background: var(--c-state-disabled-bg); margin-top: var(--sp-12); overflow: hidden; }
 .sch-progress > span { display: block; height: 100%; background: var(--c-brand-violet-500); }

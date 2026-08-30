@@ -11,9 +11,9 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { ACCESS_PARAMS, safeNext } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
-import { Button, Field, Modal } from "../ui";
+import { Avatar, Button, EmptyState, ErrorState, Field, Modal, Skeletons } from "../ui";
 import { CameraDenied, hasCamera, parseQr, QrCamera } from "../qr";
-import { useIsMobile, usePolling } from "../hooks";
+import { useAsync, useIsMobile, usePolling } from "../hooks";
 import { navigate } from "../router";
 
 /**
@@ -73,7 +73,6 @@ function AuthFrame({ children }: { children: React.ReactNode }) {
 // ─────────────────────────── S-00 · лендинг ───────────────────────────
 
 export function LandingScreen({ authed, startScreen }: { authed: boolean; startScreen: string }) {
-  const [loginOpen, setLoginOpen] = useState(false);
   return (
     <div className="sch sch-landing">
       <header className="sch-landing-top">
@@ -91,12 +90,57 @@ export function LandingScreen({ authed, startScreen }: { authed: boolean; startS
           <span className="sch-hero-accent">в одном месте</span>
         </h1>
         <p>Дневник · Журнал · Расписание</p>
-        <Button kind="primary" testId="S-00.btn.login" onClick={() => (authed ? navigate(startScreen) : setLoginOpen(true))}>
+        <Button kind="primary" testId="S-00.btn.login" onClick={() => navigate(authed ? startScreen : "/schools")}>
           Войти
         </Button>
       </div>
+    </div>
+  );
+}
 
-      {loginOpen ? <LoginModal onClose={() => setLoginOpen(false)} /> : null}
+// ─────────────────────────── S-92 · витрина школ ───────────────────────────
+
+/**
+ * Экран между лендингом и входом (AR-163): выбор школы карточкой — аватар,
+ * название, число участников. Клик по карточке ведёт на `/login` (`S-01`) —
+ * тот уже несёт QR, код и пароль; карточка ничего не выбирает технически
+ * (QR/код сами несут свою школу), это витрина, а не гейт (v1-упрощение).
+ */
+export function SchoolDirectoryScreen() {
+  const [state, reload] = useAsync(() => api.schools());
+
+  return (
+    <div className="sch sch-landing">
+      <header className="sch-landing-top">
+        <div className="sch-logo" data-testid="S-92.logo">
+          Schoolium
+        </div>
+      </header>
+      <div className="sch-stack" data-testid="S-92">
+        <h1>Выберите школу</h1>
+        {state.status === "loading" ? <Skeletons count={4} /> : null}
+        {state.status === "error" ? <ErrorState message={state.message} onRetry={reload} /> : null}
+        {state.status === "ready" && state.data.length === 0 ? (
+          <EmptyState title="Пока нет ни одной школы" testId="S-92.empty" />
+        ) : null}
+        {state.status === "ready" && state.data.length > 0 ? (
+          <div className="sch-cards--auto" data-testid="S-92.list">
+            {state.data.map((school) => (
+              <button
+                key={school.id}
+                type="button"
+                className="sch-card sch-card--clickable"
+                data-testid="S-92.card"
+                onClick={() => navigate("/login")}
+              >
+                <Avatar name={school.name} url={school.logoUrl} large />
+                <div className="sch-card-title">{school.name}</div>
+                <div className="sch-card-sub">{school.memberCount} участников</div>
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

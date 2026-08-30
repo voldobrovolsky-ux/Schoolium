@@ -31,6 +31,7 @@ import type {
   MarkValue,
   MeDto,
   SchedulePreviewDto,
+  SchoolDirectoryEntryDto,
   SchoolRole,
   SessionDto,
   SetLoadDto,
@@ -109,6 +110,8 @@ export const api = {
   consumeBootstrap: (token: string) =>
     call<{ ok: boolean; startScreen: string }>("POST", `${V1}/auth/bootstrap/consume`, { token }),
   sessions: () => call<SessionDto[]>("GET", `${V1}/auth/sessions`),
+  // `S-92` (AR-163): витрина школ на лендинге — публично, без сессии.
+  schools: () => call<SchoolDirectoryEntryDto[]>("GET", `${V1}/schools`),
   endSession: (sid: string) => call<{ ok: boolean }>("DELETE", `${V1}/auth/sessions/${sid}`),
 
   // ─── контингент ───

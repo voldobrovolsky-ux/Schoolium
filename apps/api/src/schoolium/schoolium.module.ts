@@ -8,6 +8,7 @@ import { AccessService } from './access/access.service';
 import { AccountsService } from './access/accounts.service';
 import { DiaryService } from './diary/diary.service';
 import { MeController, SchoolAuthController } from './access/access.controller';
+import { SchoolsDirectoryController } from './access/schools-directory.controller';
 import { ContingentContractService, ContingentService } from './contingent/contingent.service';
 import { SubjectsContractService, SubjectsService } from './subjects/subjects.service';
 import { StaffService } from './staff/staff.service';
@@ -45,6 +46,7 @@ import {
   imports: [PrismaModule, EventsModule, AuthzModule, AuditModule],
   controllers: [
     SchoolAuthController,
+    SchoolsDirectoryController,
     MeController,
     ClassesController,
     StudentsController,

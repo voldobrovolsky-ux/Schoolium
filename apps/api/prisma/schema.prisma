@@ -152,6 +152,7 @@ model Workspace {
   worknetId         String? // nullable: школа максимум в одной сети (контейнер, не many-to-many)
   worknet           Worknet?     @relation(fields: [worknetId], references: [id])
   name              String
+  logoUrl           String? // витрина школ на лендинге (AR-163); без него — инициалы на фронте
   sector            String       @default("private") // §3.7 private | state (152-ФЗ §6.5)
   status            String       @default("active")
   memberships       Membership[]

@@ -14,7 +14,7 @@ import { SessionProvider, useSession } from "./session";
 import { isAppPath, navigate, useRoute } from "./router";
 import { Shell } from "./shell";
 import { Skeletons } from "./ui";
-import { BootstrapScreen, JoinScreen, LandingScreen, LoginCodeScreen, LoginScreen, PhotoScreen } from "./screens/auth";
+import { BootstrapScreen, JoinScreen, LandingScreen, LoginCodeScreen, LoginScreen, PhotoScreen, SchoolDirectoryScreen } from "./screens/auth";
 import { ClassScreen, ClassesScreen } from "./screens/classes";
 import { SubjectsScreen } from "./screens/subjects";
 import { StaffScreen } from "./screens/staff";
@@ -50,6 +50,14 @@ function Routes() {
   const authed = state.status === "authed";
 
   // ─── публичный контур входа: без оболочки (§2.3) ───
+  if (path === "/schools") {
+    // Вошедший на витрину школ не выбирает заново — он уже внутри (AR-95).
+    if (authed) {
+      navigate(state.me.startScreen);
+      return null;
+    }
+    return <SchoolDirectoryScreen />;
+  }
   if (path === "/join/:token") return <JoinScreen token={params.token} />;
   if (path === "/join/:token/photo") return <PhotoScreen />;
   if (path === "/bootstrap/:token") return <BootstrapScreen token={params.token} />;
