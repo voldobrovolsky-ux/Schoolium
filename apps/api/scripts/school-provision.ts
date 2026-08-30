@@ -106,7 +106,8 @@ async function main(): Promise<void> {
   }
 
   const members = await prisma.membership.findMany({ where: { workspaceId: ws.id, florusRole: 'staff' } });
-  const users = await prisma.user.findMany({ where: { id: { in: members.map((m) => m.userId) } } });
+  const memberIds = members.map((m) => m.userId).filter((x): x is string => x !== null);
+  const users = await prisma.user.findMany({ where: { id: { in: memberIds } } });
   const out: string[] = [`Школа: ${ws.name} (workspace ${ws.id})`, `Персонал с учётками (${members.length}):`];
   for (const m of members) {
     const u = users.find((x) => x.id === m.userId);
