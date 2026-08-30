@@ -336,10 +336,17 @@ async function main() {
     await click(page, 'S-00.btn.login');
     await page.waitForSelector('[data-testid="S-92"]');
     await hasAll(page, ['S-92.logo']);
-    // база смока в этой точке пуста — витрина честно говорит об этом
-    await page.waitForSelector('[data-testid="S-92.empty"]');
-    console.log('    ✅ пустая база → S-92.empty, а не вечный скелетон');
+    // Школа смока заведена bootstrap-ом ДО старта браузера — витрина несёт её
+    // карточку (первая редакция этого шага ждала S-92.empty и была неправа).
+    await page.waitForSelector('[data-testid="S-92.card"]');
+    const schoolCards = await page.locator('[data-testid="S-92.card"]').count();
+    if (schoolCards === 1) console.log('    ✅ витрина несёт ровно одну школу смока');
+    else { console.error(`    ❌ карточек школ: ${schoolCards}, ждали 1`); failures++; }
     await shot(page, 'S-92-school-directory');
+    // Клик по карточке — навигация на общий вход (AR-163: витрина — не гейт).
+    await click(page, 'S-92.card');
+    await page.waitForSelector(MOBILE ? '[data-testid="S-01.caption"]' : '[data-testid="S-01.qr"]');
+    console.log('    ✅ карточка школы ведёт на вход S-01');
 
     // ── S-01 · вход по QR (аноним): страница выдаёт код и ждёт скан ──
     console.log('▶ S-01 · вход');
