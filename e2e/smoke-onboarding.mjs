@@ -1026,9 +1026,21 @@ async function main() {
       await page.waitForSelector('[data-testid="S-21.btn.deleteSubject"]', { timeout: 20_000 });
       await page.locator('[data-testid="S-21.btn.deleteSubject"]').click();
       await page.waitForSelector('[data-testid="M-04"]', { state: 'detached', timeout: 20_000 });
+      // Событие уезжает через outbox (воркер раз в 2 с), а экран не обновляет
+      // себя сам: на медленной машине страница успевает отрендериться ДО
+      // события. Ожидание — честным опросом с перезагрузкой, а не одной гонкой.
       await page.goto(`${WEB}/schedule`);
-      await page.waitForSelector('[data-testid="S-40.banner.stale"]', { timeout: 30_000 });
-      await hasAll(page, ['S-40.banner.stale', 'S-40.btn.regenerate']);
+      let staleUp = false;
+      for (let i = 0; i < 15 && !staleUp; i++) {
+        await page.waitForSelector('[data-testid="S-40.grid.week"], [data-testid="S-40.banner.stale"]', { timeout: 20_000 });
+        staleUp = (await page.locator('[data-testid="S-40.banner.stale"]').count()) > 0;
+        if (!staleUp) {
+          await page.waitForTimeout(2000);
+          await page.reload();
+        }
+      }
+      if (!staleUp) { console.error('    ❌ плашка «устарело» не поднялась за 30 с после удаления предмета'); failures++; }
+      else await hasAll(page, ['S-40.banner.stale', 'S-40.btn.regenerate']);
       await shot(page, 'S-40-stale');
 
       // ── M-14 · выход из настройки с введёнными данными спрашивает подтверждение ──
