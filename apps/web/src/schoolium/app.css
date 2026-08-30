@@ -800,7 +800,7 @@
 }
 
 /* ─── Премиальный минимум лендинга и дневника (правка владельца 2026-08-30) ─── */
-.sch-landing { justify-content: flex-start; background: linear-gradient(160deg, var(--c-brand-violet-050) 0%, #FFFFFF 45%, var(--c-brand-pink-050) 100%); }
+.sch-landing { justify-content: flex-start; background: linear-gradient(160deg, var(--c-brand-violet-050) 0%, var(--c-surface-page) 45%, var(--c-brand-pink-050) 100%); }
 .sch-landing .sch-hero { margin: auto 0; display: flex; flex-direction: column; align-items: center; gap: var(--sp-20); }
 .sch-landing .sch-hero h1 { font-family: var(--font-display); font-size: clamp(44px, 8vw, 72px); line-height: 1.04; margin: 0; letter-spacing: -0.02em; }
 .sch-hero-accent { background: linear-gradient(90deg, var(--c-brand-violet-600), var(--c-brand-pink-500)); -webkit-background-clip: text; background-clip: text; color: transparent; }

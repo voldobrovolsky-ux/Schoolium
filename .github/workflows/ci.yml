@@ -1,9 +1,9 @@
 name: CI
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main, work-line, "claude/**"]
   pull_request:
-    branches: [main]
+    branches: [main, work-line]
 
 jobs:
   build:
@@ -50,6 +50,23 @@ jobs:
         run: node tools/design/tokens-to-css.mjs --check
       - name: G-52 — экранный реестр реализован поимённо
         run: node tools/method/check-testids.mjs
+
+  # Слой качества расписания (G-56…G-63): чистые функции, без БД и сети.
+  # Раскладка по джобам задокументирована в docs/G-CHECKS.md.
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install
+        run: npm install
+      - name: Prisma generate
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: G-56…G-63 — слой качества расписания одним прогоном
+        run: npm --workspace apps/api run quality:check
 
   # Сквозной поток «учебник → КТП → КПП → содержание уроков»:
   # flow:check — интеграционные проверки на живом Postgres (25 шт.);

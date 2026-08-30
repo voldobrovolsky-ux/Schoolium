@@ -16,6 +16,8 @@
 # печатаются в лог приватного репозитория — ссылка живёт 24 ч, пароль оператора
 # после события стоит перевыпустить с карточки.
 name: deploy-school
+permissions:
+  contents: write # теги деплоя (deploy/<дата>, deploy-current/previous) ставит сам workflow
 on:
   workflow_dispatch:
     inputs:
@@ -110,6 +112,34 @@ jobs:
           $SSH_CMD 'sleep 5; code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/healthz || true);
             echo "API /health: $code";
             docker compose -f ~/schoolium/docker-compose.prod.yml --env-file ~/schoolium/.env.prod logs --tail=20 api'
+
+      # Снапшоты деплоя (решение владельца 2026-08-30, вместо веток-копий): после
+      # зелёного health-check workflow сам ставит неизменяемый тег
+      # deploy/<дата>-run<N> на задеплоенный коммит и передвигает алиасы
+      # deploy-current / deploy-previous. Руками теги не двигаются; откат =
+      # запуск этого workflow с предыдущим тегом (Use workflow from → тег).
+      - name: Тег деплоя + алиасы deploy-current / deploy-previous
+        if: inputs.action == 'deploy'
+        run: |
+          code=$($SSH_CMD 'curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/healthz || true')
+          if [ "$code" != "200" ]; then echo "healthz=$code — деплой не подтверждён, тег не ставится"; exit 1; fi
+          git config user.name  "deploy-school"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch --tags --force --quiet origin
+          stamp=$(date -u +%Y%m%d-%H%M)
+          tag="deploy/${stamp}-run${{ github.run_number }}"
+          git tag -a "$tag" -m "Деплой ${stamp} UTC (run ${{ github.run_number }}) с ${{ github.ref_name }} @ ${GITHUB_SHA}"
+          old=$(git rev-parse -q --verify 'refs/tags/deploy-current^{commit}' || true)
+          if [ -n "$old" ] && [ "$old" != "$GITHUB_SHA" ]; then
+            git tag -f deploy-previous "$old"
+          fi
+          git tag -f deploy-current "$GITHUB_SHA"
+          git push --quiet origin "refs/tags/$tag"
+          git push --quiet -f origin refs/tags/deploy-current
+          if git rev-parse -q --verify refs/tags/deploy-previous >/dev/null; then
+            git push --quiet -f origin refs/tags/deploy-previous
+          fi
+          echo "Тег: $tag; deploy-current → ${GITHUB_SHA}; deploy-previous → ${old:-'(первый деплой, не ставился)'}"
 
       - name: Завести школу и оператора (bootstrap)
         if: inputs.action == 'bootstrap' && inputs.relink != 'true'
