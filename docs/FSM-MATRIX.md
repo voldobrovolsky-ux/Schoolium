@@ -4,20 +4,25 @@
 > `состояние → (входы, выходы, дом-экран, терминал?)`. Пустая ячейка или «—» с
 > пометкой ⚠ = дыра, видимая перечислением, а не чтением кода. Ссылки АР-N —
 > на блочные реестры [docs/ar/](./ar/INDEX.md). Дыры сведены в конец документа.
+>
+> **Правка 2026-08-30:** имена событий КТП/КПП приведены к текущему канону
+> событий (`<домен>.<агрегат>.<глаголПрош>.v<N>`, запрет `edustore.*` — G-16,
+> AR-23/24); актуальный каталог литералов — в коде и `docs/ar/events.md`, эта
+> матрица описывает только полноту переходов состояний, не канон имён.
 
 ## 1. `Ktp` (календарно-тематический план) — `KtpStatus`
 
 | Состояние | Вход | Выход | Дом-экран | Терминал? |
 |---|---|---|---|---|
 | `draft` | автогенерация из `textbook.parsed` (`ktp.generated`, часы `hoursSource='estimated'`); дополнение при повторной загрузке; ручная правка темы `POST edu/ktp/topics/:id` (снимает флаг оценки); ⚠ ручное создание КТП без учебника не определено (AR-38) | `approve` → `approved` (завуч, `planning.ktp.approve`) | KtpApprovalScreen (завуч, бейдж «оценка парсера») | нет |
-| `approved` | `approve` + событие `edustore.ktp.approved` → триггерит Solver | повторный `textbook.parsed` → НОВАЯ draft-версия (утверждённая не трогается); ⚠ прямой возврат approved→draft не определён | KtpApprovalScreen | да (де-факто) |
+| `approved` | `approve` + событие `planning.ktp.approved.v1` → триггерит Solver | повторный `textbook.parsed` → НОВАЯ draft-версия (утверждённая не трогается); ⚠ прямой возврат approved→draft не определён | KtpApprovalScreen | да (де-факто) |
 
 ## 2. `Kpp` (календарно-поурочный план) — `KppStatus`
 
 | Состояние | Вход | Выход | Дом-экран | Терминал? |
 |---|---|---|---|---|
 | `scheduled` | Solver `generateKpp` (по `ktp.approved`); отказы: `NO_APPROVED_KTP`, `NO_TIMETABLE`, `INSUFFICIENT_SLOTS`, `KPP_IN_USE` | `approve` → `approved` (завуч); пересборка Solver'ом (сносит КПП+уроки, только пока все уроки idle) | KtpApprovalScreen | нет |
-| `approved` | `approve` + `edustore.kpp.approved` → открывает гейт `lesson.start` | ⚠ отзыв утверждения не определён; пересборка заблокирована `KPP_IN_USE` при не-idle уроках | KtpApprovalScreen | да (де-факто) |
+| `approved` | `approve` + `planning.kpp.approved.v1` → открывает гейт `lesson.start` | ⚠ отзыв утверждения не определён; пересборка заблокирована `KPP_IN_USE` при не-idle уроках | KtpApprovalScreen | да (де-факто) |
 
 ## 3. `Lesson` — `LessonState` (+ `phase` внутри running)
 

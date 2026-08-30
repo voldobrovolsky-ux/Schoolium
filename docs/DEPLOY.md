@@ -8,7 +8,7 @@
 
 ```bash
 git clone <repo> schoolium && cd schoolium
-git checkout claude/schoolium-foundation-architecture-6jqc6q
+git checkout main
 cp .env.prod.example .env.prod && $EDITOR .env.prod   # POSTGRES_PASSWORD, SITE_DOMAIN, WEB_ORIGIN
 
 # стек: postgres + api + web + Caddy(авто-SSL). ASR не собирается.
@@ -105,7 +105,7 @@ Docker (`pgdata`), а не в папке с кодом, поэтому школ�
 
 ```bash
 cd ~ && rm -rf schoolium              # только папка с кодом — контейнеры и том не трогает
-git clone <repo> schoolium && cd schoolium && git checkout claude/schoolium-foundation-architecture-6jqc6q
+git clone <repo> schoolium && cd schoolium && git checkout main
 cp ~/.env.prod .env.prod              # ваш прежний .env.prod, не пример — в нём пароль от той же базы
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 ```
@@ -140,7 +140,7 @@ docker compose -f docker-compose.prod.yml exec -T postgres \
 scp schoolium-*.dump .env.prod user@новый-сервер:~/
 
 # 3. На НОВОМ сервере — поднять стек и залить дамп
-git clone <repo> schoolium && cd schoolium && git checkout claude/schoolium-foundation-architecture-6jqc6q
+git clone <repo> schoolium && cd schoolium && git checkout main
 cp ~/.env.prod .   # правим только SITE_DOMAIN и WEB_ORIGIN, если домен меняется
 docker compose -f docker-compose.prod.yml --env-file .env.prod --profile caddy up -d --build
 
