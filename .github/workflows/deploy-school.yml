@@ -37,6 +37,10 @@ on:
         description: 'bootstrap: Фамилия Имя оператора'
         required: false
         default: ''
+      relink:
+        description: 'bootstrap: true — не заводить школу заново, а перевыпустить одноразовую ссылку входа (24ч) для СУЩЕСТВУЮЩЕГО модератора по phone'
+        required: false
+        default: 'false'
       workspace:
         description: 'import: workspace id (печатает bootstrap)'
         required: false
@@ -108,10 +112,19 @@ jobs:
             docker compose -f ~/schoolium/docker-compose.prod.yml --env-file ~/schoolium/.env.prod logs --tail=20 api'
 
       - name: Завести школу и оператора (bootstrap)
-        if: inputs.action == 'bootstrap'
+        if: inputs.action == 'bootstrap' && inputs.relink != 'true'
         run: |
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run school:bootstrap -- --phone='${{ inputs.phone }}' --school='${{ inputs.school }}' --name='${{ inputs.opname }}'"
+
+      # Не заводит школу заново — только перевыпускает 24ч-ссылку для уже
+      # существующего модератора (AR-93, дополнение 2026-08-21): «единственный
+      # модератор потерял телефон/сессию» решается платформой, без пароля.
+      - name: Перевыпустить ссылку входа существующему модератору (relink)
+        if: inputs.action == 'bootstrap' && inputs.relink == 'true'
+        run: |
+          $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            npm run school:bootstrap -- --phone='${{ inputs.phone }}' --relink"
 
       - name: Залить данные школы (import)
         if: inputs.action == 'import'

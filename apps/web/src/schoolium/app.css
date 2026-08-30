@@ -424,7 +424,9 @@
 
 /* ─────────────────────────── контур входа (без оболочки, §2.3) ─────────────────────────── */
 
-.sch-auth { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-24); padding: var(--sp-24); background: var(--c-surface-page); }
+/* `height`+`overflow-y:auto` — см. пояснение у `.sch-landing` выше: тот же баг
+   на любом экране контура входа (`/login`, `/login/code`, `/join`, `/bootstrap`). */
+.sch-auth { height: 100vh; overflow-y: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-24); padding: var(--sp-24); background: var(--c-surface-page); }
 .sch-auth-card { width: 420px; max-width: 100%; }
 .sch-auth-card--wide { width: 480px; }
 .sch-qr { display: flex; flex-direction: column; align-items: center; gap: var(--sp-12); }
@@ -780,7 +782,11 @@
 [data-testid="S-91.table"] .sch-table tbody tr { cursor: default; }
 
 /* ─── S-00 · лендинг (правка владельца 2026-08-30: лендинг + модалка входа) ─── */
-.sch-landing { min-height: 100vh; display: flex; flex-direction: column; align-items: center; gap: var(--sp-40); padding: var(--sp-24); background: var(--c-surface-page); }
+/* `height` + `overflow-y: auto`, не `min-height`: глобальный `body{overflow:hidden}`
+   (design/styles.css, легаси-кабинет с фиксированным вьюпортом) иначе делает контент
+   выше окна недостижимым — ни колесом, ни свайпом (тот же класс бага, что у
+   `.sch-sidebar` выше). */
+.sch-landing { height: 100vh; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: var(--sp-40); padding: var(--sp-24); background: var(--c-surface-page); }
 .sch-landing-top { width: 100%; max-width: 1200px; display: flex; align-items: center; justify-content: space-between; }
 .sch-landing .sch-hero { margin-top: var(--sp-40); }
 .sch-landing .sch-hero h1 { font-size: var(--fs-h1); }
