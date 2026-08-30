@@ -279,6 +279,10 @@ export function LoginScreen({ next }: { next: string | null }) {
             Войти по коду от модератора
           </Button>
           <PasswordLoginBlock next={next} />
+          {/* Тупик назван честно (AR-92, G-44): без якоря и модератора входа нет — и написано, к кому идти. */}
+          <p className="sch-muted" data-testid="S-01.note.help">
+            Первый раз здесь? Доступ выдаёт модератор школы
+          </p>
         </div>
       </AuthFrame>
     );
@@ -316,6 +320,9 @@ export function LoginScreen({ next }: { next: string | null }) {
               Нет телефона под рукой? Войти по коду от модератора
             </Button>
             <PasswordLoginBlock next={next} />
+            <p className="sch-muted" data-testid="S-01.note.help">
+              Первый раз здесь? Доступ выдаёт модератор школы
+            </p>
           </>
         )}
       </div>
