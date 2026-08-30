@@ -6,7 +6,12 @@ import {
   schoolDayCap,
   type ConfirmScheduleDto,
   type DayParamsDto,
+  type DaySkeletonDto,
+  type GridKind,
   type SchedulePreviewDto,
+  type SetSkeletonDto,
+  type SkeletonKind,
+  type SkeletonPositionDto,
   type SetLoadDto,
   type SetPrioritiesDto,
   type TemplateSlotDto,
@@ -400,6 +405,7 @@ export class ScheduleService implements OnModuleInit {
           }),
       ),
     ];
+    const skel = await this.skeleton();
     return {
       templateId: tpl.id,
       seed: tpl.seed,
@@ -411,11 +417,125 @@ export class ScheduleService implements OnModuleInit {
         bigBreakAfter: tpl.bigBreakAfter,
         bigBreakMin: tpl.bigBreakMin,
       },
+      skeleton: skel.positions.length ? skel.positions : null,
+      gridKind: skel.gridKind,
       slots,
       priorityWarnings,
       willDetach,
       version: reg.scheduleVersion,
     };
+  }
+
+  // ─────────────── скелет дня (AR-171, УТЦ v1.4 фаза I) ───────────────
+
+  /** `GET /v1/schedule/skeleton` — скелет школы; пустой список = фолбэк на grid. */
+  async skeleton(): Promise<DaySkeletonDto> {
+    const ws = TenantContext.require();
+    const [rows, reg] = await Promise.all([
+      this.prisma.skeletonPosition.findMany({ where: { workspaceId: ws }, orderBy: [{ dayNo: 'asc' }, { posNo: 'asc' }] }),
+      this.state.register(),
+    ]);
+    const st = await this.prisma.schoolState.findUnique({ where: { workspaceId: ws }, select: { gridKind: true } });
+    return {
+      gridKind: (st?.gridKind as GridKind) ?? 'paired',
+      positions: rows.map((r) => ({
+        dayNo: r.dayNo,
+        posNo: r.posNo,
+        kind: r.kind as SkeletonKind,
+        title: r.title,
+        startMin: r.startMin,
+        endMin: r.endMin,
+        lessonNo: r.lessonNo,
+        pairNo: r.pairNo,
+      })),
+      version: reg.scheduleVersion,
+    };
+  }
+
+  /**
+   * `PUT /v1/schedule/skeleton` — школа вводит времена сама, дефолтов нет
+   * (решение владельца №10). Отказы — именованные `SKELETON_INVALID` с причиной
+   * СЛОВАМИ. Правило спаренной сетки (AR-171): части одной пары смежны, перемены
+   * внутри пары нет; проверяется здесь, а не доверяется клиенту.
+   */
+  async setSkeleton(dto: SetSkeletonDto, actor: SchoolActor) {
+    await this.state.checkVersion('schedule', dto.version);
+    const ws = TenantContext.require();
+    if (dto.gridKind !== 'paired' && dto.gridKind !== 'variable') {
+      throw new SchoolError('SKELETON_INVALID', { reason: `неизвестный вид сетки «${dto.gridKind}»` });
+    }
+    const byDay = new Map<number, SkeletonPositionDto[]>();
+    for (const p of dto.positions) {
+      if (p.dayNo < 0 || p.dayNo > 6) throw new SchoolError('SKELETON_INVALID', { reason: `день ${p.dayNo} вне недели` });
+      if (!['lesson', 'meal', 'event'].includes(p.kind)) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `неизвестный тип позиции «${p.kind}»` });
+      }
+      if (p.endMin <= p.startMin) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `позиция ${p.posNo} дня ${p.dayNo}: конец не позже начала` });
+      }
+      if (p.kind === 'lesson' && !p.lessonNo) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `урок в позиции ${p.posNo} дня ${p.dayNo} без номера урока` });
+      }
+      if (p.kind !== 'lesson' && !p.title) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `позиция ${p.posNo} дня ${p.dayNo} без названия` });
+      }
+      (byDay.get(p.dayNo) ?? byDay.set(p.dayNo, []).get(p.dayNo)!).push(p);
+    }
+    for (const [dayNo, list] of byDay) {
+      list.sort((a, b) => a.posNo - b.posNo);
+      for (let i = 1; i < list.length; i += 1) {
+        if (list[i].startMin < list[i - 1].endMin) {
+          throw new SchoolError('SKELETON_INVALID', {
+            reason: `день ${dayNo}: позиции ${list[i - 1].posNo} и ${list[i].posNo} пересекаются по времени`,
+          });
+        }
+      }
+      const lessons = list.filter((p) => p.kind === 'lesson');
+      const nos = lessons.map((p) => p.lessonNo);
+      if (new Set(nos).size !== nos.length) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `день ${dayNo}: номера уроков повторяются` });
+      }
+      if (dto.gridKind === 'paired') {
+        const pairs = new Map<number, SkeletonPositionDto[]>();
+        for (const l of lessons) if (l.pairNo) (pairs.get(l.pairNo) ?? pairs.set(l.pairNo, []).get(l.pairNo)!).push(l);
+        for (const [pairNo, parts] of pairs) {
+          parts.sort((a, b) => a.startMin - b.startMin);
+          for (let i = 1; i < parts.length; i += 1) {
+            if (parts[i].startMin !== parts[i - 1].endMin) {
+              throw new SchoolError('SKELETON_INVALID', {
+                reason: `день ${dayNo}, пара ${pairNo}: между частями пары перемена — части обязаны быть смежными`,
+              });
+            }
+          }
+        }
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.skeletonPosition.deleteMany({ where: { workspaceId: ws } });
+      if (dto.positions.length) {
+        await tx.skeletonPosition.createMany({
+          data: dto.positions.map((p) => ({
+            workspaceId: ws,
+            dayNo: p.dayNo,
+            posNo: p.posNo,
+            kind: p.kind,
+            title: p.title ?? null,
+            startMin: p.startMin,
+            endMin: p.endMin,
+            lessonNo: p.kind === 'lesson' ? p.lessonNo : null,
+            pairNo: p.kind === 'lesson' ? (p.pairNo ?? null) : null,
+          })),
+        });
+      }
+      await tx.schoolState.upsert({
+        where: { workspaceId: ws },
+        update: { gridKind: dto.gridKind },
+        create: { workspaceId: ws, gridKind: dto.gridKind },
+      });
+      // Версия агрегата (AR-109); сетку слотов скелет не меняет — stale нет.
+      await this.state.bump(tx, 'schedule', { id: actor.userId, name: actor.name }, ws);
+    });
+    return { ok: true };
   }
 
   private async detachCandidates(slots: { dayNo: number; slotNo: number; classId: string; groupNo: number; subjectId: string }[]) {

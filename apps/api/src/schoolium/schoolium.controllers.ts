@@ -10,6 +10,7 @@ import type {
   CreateStaffCardDto,
   CreateSubjectDto,
   DayParamsDto,
+  SetSkeletonDto,
   FillStaffCardDto,
   MarkValue,
   SchoolRole,
@@ -606,6 +607,20 @@ export class ScheduleController {
   @Put('day-params')
   setDayParams(@Req() req: Req0, @Body() body: DayParamsDto) {
     return this.svc.setDayParams(body, actorOf(req));
+  }
+
+  /** Скелет дня (AR-171, УТЦ v1.4): явные времена позиций; пустой = фолбэк. */
+  @RequirePermission('schedule.read')
+  @Get('skeleton')
+  skeleton() {
+    return this.svc.skeleton();
+  }
+
+  /** Скелет вводит школа; отказ — `SKELETON_INVALID` с причиной словами. */
+  @RequirePermission('schedule.build')
+  @Put('skeleton')
+  setSkeleton(@Req() req: Req0, @Body() body: SetSkeletonDto) {
+    return this.svc.setSkeleton(body, actorOf(req));
   }
 
   /** §11 строка 21 · `S-41.btn.generate`: результат — предложение (AR-18). */

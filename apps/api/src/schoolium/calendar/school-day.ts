@@ -40,3 +40,39 @@ export function schoolToday(): Date {
 
 /** Учебный день строкой `YYYY-MM-DD` — форма, в которой его сравнивает журнал. */
 export const schoolTodayIso = (): string => schoolToday().toISOString().slice(0, 10);
+
+const HH_MM = /^\d{1,2}:\d{2}$/;
+let warnedNow = false;
+
+/**
+ * «Сейчас» учебного дня в минутах от полуночи по часовому поясу школы
+ * (AR-172, минутный гейт журнала). `SCHOOL_NOW=HH:MM` фиксирует его для
+ * проверок тем же правилом, что `SCHOOL_TODAY`: сдвигает ТОЛЬКО учебное
+ * время, сроки токенов и сессий живут по настоящим часам; неразбираемое
+ * значение игнорируется с одним предупреждением (fail-closed, AR-94).
+ */
+export function schoolNowMinutes(timezone: string): number {
+  const raw = process.env.SCHOOL_NOW;
+  if (raw) {
+    if (HH_MM.test(raw)) {
+      const [h, m] = raw.split(':').map(Number);
+      if (h < 24 && m < 60) return h * 60 + m;
+    }
+    if (!warnedNow) {
+      warnedNow = true;
+      // eslint-disable-next-line no-console
+      console.warn(`SCHOOL_NOW=${raw} не разбирается как HH:MM — учебное «сейчас» берётся из системных часов`);
+    }
+  }
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('ru-RU', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false })
+      .formatToParts(new Date());
+  } catch {
+    parts = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit', hour12: false })
+      .formatToParts(new Date());
+  }
+  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0) % 24;
+  const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  return h * 60 + m;
+}

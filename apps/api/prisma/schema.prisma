@@ -1509,11 +1509,40 @@ model SchoolState {
   bigBreakAfter     Int      @default(2)
   bigBreakMin       Int      @default(20)
   dayStartMin       Int      @default(540) // 9:00 — начало первого урока (правка владельца 2026-08-30: времена в дневнике)
+  // УТЦ v1.4 (AR-171, AR-172): часовой пояс школы для минутного гейта журнала
+  // и маркер сетки скелета. Дефолт tz — [дефолт]; дефолт сетки — спаренная
+  // (решение владельца №7). Времена позиций живут в SkeletonPosition.
+  timezone          String   @default("Europe/Moscow")
+  gridKind          String   @default("paired") // 'paired' | 'variable'
   dayParamsSet      Boolean  @default(false)
   prioritiesSet     Boolean  @default(false)
   lastEditorId      String?
   lastEditorName    String?
   updatedAt         DateTime @updatedAt
+}
+
+/// Скелет дня (AR-171, решение владельца 2026-08-30; эталон — реальная сетка
+/// школы 26/27): явные времена КАЖДОЙ позиции по дням недели. Дефолтов времени
+/// нет — скелет вводит школа; пока его нет, экраны и гейт журнала живут на
+/// прежних параметрах дня (dayStartMin/lessonMin/…) [фолбэк]. kind:
+/// 'lesson' — урок (несёт lessonNo — номер урока в дне, стыкуется со slotNo
+/// шаблона; pairNo группирует части пары: внутри пары перемены нет);
+/// 'meal' — обед/полдник в общей нумерации дня; 'event' — линейка,
+/// самоподготовка, классный час (именованные, title обязателен).
+model SkeletonPosition {
+  id          String  @id @default(cuid())
+  workspaceId String
+  dayNo       Int // 0=ПН … 6=ВС
+  posNo       Int // порядок в дне, 1-based
+  kind        String // 'lesson' | 'meal' | 'event'
+  title       String?
+  startMin    Int
+  endMin      Int
+  lessonNo    Int?
+  pairNo      Int?
+
+  @@unique([workspaceId, dayNo, posNo])
+  @@index([workspaceId, dayNo])
 }
 
 // ─────────────────── контур доступа 1.1.1 (AR-94, AR-99) ───────────────────

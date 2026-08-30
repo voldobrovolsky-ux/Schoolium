@@ -709,6 +709,8 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 | `NO_SOLUTION` | S-42 | Не удалось собрать сетку. Ослабьте приоритеты или добавьте учебный день |
 | `LESSON_NOT_HELD` | S-50 | Урок ещё не прошёл |
 | `LESSON_DETACHED` | S-50 | Урок вне расписания: отметки сохранены, изменить их нельзя |
+| `MARK_VALUE_INVALID` | S-52 | Значение «7» не входит в шкалу — допустимы 2, 3, 4, 5, «н», «б» |
+| `SKELETON_INVALID` | S-41.4 | Скелет дня не сходится: день 0, пара 1: между частями пары перемена — части обязаны быть смежными |
 | `CLASS_HAS_MARKS` | S-12 | В классе есть выставленные отметки — класс не удаляется |
 | `STUDENT_HAS_MARKS` | S-12 | У ученика есть выставленные отметки — запись деактивируется, а не удаляется |
 | `STAFF_HAS_HISTORY` | S-31 | У сотрудника есть привязки к предметам или выставленные отметки — карточка деактивируется, а не удаляется |
@@ -762,7 +764,8 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 | 21 | POST `/api/v1/schedule/generate` | S-42 | `schedule.build` | — | `SUBJECT_UNCOVERED`, `GROUPS_UNASSIGNED`, `NO_SOLUTION` |
 | 22 | POST `/api/v1/schedule/confirm` | S-42 | `schedule.build` | `schedule.template.confirmed.v1`, `schedule.lesson.materialized.v1` ×N, `schedule.lesson.detached.v1` ×M | `CONCURRENT_EDIT` |
 | 23 | PUT `/api/v1/lessons/:id/topic` | S-51 | `journal.topic.set` | `journal.topic.set.v1` | `LESSON_NOT_HELD` |
-| 24 | POST `/api/v1/lessons/:id/marks` | S-52 | `journal.mark.post` | `journal.mark.posted.v1` | `LESSON_NOT_HELD`, `LESSON_DETACHED`, `STUDENT_INACTIVE` |
+| 24 | POST `/api/v1/lessons/:id/marks` | S-52 | `journal.mark.post` | `journal.mark.posted.v1` | `LESSON_NOT_HELD`, `LESSON_DETACHED`, `STUDENT_INACTIVE`, `MARK_VALUE_INVALID` |
+| 24а | PUT `/api/v1/schedule/skeleton` | S-41.4 | `schedule.build` | — (версия агрегата, AR-109) | `SKELETON_INVALID`, `CONCURRENT_EDIT` — скелет дня AR-171: явные времена позиций, минутный гейт журнала AR-172; UI настройки — фаза IV `specs/utc-schedule/` |
 | 25 | DELETE `/api/v1/lessons/:id/marks/:studentId` | S-52 | `journal.mark.post` | `journal.mark.removed.v1` | `LESSON_NOT_HELD`, `LESSON_DETACHED` |
 | 26 | DELETE `/api/v1/classes/:id` | S-12 | `contingent.write` | `contingent.class.deleted.v1`, `contingent.student.deleted.v1` ×N | `CLASS_HAS_MARKS` |
 | 27 | POST `/api/v1/students/:id/reactivate` | S-12 | `contingent.write` | `contingent.student.reactivated.v1` | — |

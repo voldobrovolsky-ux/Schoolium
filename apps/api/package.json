@@ -41,7 +41,8 @@
     "subscribers:check": "ts-node scripts/event-subscribers-check.ts",
     "concurrent:check": "ts-node scripts/concurrent-edit-check.ts",
     "texts:check": "ts-node scripts/error-texts-check.ts",
-    "schoolium:check": "npm run shared:build && npm run schemafit:check && npm run daygrid:check && npm run generator:check && npm run subscribers:check && npm run access:check && npm run login:check && npm run qr:check && npm run onboarding:check && npm run calendar:check && npm run schooljournal:check && npm run regen:check && npm run reversal:check && npm run destructive:check && npm run moderator:check && npm run secondschool:check && npm run concurrent:check && npm run launch:check && npm run texts:check",
+    "schoolium:check": "npm run shared:build && npm run schemafit:check && npm run daygrid:check && npm run generator:check && npm run subscribers:check && npm run access:check && npm run login:check && npm run qr:check && npm run onboarding:check && npm run calendar:check && npm run schooljournal:check && npm run skeleton:check && npm run regen:check && npm run reversal:check && npm run destructive:check && npm run moderator:check && npm run secondschool:check && npm run concurrent:check && npm run launch:check && npm run texts:check",
+    "skeleton:check": "ts-node scripts/skeleton-check.ts",
     "shared:build": "npm --workspace @edustore/shared run build",
     "launch:check": "ts-node scripts/school-launch-check.ts",
     "school:import": "ts-node --transpile-only scripts/school-import.ts"

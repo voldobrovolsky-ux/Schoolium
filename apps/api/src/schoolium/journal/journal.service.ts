@@ -16,7 +16,7 @@ import { OutboxService } from '../../common/outbox/outbox.service';
 import { newEvent } from '../../common/events/domain-event';
 import { SCHOOL_EVENTS, type MarkPostedV1, type MarkRemovedV1, type TopicSetV1 } from '../schoolium.contract';
 import { SchoolError } from '../schoolium.errors';
-import { schoolTodayIso as today } from '../calendar/school-day';
+import { schoolNowMinutes, schoolTodayIso as today } from '../calendar/school-day';
 
 export interface Actor {
   userId: string;
@@ -205,6 +205,22 @@ export class JournalService {
     // понимания, что произошло.
     if (col.detachedAt) throw new SchoolError('LESSON_DETACHED');
     if (isoDay(col.date) > today()) throw new SchoolError('LESSON_NOT_HELD');
+    // Минутный гейт (AR-172, решение владельца 2026-08-30 №4): урок сегодняшнего
+    // дня открывается со времени начала его позиции по скелету в поясе школы.
+    // Школа без скелета живёт на прежнем дневном гейте [фолбэк]; закрытие —
+    // по-прежнему конец дня, а не конец урока.
+    if (isoDay(col.date) === today()) {
+      const ws = TenantContext.require();
+      const dayNo = (col.date.getUTCDay() + 6) % 7;
+      const pos = await this.prisma.skeletonPosition.findFirst({
+        where: { workspaceId: ws, kind: 'lesson', dayNo, lessonNo: col.slotNo },
+        select: { startMin: true },
+      });
+      if (pos) {
+        const st = await this.prisma.schoolState.findUnique({ where: { workspaceId: ws }, select: { timezone: true } });
+        if (schoolNowMinutes(st?.timezone ?? 'Europe/Moscow') < pos.startMin) throw new SchoolError('LESSON_NOT_HELD');
+      }
+    }
     return col;
   }
 
@@ -212,7 +228,8 @@ export class JournalService {
 
   /** §11 строка 24 · `S-52`: отметка. Шкала — шесть значений (AR-79). */
   async postMark(lessonId: string, studentId: string, mark: MarkValue, actor: Actor) {
-    if (!MARK_VALUES.includes(mark)) throw new SchoolError('LESSON_NOT_HELD');
+    // Развод перегруженного кода (AR-172): битое значение — не «урок не прошёл».
+    if (!MARK_VALUES.includes(mark)) throw new SchoolError('MARK_VALUE_INVALID', { value: mark });
     await this.gate(lessonId, actor);
     const row = await this.prisma.journalRow.findUnique({ where: { studentId } });
     if (!row) throw new SchoolError('STUDENT_INACTIVE');

@@ -167,6 +167,10 @@ export const ERROR_CODES = [
   'NO_SOLUTION',
   'LESSON_NOT_HELD',
   'LESSON_DETACHED',
+  // УТЦ v1.4 фаза I (AR-171, AR-172): скелет дня и развод перегруженного
+  // LESSON_NOT_HELD — битое значение отметки больше не читается как «урок не прошёл»
+  'SKELETON_INVALID',
+  'MARK_VALUE_INVALID',
   'CLASS_HAS_MARKS',
   'LAST_MODERATOR',
   'LAST_ROLE',
@@ -512,6 +516,8 @@ export interface DiaryWeekDto {
   monday: string;
   /** Сетка времён подтверждённого расписания; null — расписания ещё нет. */
   grid: DayGridDto | null;
+  /** Скелет дня (AR-171); null — фолбэк на grid. */
+  skeleton?: SkeletonPositionDto[] | null;
   days: DiaryDayDto[];
   /** Недели журнала для навигации — как календарь `S-50`. */
   weeks: { monday: string; hasLessons: boolean }[];
@@ -668,6 +674,51 @@ export interface DayGridDto {
   bigBreakMin: number;
 }
 
+// ── скелет дня (AR-171, УТЦ v1.4) ──────────────────────────────────────────
+export type SkeletonKind = 'lesson' | 'meal' | 'event';
+export type GridKind = 'paired' | 'variable';
+
+/**
+ * Позиция скелета дня: явные времена, тип и место в общей нумерации.
+ * У `lesson` обязателен `lessonNo` (номер урока в дне — стык со `slotNo`
+ * шаблона); `pairNo` группирует части пары (внутри пары перемены нет, AR-171).
+ * У `meal`/`event` обязателен `title` («Обед/прогулка», «Линейка»…).
+ */
+export interface SkeletonPositionDto {
+  dayNo: number; // 0=ПН … 6=ВС
+  posNo: number; // 1-based порядок в дне
+  kind: SkeletonKind;
+  title?: string | null;
+  startMin: number;
+  endMin: number;
+  lessonNo?: number | null;
+  pairNo?: number | null;
+}
+
+export interface DaySkeletonDto {
+  gridKind: GridKind;
+  positions: SkeletonPositionDto[];
+  version: number;
+}
+
+export interface SetSkeletonDto {
+  gridKind: GridKind;
+  positions: SkeletonPositionDto[];
+  /** Версия агрегата расписания (AR-109). */
+  version: number;
+}
+
+/** Время урока № lessonNo дня dayNo по скелету; null — позиции нет (фолбэк на slotTimes). */
+export function skeletonLessonTimes(
+  positions: SkeletonPositionDto[],
+  dayNo: number,
+  lessonNo: number,
+): { start: string; end: string; startMin: number; endMin: number; pairNo: number | null } | null {
+  const p = positions.find((x) => x.dayNo === dayNo && x.kind === 'lesson' && x.lessonNo === lessonNo);
+  if (!p) return null;
+  return { start: fmtMin(p.startMin), end: fmtMin(p.endMin), startMin: p.startMin, endMin: p.endMin, pairNo: p.pairNo ?? null };
+}
+
 const fmtMin = (m: number): string => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
 
 /** Время урока № slotNo (1-based) и длина перемены ПОСЛЕ него. */
@@ -701,6 +752,9 @@ export interface SchedulePreviewDto {
   status: 'draft' | 'confirmed' | 'stale';
   /** Временная сетка шаблона — для времён уроков на экранах. */
   grid: DayGridDto;
+  /** Скелет дня (AR-171); null/отсутствует — школа живёт на grid (фолбэк). */
+  skeleton?: SkeletonPositionDto[] | null;
+  gridKind?: GridKind;
   slots: TemplateSlotDto[];
   /** Мягкие предупреждения приоритетов — не блокируют (ограничение 6). */
   priorityWarnings: string[];
@@ -973,6 +1027,7 @@ export const SCHOOL_API = {
   scheduleLoad: '/api/v1/schedule/load',
   schedulePriorities: '/api/v1/schedule/priorities',
   scheduleDayParams: '/api/v1/schedule/day-params',
+  scheduleSkeleton: '/api/v1/schedule/skeleton',
   scheduleGenerate: '/api/v1/schedule/generate',
   scheduleGenerateCancel: '/api/v1/schedule/generate/cancel',
   scheduleConfirm: '/api/v1/schedule/confirm',

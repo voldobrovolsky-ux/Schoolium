@@ -121,12 +121,29 @@ export class DiaryService {
       where: { workspaceId: s.workspaceId, status: 'confirmed' },
       select: { dayStartMin: true, lessonMin: true, breakMin: true, bigBreakAfter: true, bigBreakMin: true },
     });
+    // Скелет дня (AR-171): явные времена позиций; пустой — фолбэк на grid.
+    const skeletonRows = await this.prisma.skeletonPosition.findMany({
+      where: { workspaceId: s.workspaceId },
+      orderBy: [{ dayNo: 'asc' }, { posNo: 'asc' }],
+    });
     return {
       studentId: s.id,
       studentName: [s.lastName, s.firstName].filter(Boolean).join(' '),
       classLabel: s.class.label,
       monday: mon,
       grid: tpl ?? null,
+      skeleton: skeletonRows.length
+        ? skeletonRows.map((r) => ({
+            dayNo: r.dayNo,
+            posNo: r.posNo,
+            kind: r.kind as 'lesson' | 'meal' | 'event',
+            title: r.title,
+            startMin: r.startMin,
+            endMin: r.endMin,
+            lessonNo: r.lessonNo,
+            pairNo: r.pairNo,
+          }))
+        : null,
       days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
       weeks,
     };
