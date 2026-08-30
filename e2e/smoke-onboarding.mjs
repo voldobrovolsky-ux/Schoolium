@@ -327,25 +327,19 @@ async function main() {
     await hasAll(page, ['S-00.logo', 'S-00.hero', 'S-00.btn.login']);
     await shot(page, 'S-00-landing');
 
-    // ── M-21 · модалка входа с лендинга (правка владельца 2026-08-30) ──
-    // Десктоп открывается QR-ом привязки, телефон — окошками кода (сам себя
-    // не сканирует); кнопка переключает содержимое и меняет подпись.
-    console.log('▶ M-21 · модалка входа');
+    // ── S-92 · витрина школ: «Войти» ведёт на каталог (AR-163, прод-флоу) ──
+    // Модалка M-21 выведена из употребления этим переходом (мёртвый код);
+    // смок под витрину не обновили в том же изменении, и красный CI (G-44)
+    // прятал это с ночи 30.08. Дальнейшая эволюция флоу — карусель и экран
+    // школы: specs/access-entry/70-screens.md (Draft).
+    console.log('▶ S-92 · витрина школ');
     await click(page, 'S-00.btn.login');
-    await page.waitForSelector('[data-testid="M-21"]');
-    await modalOpen(page, 'M-21');
-    await hasAll(page, MOBILE ? ['M-21.code', 'M-21.btn.mode'] : ['M-21.qr', 'M-21.btn.mode']);
-    await shot(page, 'M-21-login-modal');
-    await click(page, 'M-21.btn.mode');
-    // содержимое сменилось: QR ⇄ окошки кода — «либо QR, либо окошки»
-    await page.waitForSelector(MOBILE ? '[data-testid="M-21.qr"]' : '[data-testid="M-21.code"]');
-    const other = await page.locator(MOBILE ? '[data-testid="M-21.code"]' : '[data-testid="M-21.qr"]').count();
-    if (other === 0) console.log('    ✅ кнопка сменила содержимое целиком — либо QR, либо окошки');
-    else { console.error('    ❌ в модалке одновременно и QR, и окошки'); failures++; }
-    await shot(page, 'M-21-login-modal-code');
-    if (MOBILE) await tapTargets(page, 'M-21');
-    await page.keyboard.press('Escape');
-    await modalClosed(page, 'M-21');
+    await page.waitForSelector('[data-testid="S-92"]');
+    await hasAll(page, ['S-92.logo']);
+    // база смока в этой точке пуста — витрина честно говорит об этом
+    await page.waitForSelector('[data-testid="S-92.empty"]');
+    console.log('    ✅ пустая база → S-92.empty, а не вечный скелетон');
+    await shot(page, 'S-92-school-directory');
 
     // ── S-01 · вход по QR (аноним): страница выдаёт код и ждёт скан ──
     console.log('▶ S-01 · вход');
