@@ -46,19 +46,22 @@ async function main(): Promise<void> {
   const admin = await authz.resolveForRoles(['admin']);
   check([...MUTATION_PERMISSIONS, ...READ_PERMISSIONS].every((p) => admin.permissions.includes(p)),
     'администратор школы держит все мутации и чтения версии — полнота прав переехала к нему (AR-148, AR-150)');
-  const MOD_MUT = ['school.manage', 'contingent.write', 'staff.manage', 'staff.self.write'];
+  // AR-174 (УТЦ v1.4): панель УТЦ переехала модератору, завуч держит ТОЛЬКО
+  // годовые нормы часов (schedule.load.write) — ни скелета, ни генерации,
+  // ни привязок, ни календаря.
+  const MOD_MUT = ['school.manage', 'contingent.write', 'staff.manage', 'staff.self.write', 'schedule.build', 'subject.write'];
   const mod = await authz.resolveForRoles(['moderator']);
   check(
     MOD_MUT.every((p) => mod.permissions.includes(p)) &&
       MUTATION_PERMISSIONS.filter((p) => !MOD_MUT.includes(p)).every((p) => !mod.permissions.includes(p)),
-    'модератор держит ровно КПЦ: классы, контингент, персонал, активации — и ничего из панели УТЦ (AR-152)',
+    'модератор держит КПЦ и панель УТЦ: классы, контингент, персонал, предметы, расписание (AR-152, AR-174)',
   );
-  const DEP_MUT = ['schedule.build', 'subject.write', 'staff.self.write'];
+  const DEP_MUT = ['schedule.load.write', 'staff.self.write'];
   const deputy = await authz.resolveForRoles(['deputy_academic']);
   check(
     DEP_MUT.every((p) => deputy.permissions.includes(p)) &&
       MUTATION_PERMISSIONS.filter((p) => !DEP_MUT.includes(p)).every((p) => !deputy.permissions.includes(p)),
-    'завуч держит ровно панель УТЦ: предметы, привязки, расписание — и ничего из КПЦ (AR-152)',
+    'завуч держит ровно годовые нормы часов — ни скелета, ни генерации, ни привязок (AR-174)',
   );
   for (const role of ['founder', 'director', 'deputy_upbringing'] as const) {
     const acc = await authz.resolveForRoles([role]);
@@ -80,7 +83,11 @@ async function main(): Promise<void> {
 
   // ─── 2. перечисление мутаций контроллеров версии ───
   const container = b.app.get(ModulesContainer);
-  const rows: { route: string; perm: string | undefined }[] = [];
+  // Право роута — код ЛИБО список «любое из» (AR-174: нагрузка открыта и
+  // строителю, и завучу); перечисление обязано читать обе формы.
+  const rows: { route: string; perm: string | string[] | undefined }[] = [];
+  const permsOf = (r: { perm: string | string[] | undefined }): string[] =>
+    r.perm === undefined ? [] : Array.isArray(r.perm) ? r.perm : [r.perm];
   for (const m of container.values()) {
     for (const [, w] of m.controllers) {
       const ctor = w.metatype as (new () => unknown) | undefined;
@@ -103,24 +110,26 @@ async function main(): Promise<void> {
     }
   }
   check(rows.length >= 38, `мутаций контура 1.1.1 обнаружено: ${rows.length} (в §11 их 38)`);
-  const gated = rows.filter((r) => r.perm);
-  const forAdmin = gated.filter((r) => admin.permissions.includes(r.perm!));
+  const gated = rows.filter((r) => permsOf(r).length > 0);
+  const passesBy = (acc: { permissions: string[] }, r: { perm: string | string[] | undefined }): string[] =>
+    permsOf(r).filter((p) => acc.permissions.includes(p));
+  const forAdmin = gated.filter((r) => passesBy(admin, r).length > 0);
   check(forAdmin.length === gated.length,
     `администратор школы проходит ВСЕ ${gated.length} гейченных мутаций — отказа по праву он получить не может (AR-148)`);
-  const forModerator = gated.filter((r) => mod.permissions.includes(r.perm!));
-  check(forModerator.every((r) => MOD_MUT.includes(r.perm!)) && forModerator.length > 0,
-    `модератор проходит только мутации КПЦ: ${[...new Set(forModerator.map((r) => r.perm))].join(', ')} (AR-152)`);
-  const forDeputy = gated.filter((r) => deputy.permissions.includes(r.perm!));
-  check(forDeputy.every((r) => DEP_MUT.includes(r.perm!)) && forDeputy.length > 0,
-    `завуч проходит только мутации панели УТЦ: ${[...new Set(forDeputy.map((r) => r.perm))].join(', ')} (AR-152)`);
+  const forModerator = gated.filter((r) => passesBy(mod, r).length > 0);
+  check(forModerator.every((r) => passesBy(mod, r).every((p) => MOD_MUT.includes(p))) && forModerator.length > 0,
+    `модератор проходит только мутации КПЦ и панели УТЦ: ${[...new Set(forModerator.flatMap((r) => passesBy(mod, r)))].join(', ')} (AR-152, AR-174)`);
+  const forDeputy = gated.filter((r) => passesBy(deputy, r).length > 0);
+  check(forDeputy.every((r) => passesBy(deputy, r).every((p) => DEP_MUT.includes(p))) && forDeputy.length > 0,
+    `завуч проходит только нормы часов: ${[...new Set(forDeputy.flatMap((r) => passesBy(deputy, r)))].join(', ')} (AR-174)`);
   for (const role of ['founder', 'director', 'deputy_upbringing'] as const) {
     const acc = await authz.resolveForRoles([role]);
-    const passes = gated.filter((r) => acc.permissions.includes(r.perm!) && r.perm !== 'staff.self.write');
+    const passes = gated.filter((r) => passesBy(acc, r).some((p) => p !== 'staff.self.write'));
     check(passes.length === 0, `${role} не проходит ни одной мутации школы (${passes.map((p) => p.route).join(', ') || 'ноль'})`);
   }
-  const teacherPasses = gated.filter((r) => teacher.permissions.includes(r.perm!));
-  check(teacherPasses.every((r) => ['journal.mark.post', 'journal.topic.set', 'staff.self.write'].includes(r.perm!)),
-    `педагог проходит только ${teacherPasses.map((r) => r.perm).filter((v, i, a) => a.indexOf(v) === i).join(', ')}`);
+  const teacherPasses = gated.filter((r) => passesBy(teacher, r).length > 0);
+  check(teacherPasses.every((r) => passesBy(teacher, r).every((p) => ['journal.mark.post', 'journal.topic.set', 'staff.self.write'].includes(p))),
+    `педагог проходит только ${[...new Set(teacherPasses.flatMap((r) => passesBy(teacher, r)))].join(', ')}`);
 
   // ─── 3. гейт реальности действует и на модератора ───
   const s = await readySchool(b, 'Школа модератора');

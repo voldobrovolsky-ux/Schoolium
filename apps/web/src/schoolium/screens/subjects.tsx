@@ -212,6 +212,7 @@ function SubjectCardModal({ subject, onClose, onChanged }: { subject: SubjectDto
   const { can } = useSession();
   const [current, setCurrent] = useState(subject);
   const [bind, setBind] = useState(false);
+  const [bindManual, setBindManual] = useState(false);
   const { toast, showToast } = useToast();
   const mayWrite = can("subject.write");
 
@@ -269,9 +270,15 @@ function SubjectCardModal({ subject, onClose, onChanged }: { subject: SubjectDto
           </span>
           {/* «+» — accent-кнопка, единственная розовая на этом слое. */}
           {mayWrite && !current.coverageComplete ? (
-            <Button kind="fab" testId="S-21.btn.bind" aria-label="Привязать педагога" onClick={() => setBind(true)}>
-              +
-            </Button>
+            <span className="sch-row" style={{ gap: "var(--sp-8)" }}>
+              {/* Ручная привязка (AR-177): QR — основной канал, ручная — запасной. */}
+              <Button kind="secondary" testId="S-21.btn.bindManual" onClick={() => setBindManual(true)}>
+                Вручную
+              </Button>
+              <Button kind="fab" testId="S-21.btn.bind" aria-label="Привязать педагога" onClick={() => setBind(true)}>
+                +
+              </Button>
+            </span>
           ) : null}
         </div>
 
@@ -310,8 +317,143 @@ function SubjectCardModal({ subject, onClose, onChanged }: { subject: SubjectDto
         />
       ) : null}
 
+      {/* M-23 — ручная привязка (AR-177): тот же второй уровень, что M-05. */}
+      {bindManual ? (
+        <BindManual
+          subject={current}
+          onClose={() => setBindManual(false)}
+          onBound={(s) => {
+            setCurrent(s);
+            setBindManual(false);
+            onChanged();
+          }}
+        />
+      ) : null}
+
       {toast ? <Toast text={toast} /> : null}
     </>
+  );
+}
+
+// ─────────────────── ручная привязка педагога (M-23, AR-177) ───────────────────
+
+/**
+ * Ручная привязка из карточки предмета: педагог из персонала, «весь класс»
+ * либо непокрытые группы. QR остаётся основным каналом — эта модалка для
+ * онбординга, когда телефона педагога под рукой нет. Второй уровень
+ * вложенности — тот же, что у QR-слоя `M-05` (AR-82).
+ */
+function BindManual({ subject, onClose, onBound }: { subject: SubjectDto; onClose: () => void; onBound: (s: SubjectDto) => void }) {
+  const [staff] = useAsync(() => api.staff());
+  const teachers =
+    staff.status === "ready"
+      ? staff.data.filter((c) => c.filled && c.userId && !c.deactivated && c.roles.includes("teacher"))
+      : [];
+  const [teacherId, setTeacherId] = useState("");
+  const cur = teachers.some((t) => t.userId === teacherId) ? teacherId : (teachers[0]?.userId ?? "");
+
+  const hasGroupBindings = subject.bindings.some((b) => b.scope === "group");
+  const groups = subject.uncoveredGroups;
+  const [scope, setScope] = useState<"class" | "group">(hasGroupBindings ? "group" : "class");
+  const [groupNos, setGroupNos] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const valid = cur && (scope === "class" || groupNos.length > 0);
+
+  return (
+    <Modal
+      title="Привязать вручную"
+      width={420}
+      onClose={onClose}
+      testId="M-23"
+      mobile="sheet"
+      level={2}
+      footer={
+        <div className="sch-actions">
+          <Button
+            kind="primary"
+            testId="S-21.btn.bindManualConfirm"
+            disabled={!valid}
+            loading={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError(null);
+              try {
+                onBound(
+                  await api.bindTeacherManual(subject.id, {
+                    teacherId: cur,
+                    scope,
+                    groupNos: scope === "group" ? groupNos : undefined,
+                  }),
+                );
+              } catch (e) {
+                setError(e instanceof SchoolApiError ? e.message : "Не получилось");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Привязать
+          </Button>
+        </div>
+      }
+    >
+      <div className="sch-stack">
+        {staff.status === "loading" ? <Skeletons count={2} kind="row" /> : null}
+        {staff.status === "ready" && teachers.length === 0 ? (
+          <p className="sch-muted">Педагогов с заведённой учёткой пока нет — заведите их в «Персонале»</p>
+        ) : null}
+        {teachers.length > 0 ? (
+          <div className="sch-field" data-testid="S-21.select.teacher">
+            <span className="sch-field-label">Педагог</span>
+            <select className="sch-input" value={cur} onChange={(e) => setTeacherId(e.target.value)}>
+              {teachers.map((t) => (
+                <option key={t.userId} value={t.userId!}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        {groups.length > 0 || hasGroupBindings ? (
+          <>
+            <div className="sch-chips">
+              <Button
+                kind="chip"
+                aria-pressed={scope === "class"}
+                disabled={hasGroupBindings}
+                onClick={() => setScope("class")}
+              >
+                Весь класс
+              </Button>
+              <Button kind="chip" aria-pressed={scope === "group"} onClick={() => setScope("group")}>
+                Группа
+              </Button>
+            </div>
+            {scope === "group" ? (
+              <div className="sch-chips" data-testid="S-21.chips.groups">
+                {groups.map((g) => (
+                  <Button
+                    kind="chip"
+                    key={g}
+                    aria-pressed={groupNos.includes(g)}
+                    onClick={() => setGroupNos((c) => (c.includes(g) ? c.filter((x) => x !== g) : [...c, g]))}
+                  >
+                    группа {g}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : null}
+        {error ? (
+          <p className="sch-danger-text" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Modal>
   );
 }
 

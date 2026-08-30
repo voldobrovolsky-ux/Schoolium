@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import {
   ACCESS_PARAMS,
   type BindTeacherDto,
+  type BindTeacherManualDto,
   type BindingDto,
   type CreateSubjectDto,
   type SubjectDto,
@@ -296,6 +297,44 @@ export class SubjectsService implements OnModuleInit {
           workspaceId: ws,
           actor: actor.userId,
           payload: { subjectId, classId: subject.classId, teacherId, scope: dto.scope, groupNos },
+        }),
+      );
+    });
+    return this.get(subjectId);
+  }
+
+  /**
+   * §11 строка 15а · `S-21.btn.bindManual` (AR-177, УТЦ v1.4 фаза V): ручная
+   * привязка из карточки предмета. QR остаётся основным каналом; ручная даёт
+   * ТОТ ЖЕ `TeacherBinding` и ТО ЖЕ событие `teacher.bound.v1` — аудит и
+   * подписчики не различают канал. Взаимоисключение «весь класс ↔ группы» (Д6)
+   * и педагог с активной карточкой обязательны так же, как при скане.
+   */
+  async bindTeacherManual(subjectId: string, dto: BindTeacherManualDto, actor: SchoolActor) {
+    const ws = TenantContext.require();
+    const subject = await this.prisma.schoolSubject.findUnique({ where: { id: subjectId }, include: { bindings: true } });
+    if (!subject) throw new NotFoundException('предмет не найден');
+    if (dto.scope === 'class' && subject.bindings.some((b) => b.scope === 'group')) {
+      throw new BadRequestException('у предмета уже групповые привязки — «весь класс» с ними взаимоисключён');
+    }
+    if (dto.scope === 'group' && subject.bindings.some((b) => b.scope === 'class')) {
+      throw new BadRequestException('предмет уже привязан на весь класс — групповая привязка с этим взаимоисключена');
+    }
+    const membership = await this.prisma.membership.findFirst({ where: { workspaceId: ws, userId: dto.teacherId, deactivatedAt: null } });
+    if (!membership) throw new NotFoundException('педагог с активным членством в школе не найден');
+
+    const groupNos = dto.scope === 'group' ? (dto.groupNos ?? []) : [];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.teacherBinding.create({
+        data: { workspaceId: ws, subjectId, teacherId: dto.teacherId, scope: dto.scope, groupNos },
+      });
+      await this.outbox.enqueue(
+        tx,
+        newEvent<TeacherBoundV1>({
+          type: SCHOOL_EVENTS.teacherBound,
+          workspaceId: ws,
+          actor: actor.userId,
+          payload: { subjectId, classId: subject.classId, teacherId: dto.teacherId, scope: dto.scope, groupNos },
         }),
       );
     });

@@ -14,6 +14,7 @@ import {
   type SkeletonPositionDto,
   type SetLoadDto,
   type SetPrioritiesDto,
+  type SwapSlotsDto,
   type TemplateSlotDto,
 } from '@edustore/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -286,6 +287,22 @@ export class ScheduleService implements OnModuleInit {
         return uncoveredGroups(u.subjectId, cls?.groupCount ?? 0, subjects.find((s) => s.id === u.subjectId)!.bindings).length > 0;
       });
 
+    // Скелет дня (AR-171, фаза III): урочные позиции по дням — вход укладки.
+    // Пустой скелет = null: прежняя укладка арифметикой параметров дня.
+    const skel = await this.skeleton();
+    const skeleton = skel.positions.length
+      ? {
+          gridKind: skel.gridKind,
+          days: [...new Set(skel.positions.map((p) => p.dayNo))].map((dayNo) => ({
+            dayNo,
+            lessons: skel.positions
+              .filter((p) => p.dayNo === dayNo && p.kind === 'lesson')
+              .sort((a, b) => a.posNo - b.posNo)
+              .map((p) => ({ lessonNo: p.lessonNo ?? 0, pairNo: p.pairNo ?? null })),
+          })),
+        }
+      : null;
+
     return {
       classes,
       pairs,
@@ -301,6 +318,7 @@ export class ScheduleService implements OnModuleInit {
       seed,
       classesWithUnassignedGroups: unassigned,
       uncovered,
+      skeleton,
     };
   }
 
@@ -362,6 +380,59 @@ export class ScheduleService implements OnModuleInit {
   async cancelGeneration() {
     await this.prisma.scheduleTemplate.deleteMany({ where: { status: 'draft' } });
     return { ok: true };
+  }
+
+  /**
+   * `S-43` (AR-175, УТЦ v1.4 фаза IV): перестановка двух слотов ОДНОГО класса
+   * в ЧЕРНОВИКЕ местами; пустая сторона легальна — это перенос урока в окно.
+   * Материализует по-прежнему только `confirm` (AR-18). Жёсткое ограничение
+   * генератора «педагог не в двух местах разом» держится и здесь: занятость в
+   * целевом слоте другим классом — именованный `SWAP_CONFLICT` с фамилией.
+   */
+  async swapSlots(dto: SwapSlotsDto, actor: SchoolActor) {
+    await this.state.checkVersion('schedule', dto.version);
+    const ws = TenantContext.require();
+    const tpl = await this.prisma.scheduleTemplate.findUnique({ where: { id: dto.templateId }, include: { slots: true } });
+    if (!tpl || tpl.status !== 'draft') throw new NotFoundException('черновик не найден');
+
+    const at = (p: { dayNo: number; slotNo: number }) =>
+      tpl.slots.filter((s) => s.classId === dto.classId && s.dayNo === p.dayNo && s.slotNo === p.slotNo);
+    const aSlots = at(dto.a);
+    const bSlots = at(dto.b);
+    if (!aSlots.length && !bSlots.length) throw new NotFoundException('в обоих слотах пусто — переставлять нечего');
+
+    const busyElsewhere = (teacherId: string, dayNo: number, slotNo: number) =>
+      tpl.slots.some((s) => s.classId !== dto.classId && s.teacherId === teacherId && s.dayNo === dayNo && s.slotNo === slotNo);
+    const conflicted =
+      aSlots.find((s) => busyElsewhere(s.teacherId, dto.b.dayNo, dto.b.slotNo)) ??
+      bSlots.find((s) => busyElsewhere(s.teacherId, dto.a.dayNo, dto.a.slotNo));
+    if (conflicted) {
+      const u = await TenantContext.runAsSystem(() =>
+        this.prisma.user.findUnique({ where: { id: conflicted.teacherId }, select: { displayName: true } }),
+      );
+      throw new SchoolError('SWAP_CONFLICT', { teacher: u?.displayName ?? '—' });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      // Уникальность слота `[templateId, dayNo, slotNo, classId, groupNo]` не
+      // даёт поменять две стороны в лоб: сторона A уезжает в невозможный
+      // промежуточный номер, затем B встаёт на место A, затем A — на место B.
+      await tx.templateSlot.updateMany({
+        where: { id: { in: aSlots.map((s) => s.id) } },
+        data: { slotNo: -1 },
+      });
+      await tx.templateSlot.updateMany({
+        where: { id: { in: bSlots.map((s) => s.id) } },
+        data: { dayNo: dto.a.dayNo, slotNo: dto.a.slotNo },
+      });
+      await tx.templateSlot.updateMany({
+        where: { id: { in: aSlots.map((s) => s.id) } },
+        data: { dayNo: dto.b.dayNo, slotNo: dto.b.slotNo },
+      });
+      // Версия агрегата (AR-109); черновик не материализован — stale нет.
+      await this.state.bump(tx, 'schedule', { id: actor.userId, name: actor.name }, ws);
+    });
+    return this.preview(tpl.id);
   }
 
   async preview(templateId?: string): Promise<SchedulePreviewDto> {

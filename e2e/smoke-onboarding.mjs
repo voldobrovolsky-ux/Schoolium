@@ -318,6 +318,9 @@ async function main() {
   });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => { console.error(`    ❌ ошибка страницы: ${e.message}`); failures++; });
+  // Навигации документа — в лог: «модалка исчезла» без этой строки не отличить
+  // от «страница перезагрузилась» (диагностика, не ворота).
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) console.log(`    ↪ навигация: ${f.url()}`); });
 
   try {
     // ── S-00 · лендинг анонима ──
@@ -698,17 +701,17 @@ async function main() {
     await has(page, 'S-40.empty', 'сетки ещё нет');
     await shot(page, 'S-40-empty');
 
-    // ── S-41 · мастер расписания, четыре экрана ──
-    console.log('▶ S-41 · мастер расписания');
+    // ── S-41 · настройка: ОДНА полноэкранная модалка, все разделы сразу (фаза IV) ──
+    console.log('▶ S-41 · настройка расписания (одна модалка)');
     await click(page, 'S-40.btn.setup');
     await page.waitForSelector('[data-testid="M-08"]');
     await modalOpen(page, 'M-08');
-    // Панели приходят из календаря — у первого шага есть состояние загрузки
+    // Панели приходят из календаря — у формы есть состояние загрузки
     // (скелетоны той же геометрии), и утверждать до него значит ловить гонку.
     await page.waitForSelector('[data-testid="S-41.panel.term1"]', { timeout: 20_000 });
     await hasAll(page, ['S-41.panel.term1', 'S-41.panel.term2', 'S-41.panel.term3', 'S-41.panel.term4']);
     // Реестр требует панели ПРЕДЗАПОЛНЕННЫМИ графиком ФООП, а не пустыми
-    // (`70-screens.md` S-41 экран 1): пустой ввод с нуля — дефект, а не мелочь.
+    // (`70-screens.md` S-41): пустой ввод с нуля — дефект, а не мелочь.
     const prefilled = await page.locator('[data-testid^="S-41.panel.term"] input[type="date"]').evaluateAll((n) => n.map((x) => x.value));
     if (prefilled.length === 8 && prefilled.every(Boolean)) console.log(`    ✅ панели четвертей предзаполнены: ${prefilled[0]}…${prefilled[7]}`);
     else { console.error(`    ❌ панели четвертей пришли пустыми: ${JSON.stringify(prefilled)}`); failures++; }
@@ -720,30 +723,24 @@ async function main() {
       await panel.locator('input[type="date"]').nth(1).fill(dates[i].dateTo);
     }
     await has(page, 'S-41.term.check', 'заполненная четверть отмечена галочкой');
-    await shot(page, 'S-41-step1-terms');
-    await click(page, 'S-41.btn.next1');
 
-    await page.waitForSelector('[data-testid="S-41.accordion.teacher"]', { timeout: 20_000 });
+    // Все разделы видны РАЗОМ — без «Далее» (решение владельца 2026-08-30).
     await hasAll(page, ['S-41.accordion.teacher', 'S-41.input.hours', 'S-41.summary.class']);
     const hours = page.locator('[data-testid="S-41.input.hours"]');
     for (let i = 0; i < await hours.count(); i++) await hours.nth(i).fill('4');
-    await shot(page, 'S-41-step2-load');
-    await click(page, 'S-41.btn.next2');
 
-    await page.waitForSelector('[data-testid="S-41.chips.priority"]', { timeout: 20_000 });
     await hasAll(page, ['S-41.chips.priority', 'S-41.btn.noPriority']);
     await click(page, 'S-41.btn.noPriority');
-    await shot(page, 'S-41-step3-priority');
-    await click(page, 'S-41.btn.next3');
 
-    await page.waitForSelector('[data-testid="S-41.input.slotsPerDay"]', { timeout: 20_000 });
     await hasAll(page, ['S-41.input.slotsPerDay', 'S-41.input.lessonMin', 'S-41.input.breakMin', 'S-41.input.days', 'S-41.select.bigBreakAfter', 'S-41.input.bigBreakMin', 'S-41.calc.dayLength']);
+    // Раздел скелета дня (AR-171, фаза IV) стоит в той же форме.
+    await hasAll(page, ['S-41.skeleton', 'S-41.grid.kind', 'S-41.skel.day', 'S-41.skel.add.lesson', 'S-41.skel.add.event']);
     await fill(page, 'S-41.input.slotsPerDay', '5');
     // Длина дня считается на экране из четырёх параметров, а не «примерно».
     const dayLen = await page.locator('[data-testid="S-41.calc.dayLength"]').innerText();
     console.log(`    · длина учебного дня по параметрам: ${dayLen.replace(/\s+/g, ' ').trim()}`);
-    if (MOBILE) await tapTargets(page, 'S-41 · параметры дня');
-    await shot(page, 'S-41-step4-day');
+    if (MOBILE) await tapTargets(page, 'S-41 · настройка');
+    await shot(page, 'S-41-settings');
     /*
      * `M-09` — прогресс генерации: слой живёт ровно столько, сколько идёт
      * перебор, и на пустой школе это десятки миллисекунд. Опрос
@@ -779,9 +776,29 @@ async function main() {
     } else {
       if (sawProgress) { modalsClosed.add('M-09'); console.log('    ✅ M-09 закрыта — прогресс сменился предпросмотром'); }
       modalsClosed.add('M-08');
-      await hasAll(page, ['S-42.grid.preview', 'S-42.btn.regenerate', 'S-42.btn.confirm']);
+      // Результат — две полноэкранные вкладки «Расписание | Настройка» (фаза IV).
+      await hasAll(page, ['S-42.grid.preview', 'S-42.btn.regenerate', 'S-42.btn.confirm', 'S-42.tab.schedule', 'S-42.tab.settings']);
       if (MOBILE) await tapTargets(page, 'S-42 · предпросмотр');
       await shot(page, 'S-42-preview');
+
+      // ── S-43 · ручная правка черновика: перестановка двух слотов класса ──
+      // На мобайле видны слоты одного дня, и дня с двумя уроками зерно не
+      // гарантирует — перестановка доказывается десктопным прогоном.
+      if (!MOBILE) {
+        console.log('▶ S-43 · ручная правка черновика');
+        const cells = page.locator('[data-testid="S-43.cell"]');
+        const cls = (await cells.count()) ? await cells.first().getAttribute('data-swap-class') : null;
+        const same = cls ? page.locator(`[data-testid="S-43.cell"][data-swap-class="${cls}"]`) : null;
+        if (same && (await same.count()) >= 2) {
+          await same.nth(0).click();
+          await same.nth(1).click();
+          await page.waitForSelector('.sch-toast', { timeout: 20_000 });
+          const toastText = (await page.locator('.sch-toast').innerText()).replace(/\s+/g, ' ').trim();
+          if (/переставлены/i.test(toastText)) console.log('    ✅ S-43: слоты класса переставлены в черновике');
+          else { console.error(`    ❌ S-43: неожиданный ответ — «${toastText}»`); failures++; }
+        } else { console.error('    ❌ S-43: выбираемых слотов меньше двух'); failures++; }
+      }
+
       await click(page, 'S-42.btn.confirm');
       await page.waitForSelector('[data-testid="S-40.grid.week"]', { timeout: 60_000 });
       // Плашки «устарело» здесь нет и быть не должно: сетка только что
@@ -991,45 +1008,50 @@ async function main() {
       else { console.error(`    ❌ четвертная после снятия единственной отметки: «${termAfter}»`); failures++; }
       await shot(page, 'S-52-mark-cleared');
 
-      // ── S-40.banner.stale · правка нагрузки после подтверждения ──
-      // Плашка «устарело» — не украшение: она отделяет подтверждённую сетку от
-      // той, под которой изменились входные данные (AR-85). Проверяется тем же
-      // путём, каким её увидит модератор: правкой часов в мастере.
-      console.log('▶ S-40.banner.stale · правка нагрузки роняет сетку в «устарело»');
-      await page.goto(`${WEB}/schedule`);
-      await page.waitForSelector('[data-testid="S-40.grid.week"]', { timeout: 30_000 });
-      await click(page, 'S-40.btn.setup');
-      await page.waitForSelector('[data-testid="M-08"]', { timeout: 20_000 });
-      await modalOpen(page, 'M-08');
-      await click(page, 'S-41.btn.next1');
-      await page.waitForSelector('[data-testid="S-41.input.hours"]', { timeout: 20_000 });
-      await page.locator('[data-testid="S-41.input.hours"]').first().fill('3');
-      await click(page, 'S-41.btn.next2');
-      await page.waitForSelector('[data-testid="S-41.chips.priority"]', { timeout: 20_000 });
-      // Выход из мастера с введёнными данными спрашивает подтверждение (M-14).
-      // `Esc` обязан работать и на ТРЕТЬЕМ шаге: кнопка, на которой был фокус,
-      // размонтировалась вместе с предыдущим шагом (§0, ловушка фокуса).
-      const focusInModal = await page.evaluate(() => Boolean(document.activeElement?.closest('[data-testid="M-08"]')));
-      if (focusInModal) console.log('    ✅ фокус остался внутри мастера после смены шага');
-      else { console.error('    ❌ фокус ушёл из мастера при смене шага: Esc и Tab-ловушка не работают'); failures++; }
-      await page.keyboard.press('Escape');
-      await page.waitForSelector('[data-testid="M-14"]', { timeout: 20_000 });
-      await modalOpen(page, 'M-14');
-      await has(page, 'M-14', 'выход из мастера с введёнными данными спрашивает подтверждение');
-      await shot(page, 'M-14-exit-wizard');
-      await page.locator('[data-testid="M-14"] button', { hasText: 'Закрыть без сохранения' }).click();
-      await modalClosed(page, 'M-14');
+      // ── S-40.banner.stale · правка данных после подтверждения (AR-85) ──
+      // Плашка «устарело» отделяет подтверждённую сетку от той, под которой
+      // изменились входные данные. В форме фазы IV нагрузка сохраняется только
+      // «Сгенерировать» (черновик заслонил бы плашку), поэтому берётся другой
+      // канал из восьми событий таксономии AR-85: удаление предмета. Временное
+      // «Черчение» без привязки заводится и удаляется — сетка устаревает.
+      console.log('▶ S-40.banner.stale · удаление предмета роняет сетку в «устарело»');
+      await page.goto(`${WEB}/subjects`);
+      await page.waitForSelector('[data-testid="S-20.btn.newSubject"]', { timeout: 20_000 });
+      await click(page, 'S-20.btn.newSubject');
+      await page.waitForSelector('[data-testid="M-03.input.name"]', { timeout: 20_000 });
+      await fill(page, 'M-03.input.name', 'Черчение');
+      await click(page, 'M-03.create');
+      await page.waitForSelector('[data-testid="M-03"]', { state: 'detached', timeout: 20_000 });
+      await page.locator('[data-testid="S-20.card.subject"]', { hasText: 'Черчение' }).click();
+      await page.waitForSelector('[data-testid="S-21.btn.deleteSubject"]', { timeout: 20_000 });
+      await page.locator('[data-testid="S-21.btn.deleteSubject"]').click();
+      await page.waitForSelector('[data-testid="M-04"]', { state: 'detached', timeout: 20_000 });
       await page.goto(`${WEB}/schedule`);
       await page.waitForSelector('[data-testid="S-40.banner.stale"]', { timeout: 30_000 });
       await hasAll(page, ['S-40.banner.stale', 'S-40.btn.regenerate']);
       await shot(page, 'S-40-stale');
 
-      // ── M-10 · отказ генератора: код, причина с цифрами, «К шагу N» ──
+      // ── M-14 · выход из настройки с введёнными данными спрашивает подтверждение ──
+      console.log('▶ M-14 · выход из настройки с введённым');
+      await click(page, 'S-40.btn.setup');
+      await page.waitForSelector('[data-testid="M-08"]', { timeout: 20_000 });
+      await modalOpen(page, 'M-08');
+      await page.waitForSelector('[data-testid="S-41.input.hours"]', { timeout: 20_000 });
+      await page.locator('[data-testid="S-41.input.hours"]').first().fill('3');
+      // Esc ловит карточка модалки (реактовский onKeyDown): клик возвращает
+      // фокус внутрь — Esc с фокусом вне карточки честно уходит в никуда.
+      await page.locator('[data-testid="S-41.input.hours"]').first().click();
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('[data-testid="M-14"]', { timeout: 20_000 });
+      await modalOpen(page, 'M-14');
+      await has(page, 'M-14', 'выход из настройки с введёнными данными спрашивает подтверждение');
+      await shot(page, 'M-14-exit-wizard');
+      await page.locator('[data-testid="M-14"] button', { hasText: 'Закрыть без сохранения' }).click();
+      await modalClosed(page, 'M-14');
+
+      // ── M-10 · отказ генератора: код, причина с цифрами, «К настройке» ──
       // Отказ вызывается тем же путём, каким его получит модератор: предметом
-      // без педагога. Важно, ЧЕЙ это отказ — арифметические отказы экрана 2
-      // (`LOAD_EXCEEDS_SANPIN` и соседи) сервер отдаёт ещё при вводе нагрузки,
-      // и они показываются строкой под полем, а НЕ модалкой `M-10`. `M-10`
-      // принадлежит отказам самой генерации, и проверять её надо ими.
+      // без педагога. `M-10` принадлежит отказам самой генерации.
       console.log('▶ M-10 · отказ генератора (предмет без педагога)');
       await page.goto(`${WEB}/subjects`);
       await page.waitForSelector('[data-testid="S-20.btn.newSubject"]', { timeout: 20_000 });
@@ -1043,15 +1065,11 @@ async function main() {
       await page.waitForSelector('[data-testid="S-40.grid.week"], [data-testid="S-40.banner.stale"]', { timeout: 30_000 });
       await click(page, 'S-40.btn.setup');
       await page.waitForSelector('[data-testid="M-08"]', { timeout: 20_000 });
-      await click(page, 'S-41.btn.next1');
+      // Все разделы в одной форме: нагрузка предзаполнена с сервера, выбор
+      // приоритетов обязателен явно (AR-77); параметры дня предзаполнены из
+      // прошлого шаблона — '5' здесь перезаписывает то же значение.
       await page.waitForSelector('[data-testid="S-41.input.hours"]', { timeout: 20_000 });
-      await click(page, 'S-41.btn.next2');
-      await page.waitForSelector('[data-testid="S-41.chips.priority"]', { timeout: 20_000 });
       await click(page, 'S-41.btn.noPriority');
-      await click(page, 'S-41.btn.next3');
-      await page.waitForSelector('[data-testid="S-41.input.slotsPerDay"]', { timeout: 20_000 });
-      // Параметры дня мастер не помнит между входами — их источник регистр
-      // школы, а не форма (AR-103); заполняем те же, что и в первый раз.
       await fill(page, 'S-41.input.slotsPerDay', '5');
       await click(page, 'S-41.btn.generate');
       await page.waitForSelector('[data-testid="S-42.refusal"]', { timeout: 90_000 });
@@ -1061,11 +1079,12 @@ async function main() {
       if (/Физика/.test(refusalText)) console.log(`    ✅ отказ называет объект: «${refusalText.slice(0, 100)}»`);
       else { console.error(`    ❌ отказ не называет предмет: «${refusalText}»`); failures++; }
       await shot(page, 'M-10-refusal');
-      // «К шагу N» ведёт на конкретный экран мастера, а не «куда-нибудь» (§3).
-      await page.locator('[data-testid="S-42.refusal"] button', { hasText: 'К шагу' }).click();
+      // «К настройке» прокручивает к разделу-виновнику, форма остаётся открытой (§3).
+      await page.locator('[data-testid="S-42.refusal"] button', { hasText: 'К настройке' }).click();
       await modalClosed(page, 'M-10');
       await page.waitForSelector('[data-testid="M-08"]', { timeout: 20_000 });
-      console.log('    ✅ «К шагу N» вернула в мастер, а не закрыла его');
+      console.log('    ✅ «К настройке» вернула в настройку, а не закрыла её');
+      await page.locator('[data-testid="S-41.input.slotsPerDay"]').click();
       await page.keyboard.press('Escape');
       await page.waitForSelector('[data-testid="M-14"], [data-testid="M-08"]', { state: 'attached', timeout: 20_000 });
       if (await page.locator('[data-testid="M-14"]').count()) {

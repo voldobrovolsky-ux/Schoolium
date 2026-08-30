@@ -69,10 +69,21 @@ export function useIsMobile(): boolean {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(max-width: 767px)");
-    const on = () => setMobile(mq.matches);
+    let t: number | undefined;
+    const on = () => {
+      // Раскладка меняется по УСТОЯВШЕМУСЯ значению. Мгновенный флип
+      // туда-обратно (исчезновение скроллбара, полностраничный скриншот,
+      // системная шторка) без задержки пересобирал бы оболочку и молча
+      // терял открытые модалки вместе с введённым в них.
+      window.clearTimeout(t);
+      t = window.setTimeout(() => setMobile(mq.matches), 120);
+    };
     mq.addEventListener("change", on);
-    on();
-    return () => mq.removeEventListener("change", on);
+    setMobile(mq.matches);
+    return () => {
+      window.clearTimeout(t);
+      mq.removeEventListener("change", on);
+    };
   }, []);
   return mobile;
 }

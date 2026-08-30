@@ -58,6 +58,17 @@ export interface GenDayParams {
   dayStartMin?: number;
 }
 
+/**
+ * Скелет дня для укладки (AR-171, УТЦ v1.4 фаза III): урочные позиции по дням
+ * в порядке `posNo`. Когда задан — слоты недели считаются ПО НЕМУ (номер слота
+ * = `lessonNo` скелета), а не арифметикой `slotsPerDay`; при `paired` часы
+ * предмета укладываются парами на смежные половины одного `pairNo`.
+ */
+export interface GenSkeleton {
+  gridKind: 'paired' | 'variable';
+  days: { dayNo: number; lessons: { lessonNo: number; pairNo: number | null }[] }[];
+}
+
 export interface GenInput {
   classes: GenClass[];
   pairs: GenPair[];
@@ -67,6 +78,8 @@ export interface GenInput {
   classesWithUnassignedGroups: { id: string; label: string }[];
   /** Предметы без полного покрытия: [{subjectId, subjectName, classId, groups}]. */
   uncovered: { subjectId: string; subjectName: string; classId: string; groups: number[] }[];
+  /** Скелет дня; null/отсутствует — прежняя укладка по параметрам дня. */
+  skeleton?: GenSkeleton | null;
   /** Бюджет перебора; по умолчанию — значения AR-107. */
   budget?: { seconds: number; attempts: number };
 }
@@ -113,6 +126,12 @@ interface Unit {
   /** Один элемент у класс-часа, по одному на группу у спаренного. */
   parts: { groupNo: number; teacherId: string }[];
   priority: boolean;
+  /**
+   * Сколько СМЕЖНЫХ слотов занимает единица: 2 — пара (два часа предмета на
+   * обеих половинах одного `pairNo`, перемены внутри нет — AR-171), 1 — одинарный
+   * час. Без скелета всегда 1 — прежняя укладка.
+   */
+  span: 1 | 2;
 }
 
 /**
@@ -137,7 +156,14 @@ export function classWeekHours(classId: string, pairs: GenPair[]): number {
  */
 export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; details: Record<string, unknown> } | null {
   const { classes, pairs, params } = input;
-  const grid = params.days * params.slotsPerDay;
+  // Слоты дня: по скелету — число урочных позиций ЭТОГО дня (день без позиций
+  // не вмещает ничего); без скелета — школьное число с экрана параметров.
+  const daySlots = (d: number): number => {
+    const lessons = dayLessons(input.skeleton, d);
+    return lessons ? lessons.length : params.slotsPerDay;
+  };
+  const weekDays = Array.from({ length: params.days }, (_, d) => d);
+  const grid = weekDays.reduce((a, d) => a + daySlots(d), 0);
 
   for (const c of classes) {
     const total = classWeekHours(c.id, pairs);
@@ -149,7 +175,7 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
     // «уроков в день» — второй множитель «слотов недели» (AR-103), но считается он
     // ПОКЛАССНО: день класса ограничен потолком ЕГО параллели (AR-114), а не
     // школьным числом. Иначе первоклассник тянул бы вниз всю школу.
-    const classGrid = params.days * classDayCap(c.parallel, params.slotsPerDay);
+    const classGrid = weekDays.reduce((a, d) => a + Math.min(classDayCap(c.parallel, params.slotsPerDay), daySlots(d)), 0);
     if (total > classGrid) {
       return {
         code: 'LOAD_EXCEEDS_GRID',
@@ -224,8 +250,11 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
     return { code: 'DAY_EXCEEDS_SANPIN', details: { senior: senior.parallel, slotsPerDay: params.slotsPerDay, cap: dayCap } };
   }
 
+  // Длина дня школы со скелетом задана временами самого скелета и проверена
+  // при его сохранении (`SKELETON_INVALID`) — арифметика параметров дня её
+  // больше не описывает и потому не судит.
   const minutes = dayLength(params);
-  if (minutes > DAY_MINUTES_CAP) {
+  if (!input.skeleton && minutes > DAY_MINUTES_CAP) {
     return {
       code: 'DAY_TOO_LONG',
       details: { minutes, cap: DAY_MINUTES_CAP, breakdown: dayLengthBreakdown(params) },
@@ -238,29 +267,47 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
 export const PRE_SEARCH_CODES = ARITHMETIC_REFUSALS;
 
 function buildUnits(input: GenInput): Unit[] {
+  // Спаренная сетка: часы предмета режутся на пары (span 2) и одиночный
+  // остаток (span 1). Дефолт школы — `paired` (решение владельца №7);
+  // `variable` и школа без скелета укладываются прежними одиночными часами.
+  const paired = input.skeleton?.gridKind === 'paired';
+  const spans = (hours: number): (1 | 2)[] =>
+    paired
+      ? [...Array<2>(Math.floor(hours / 2)).fill(2), ...(hours % 2 ? [1 as const] : [])]
+      : Array<1>(hours).fill(1);
+
   const units: Unit[] = [];
   for (const c of input.classes) {
     const own = input.pairs.filter((p) => p.classId === c.id);
     for (const p of own.filter((x) => x.scope === 'class')) {
-      for (let h = 0; h < p.hours; h += 1) {
-        units.push({ classId: c.id, subjectId: p.subjectId, parts: [{ groupNo: 0, teacherId: p.teacherId }], priority: p.priority });
+      for (const span of spans(p.hours)) {
+        units.push({ classId: c.id, subjectId: p.subjectId, parts: [{ groupNo: 0, teacherId: p.teacherId }], priority: p.priority, span });
       }
     }
     for (const sid of new Set(own.filter((x) => x.scope === 'group').map((x) => x.subjectId))) {
       const ps = own.filter((x) => x.subjectId === sid && x.scope === 'group');
-      const hours = ps[0].hours;
-      for (let h = 0; h < hours; h += 1) {
+      for (const span of spans(ps[0].hours)) {
         units.push({
           classId: c.id,
           subjectId: sid,
           // атомарная спаренная единица: все группы предмета в ОДНОМ слоте
           parts: ps.flatMap((p) => p.groupNos.map((g) => ({ groupNo: g, teacherId: p.teacherId }))),
           priority: ps[0].priority,
+          span,
         });
       }
     }
   }
   return units;
+}
+
+/**
+ * Урочные позиции дня по скелету, в порядке `posNo`. Дня нет в скелете —
+ * пустой список: занятий туда генератор не кладёт.
+ */
+function dayLessons(skeleton: GenSkeleton | null | undefined, dayNo: number): { lessonNo: number; pairNo: number | null }[] | null {
+  if (!skeleton) return null;
+  return skeleton.days.find((d) => d.dayNo === dayNo)?.lessons ?? [];
 }
 
 /**
@@ -271,7 +318,10 @@ function buildUnits(input: GenInput): Unit[] {
  *   4. полуокно запрещено — спаренная единица ставится целиком;
  *   5. без окон у класса: уроки дня идут подряд с первого слота;
  *   6. приоритетные предметы — в первой половине дня (МЯГКОЕ: помечается);
- *   7. дневной максимум класса — проверен арифметикой до перебора.
+ *   7. дневной максимум класса — проверен арифметикой до перебора;
+ *   8. при скелете `paired` (AR-171): пара предмета (span 2) занимает обе
+ *      половины ОДНОГО `pairNo` смежно; слоты недели = урочные позиции
+ *      скелета, номер слота = его `lessonNo`.
  */
 export function generate(input: GenInput): GenResult {
   const started = Date.now();
@@ -292,11 +342,13 @@ export function generate(input: GenInput): GenResult {
     }
     const rand = lcg(input.seed + restart * 7919);
     const order = units
-      .map((u, i) => ({ k: rand() - (u.priority ? 0.5 : 0), i })) // приоритетные — раньше в порядке
+      // приоритетные — раньше в порядке; пары — раньше одиночных, чтобы одиночный
+      // час не занял первую половину пары и не оставил для пары несмежный остаток
+      .map((u, i) => ({ k: rand() - (u.priority ? 0.5 : 0) - (u.span === 2 ? 0.25 : 0), i }))
       .sort((a, b) => a.k - b.k)
       .map((x) => units[x.i]);
 
-    const busyTeacher = new Set<string>(); // `${day}:${slot}:${teacherId}`
+    const busyTeacher = new Set<string>(); // `${day}:${lessonNo}:${teacherId}`
     const dayLen = new Map<string, number>(); // `${classId}:${day}` → занято слотов подряд
     const placed: GenSlot[] = [];
     let failed = false;
@@ -306,8 +358,19 @@ export function generate(input: GenInput): GenResult {
       const options: [number, number][] = [];
       for (let d = 0; d < days; d += 1) {
         const s = dayLen.get(`${u.classId}:${d}`) ?? 0; // без окон: следующий подряд
-        if (s >= cap) continue; // день класса ограничен потолком ЕГО параллели (AR-114)
-        if (u.parts.some((p) => busyTeacher.has(`${d}:${s}:${p.teacherId}`))) continue;
+        const lessons = dayLessons(input.skeleton, d);
+        // день класса ограничен потолком ЕГО параллели (AR-114) и, при скелете,
+        // числом урочных позиций этого дня
+        const dCap = lessons ? Math.min(cap, lessons.length) : cap;
+        if (s + u.span > dCap) continue;
+        // пара — на обе половины ОДНОГО pairNo, смежно и без перемены (AR-171)
+        if (u.span === 2 && lessons) {
+          const a = lessons[s];
+          const b = lessons[s + 1];
+          if (!a || !b || a.pairNo == null || a.pairNo !== b.pairNo) continue;
+        }
+        const nos = lessons ? lessons.slice(s, s + u.span).map((l) => l.lessonNo) : [s + 1];
+        if (u.parts.some((p) => nos.some((no) => busyTeacher.has(`${d}:${no}:${p.teacherId}`)))) continue;
         options.push([d, s]);
       }
       attempts += 1;
@@ -316,11 +379,15 @@ export function generate(input: GenInput): GenResult {
       }
       if (!options.length) { failed = true; break; }
       const [d, s] = options[Math.floor(rand() * options.length)];
-      for (const p of u.parts) {
-        busyTeacher.add(`${d}:${s}:${p.teacherId}`);
-        placed.push({ dayNo: d, slotNo: s + 1, classId: u.classId, groupNo: p.groupNo, subjectId: u.subjectId, teacherId: p.teacherId });
+      const lessons = dayLessons(input.skeleton, d);
+      for (let k = 0; k < u.span; k += 1) {
+        const no = lessons ? lessons[s + k].lessonNo : s + 1 + k;
+        for (const p of u.parts) {
+          busyTeacher.add(`${d}:${no}:${p.teacherId}`);
+          placed.push({ dayNo: d, slotNo: no, classId: u.classId, groupNo: p.groupNo, subjectId: u.subjectId, teacherId: p.teacherId });
+        }
       }
-      dayLen.set(`${u.classId}:${d}`, s + 1);
+      dayLen.set(`${u.classId}:${d}`, s + u.span);
     }
     if (failed) continue;
 

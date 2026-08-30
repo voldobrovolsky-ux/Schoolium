@@ -77,6 +77,8 @@ export const MUTATION_PERMISSIONS = [
   'subject.write',
   'staff.manage',
   'schedule.build',
+  // AR-174 (УТЦ v1.4): годовые нормы часов — ЕДИНСТВЕННОЕ право завуча в УТЦ
+  'schedule.load.write',
   'journal.mark.post',
   'journal.topic.set',
   'staff.self.write',
@@ -108,8 +110,11 @@ export type SchoolPermission = (typeof SCHOOL_PERMISSIONS)[number];
  */
 export const ROLE_PERMISSIONS: Record<SchoolRole, SchoolPermission[]> = {
   admin: [...MUTATION_PERMISSIONS, ...READ_PERMISSIONS],
-  moderator: [...READ_PERMISSIONS, 'school.manage', 'contingent.write', 'staff.manage', 'staff.self.write'],
-  deputy_academic: [...READ_PERMISSIONS, 'schedule.build', 'subject.write', 'staff.self.write'],
+  // AR-174: панель УТЦ (предметы, привязки, расписание) переезжает модератору…
+  moderator: [...READ_PERMISSIONS, 'school.manage', 'contingent.write', 'staff.manage', 'staff.self.write', 'schedule.build', 'subject.write'],
+  // …а завуч расставляет ТОЛЬКО годовые нормы часов: ни скелета, ни генерации,
+  // ни календаря, ни привязок (решение владельца 2026-08-30, №9)
+  deputy_academic: [...READ_PERMISSIONS, 'schedule.load.write', 'staff.self.write'],
   teacher: [...READ_PERMISSIONS, 'journal.mark.post', 'journal.topic.set', 'staff.self.write'],
   founder: [...READ_PERMISSIONS, 'staff.self.write'],
   director: [...READ_PERMISSIONS, 'staff.self.write'],
@@ -171,6 +176,8 @@ export const ERROR_CODES = [
   // LESSON_NOT_HELD — битое значение отметки больше не читается как «урок не прошёл»
   'SKELETON_INVALID',
   'MARK_VALUE_INVALID',
+  // УТЦ v1.4 фаза IV (AR-175): ручная перестановка в черновике сетки
+  'SWAP_CONFLICT',
   'CLASS_HAS_MARKS',
   'LAST_MODERATOR',
   'LAST_ROLE',
@@ -379,6 +386,17 @@ export interface CreateSubjectDto {
 
 export interface BindTeacherDto {
   token: string;
+  scope: BindingScope;
+  groupNos?: number[];
+}
+
+/**
+ * Ручная привязка педагога из карточки предмета (AR-177, УТЦ v1.4 фаза V):
+ * QR остаётся основным каналом, ручная — равноправный запасной. Даёт тот же
+ * `TeacherBinding` и то же событие `teacher.bound.v1`, что скан.
+ */
+export interface BindTeacherManualDto {
+  teacherId: string;
   scope: BindingScope;
   groupNos?: number[];
 }
@@ -766,6 +784,19 @@ export interface SchedulePreviewDto {
 export interface ConfirmScheduleDto {
   templateId: string;
   version: number;
+}
+
+/**
+ * Ручная правка черновика сетки (`S-43`, УТЦ v1.4 фаза IV): перестановка двух
+ * слотов ОДНОГО класса местами. Правится только черновик — подтверждённая
+ * сетка меняется регенерацией; версия — AR-109.
+ */
+export interface SwapSlotsDto {
+  templateId: string;
+  version: number;
+  a: { dayNo: number; slotNo: number };
+  b: { dayNo: number; slotNo: number };
+  classId: string;
 }
 
 // ─────────────────────────── журнал ───────────────────────────

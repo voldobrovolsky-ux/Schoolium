@@ -23,6 +23,7 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
   // УТЦ v1.4 фаза I (AR-171, AR-172)
   SKELETON_INVALID: (d) => `Скелет дня не сходится: ${n(d, 'reason')}`,
   MARK_VALUE_INVALID: (d) => `Значение «${n(d, 'value')}» не входит в шкалу — допустимы 2, 3, 4, 5, «н», «б»`,
+  SWAP_CONFLICT: (d) => `Перестановка невозможна: ${n(d, 'teacher')} в этом слоте ведёт урок в другом классе`,
   TOKEN_EXPIRED: () => 'Код погас, откройте карточку заново',
   PHONE_TAKEN_IN_SCHOOL: () => 'Этот номер уже зарегистрирован в школе',
   // контур учётки 1.2.0 (AR-153…AR-156); первые три видит модератор на формах КПЦ
@@ -69,6 +70,7 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
 /** HTTP-статус отказа: 409 у конфликтов состояния, 403 у отзыва доступа, иначе 400. */
 const STATUS: Partial<Record<ErrorCode, HttpStatus>> = {
   CONCURRENT_EDIT: HttpStatus.CONFLICT,
+  SWAP_CONFLICT: HttpStatus.CONFLICT,
   CLASSES_ALREADY_EXIST: HttpStatus.CONFLICT,
   PHONE_TAKEN_IN_SCHOOL: HttpStatus.CONFLICT,
   CLASS_HAS_MARKS: HttpStatus.CONFLICT,

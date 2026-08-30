@@ -21,7 +21,7 @@ export class PermissionGuard implements CanActivate {
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const code = this.reflector.getAllAndOverride<string | undefined>(REQUIRE_PERMISSION, [
+    const code = this.reflector.getAllAndOverride<string | string[] | undefined>(REQUIRE_PERMISSION, [
       ctx.getHandler(),
       ctx.getClass(),
     ]);
@@ -32,8 +32,10 @@ export class PermissionGuard implements CanActivate {
     const access = req.user.roles?.length
       ? await this.authz.resolveForRoles(req.user.roles)
       : await this.authz.resolveAccess(req.user.role, req.user.subRole);
-    if (!access.permissions.includes(code)) {
-      throw new ForbiddenException(`нет права: ${code}`);
+    // Массив — «любое из» (AR-174): роут открыт носителю хотя бы одного кода.
+    const codes = Array.isArray(code) ? code : [code];
+    if (!codes.some((c) => access.permissions.includes(c))) {
+      throw new ForbiddenException(`нет права: ${codes.join(' | ')}`);
     }
     return true;
   }

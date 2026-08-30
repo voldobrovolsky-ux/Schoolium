@@ -837,3 +837,85 @@
 .sch-weekbar { display: flex; align-items: center; justify-content: space-between; }
 .sch-weekrange { font-weight: var(--fw-semibold); }
 .sch-break { text-align: center; color: var(--c-ink-muted); font-size: var(--fs-xs); padding: var(--sp-4) 0; }
+
+/* ─── УТЦ v1.4 фаза II (AR-175): ленты дней и недель, неделя 3+3, строки по скелету ─── */
+/* Лента дней листается со снапом; дата — ТОЛЬКО под открытым днём (правка владельца 2026-08-30). */
+.sch-daystrip--snap { scroll-snap-type: x proximity; }
+.sch-daystrip--snap .sch-daychip { scroll-snap-align: center; flex: none; }
+.sch-daychip-date { font-weight: var(--fw-bold); }
+.sch-daychip--muted { opacity: 0.55; }
+
+/* Лента недель учебного года — мотается курсором/колесом, открытая подкручена в центр. */
+.sch-weekstrip { display: flex; gap: var(--sp-8); overflow-x: auto; padding-bottom: var(--sp-4); scroll-snap-type: x proximity; }
+.sch-weekchip {
+  flex: none; scroll-snap-align: center; min-height: var(--tap-min); padding: 0 var(--sp-16);
+  border-radius: var(--r-pill); border: 1px solid var(--c-border-default); background: var(--c-surface-card);
+  color: var(--c-ink-primary); font: inherit; font-size: var(--fs-sm); cursor: pointer; white-space: nowrap;
+}
+.sch-weekchip--active { background: var(--c-brand-violet-600); border-color: var(--c-brand-violet-600); color: var(--c-ink-on-violet); }
+.sch-weekchip--muted { color: var(--c-ink-muted); }
+
+/* Неделя 3+3: колонки заполняются сверху вниз — ПН/ВТ/СР слева, ЧТ/ПТ/СБ справа. */
+.sch-days33 { display: grid; grid-template-rows: repeat(3, auto); grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--sp-16) var(--sp-24); align-items: start; }
+.sch-day33 { display: flex; flex-direction: column; gap: var(--sp-8); min-width: 0; }
+.sch-day33-head { font-weight: var(--fw-semibold); color: var(--c-ink-secondary); }
+
+/* Номер ОБЩЕЙ нумерации дня («N.» — уроки, обед и события скелета в одном ряду). */
+.sch-pos-no {
+  width: 44px; height: 44px; border-radius: var(--r-md); flex: none;
+  background: var(--c-brand-violet-050); color: var(--c-brand-violet-700);
+  display: flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); font-size: var(--fs-lg);
+}
+/* Заголовок строки: «Предмет (1|2)» + отметка СРАЗУ после названия — переопределяет
+   общий приглушённый стиль `.sch-lesson-body span` для себя и для чипа отметки. */
+.sch-lesson-body .sch-lesson-title { display: flex; align-items: center; gap: var(--sp-8); color: var(--c-ink-primary); font-size: var(--fs-md); white-space: normal; overflow: visible; }
+.sch-lesson-body .sch-mark { display: inline-flex; width: 28px; height: 28px; font-size: var(--fs-sm); flex: none; }
+.sch-lesson-when { font-variant-numeric: tabular-nums; }
+.sch-lesson--special { background: var(--c-brand-pink-050); box-shadow: none; }
+.sch-lesson--special .sch-pos-no { background: var(--c-surface-card); }
+.sch-noday { text-align: center; padding: var(--sp-24) 0; }
+
+/* Раскрытие дня сверху вниз (правка владельца 2026-08-30). */
+@keyframes sch-unfold { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.sch-unfold { animation: sch-unfold 0.25s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .sch-unfold { animation: none; }
+}
+
+/* ─── УТЦ v1.4 фаза IV (AR-175): результат вкладками, скелет-редактор, ручная правка ─── */
+/* Полноэкранный результат: вкладки сверху «как вкладки браузера», тело скроллится. */
+.sch-studio { align-items: stretch; justify-content: flex-start; gap: 0; }
+.sch-tabsbar {
+  display: flex; align-items: center; gap: var(--sp-4); flex: none;
+  padding: var(--sp-8) var(--sp-16) 0; border-bottom: 1px solid var(--c-border-default);
+  background: var(--c-surface-card);
+}
+/* `sch-studiotab`, не `sch-tab`: имя вкладки таб-бара оболочки уже занято. */
+.sch-studiotab {
+  font: inherit; font-size: var(--fs-md); font-weight: var(--fw-semibold); cursor: pointer;
+  flex: 1 1 0; max-width: 220px;
+  padding: var(--sp-8) var(--sp-16); min-height: var(--tap-min); min-width: 96px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border: 1px solid var(--c-border-default); border-bottom: none;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: var(--c-surface-page); color: var(--c-ink-secondary);
+}
+.sch-studiotab--active { background: var(--c-surface-card); color: var(--c-ink-primary); border-color: var(--c-brand-violet-600); }
+.sch-studio-body { flex: 1; overflow-y: auto; padding: var(--sp-16); width: 100%; max-width: 1200px; margin: 0 auto; }
+.sch-studio-foot {
+  flex: none; display: flex; gap: var(--sp-12); justify-content: flex-end;
+  padding: var(--sp-12) var(--sp-16); border-top: 1px solid var(--c-border-default); background: var(--c-surface-card);
+}
+@media (max-width: 720px) {
+  .sch-studio-foot { flex-direction: column; }
+  .sch-studio-foot .sch-btn { width: 100%; }
+}
+
+/* Выбранный для перестановки слот (`S-43`) — рамка фирменным цветом. */
+.sch-cell--picked { outline: 2px solid var(--c-brand-violet-600); outline-offset: -2px; }
+
+/* Строка скелет-редактора: тип · [название] · начало · конец · убрать. */
+.sch-skel-row { display: flex; gap: var(--sp-8); align-items: center; flex-wrap: wrap; }
+.sch-skel-row select { flex: 0 0 110px; }
+.sch-skel-row input[type="time"] { flex: 0 0 104px; }
+.sch-skel-row input:not([type="time"]) { flex: 1 1 140px; min-width: 0; }

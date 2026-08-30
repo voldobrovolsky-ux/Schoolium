@@ -85,6 +85,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'contingent.write', section: 'school', screen: 'classes', action: 'write', label: 'Ведение классов и контингента' },
   { code: 'subject.write', section: 'school', screen: 'subjects', action: 'write', label: 'Ведение предметов и привязок' },
   { code: 'staff.manage', section: 'school', screen: 'staff', action: 'manage', label: 'Ведение персонала' },
+  // AR-174 (УТЦ v1.4): годовые нормы часов — единственное право завуча в УТЦ
+  { code: 'schedule.load.write', section: 'school', screen: 'schedule', action: 'load', label: 'Годовые нормы часов (завуч)' },
   { code: 'journal.mark.post', section: 'school', screen: 'journal', action: 'mark', label: 'Постановка и снятие отметок' },
   { code: 'journal.topic.set', section: 'school', screen: 'journal', action: 'topic', label: 'Тема урока' },
   { code: 'staff.self.write', section: 'school', screen: 'profile', action: 'write', label: 'Собственная аватарка' },
@@ -181,6 +183,13 @@ export async function syncAuthzCatalog(prisma: PrismaClient): Promise<void> {
         create: { rolePackageId: row.id, permissionId: perm.id },
       });
     }
+    // Прунинг ВНУТРИ пакета: право, выпавшее из канона роли, обязано уйти и из
+    // БД — иначе сужение пакета (AR-174: завуч теряет schedule.build) остаётся
+    // только текстом, а гейты продолжают пускать по прошлогодней записи.
+    const canon = await prisma.permission.findMany({ where: { code: { in: [...pkg.permissions] } }, select: { id: true } });
+    await prisma.rolePackagePermission.deleteMany({
+      where: { rolePackageId: row.id, permissionId: { notIn: canon.map((p) => p.id) } },
+    });
   }
   // прунинг: убрать пакеты, выпавшие из канона (например прежние admin/owner — tenancy-роли,
   // каталог на них не строим). Связи RolePackagePermission уходят каскадом.

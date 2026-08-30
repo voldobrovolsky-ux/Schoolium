@@ -26,7 +26,7 @@ on:
         required: true
         default: deploy
         type: choice
-        options: [deploy, bootstrap, import, status]
+        options: [deploy, bootstrap, provision, import, status]
       school:
         description: 'bootstrap: название школы'
         required: false
@@ -44,7 +44,15 @@ on:
         required: false
         default: 'false'
       workspace:
-        description: 'import: workspace id (печатает bootstrap)'
+        description: 'import/provision: workspace id (печатает bootstrap; provision при единственной школе найдёт сам)'
+        required: false
+        default: ''
+      admin:
+        description: 'provision: учётка администратора школы, "Фамилия Имя=username"'
+        required: false
+        default: ''
+      moderator:
+        description: 'provision: учётка модератора школы, "Фамилия Имя=username"'
         required: false
         default: ''
 
@@ -155,6 +163,21 @@ jobs:
         run: |
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run school:bootstrap -- --phone='${{ inputs.phone }}' --relink"
+
+      # Доведение СУЩЕСТВУЮЩЕЙ школы до рабочих кабинетов: учётки админа и
+      # модератора с одноразовыми ссылками входа (24ч). Только добавляет —
+      # существующих пользователей и данные школы не трогает.
+      - name: Завести учётки школы (provision)
+        if: inputs.action == 'provision'
+        run: |
+          A="${{ inputs.admin }}"
+          M="${{ inputs.moderator }}"
+          ARGS=""
+          if [ -n "$A" ]; then ARGS="$ARGS --admin-name='${A%%=*}' --admin-username='${A##*=}'"; fi
+          if [ -n "$M" ]; then ARGS="$ARGS --moderator-name='${M%%=*}' --moderator-username='${M##*=}'"; fi
+          if [ -n "${{ inputs.workspace }}" ]; then ARGS="$ARGS --workspace='${{ inputs.workspace }}'"; fi
+          $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            npm run school:provision -- $ARGS"
 
       - name: Залить данные школы (import)
         if: inputs.action == 'import'

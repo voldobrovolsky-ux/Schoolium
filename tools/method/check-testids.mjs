@@ -43,6 +43,7 @@ const HOME = {
   'S-20': ['screens/subjects.tsx'], 'S-21': ['screens/subjects.tsx'], 'S-22': ['screens/subjects.tsx'],
   'S-30': ['screens/staff.tsx'], 'S-31': ['screens/staff.tsx'],
   'S-40': ['screens/schedule.tsx'], 'S-41': ['screens/schedule.tsx'], 'S-42': ['screens/schedule.tsx'],
+  'S-43': ['screens/schedule.tsx'],
   'S-50': ['screens/journal.tsx'], 'S-51': ['screens/journal.tsx'], 'S-52': ['screens/journal.tsx'],
   'S-60': ['screens/misc.tsx'], 'S-70': ['screens/misc.tsx'], 'S-80': ['screens/misc.tsx'],
   // 1.2.0 (specs/school-launch/20-cabinets.md §7)

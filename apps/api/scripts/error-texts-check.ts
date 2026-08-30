@@ -54,6 +54,8 @@ const SAMPLE: Record<ErrorCode, Record<string, unknown>> = {
   // УТЦ v1.4 фаза I (AR-171, AR-172)
   SKELETON_INVALID: { reason: 'день 0, пара 1: между частями пары перемена — части обязаны быть смежными' },
   MARK_VALUE_INVALID: { value: '7' },
+  // УТЦ v1.4 фаза IV (AR-175): ручная перестановка в черновике
+  SWAP_CONFLICT: { teacher: 'Иванова М. И.' },
   LOAD_EXCEEDS_SANPIN: { classLabel: 5, total: 34, cap: 29 },
   LOAD_EXCEEDS_GRID: { classLabel: 5, total: 40, grid: 30, perDay: 6, days: 5 },
   GROUP_HOURS_UNEQUAL: { subject: 'Английский', classLabel: 7, hours: 'группа 1 — 3 ч, группа 2 — 1 ч' },

@@ -21,11 +21,15 @@ import type {
   StudentAccessDto,
   SubjectAverageDto,
   BindTeacherDto,
+  BindTeacherManualDto,
   ClassDto,
   ConfirmScheduleDto,
   CreateClassesDto,
   CreateSubjectDto,
   DayParamsDto,
+  DaySkeletonDto,
+  SetSkeletonDto,
+  SwapSlotsDto,
   ErrorCode,
   JournalDto,
   MarkValue,
@@ -148,6 +152,8 @@ export const api = {
 
   // ─── персонал ───
   staff: () => call<StaffCardDto[]>("GET", `${V1}/staff`),
+  bindTeacherManual: (subjectId: string, dto: BindTeacherManualDto) =>
+    call<SubjectDto>("POST", `${V1}/subjects/${subjectId}/teachers/manual`, dto),
   staffCard: (id: string) => call<StaffCardDto>("GET", `${V1}/staff/${id}`),
   // Учётку целиком заводит модератор (AR-154): пароль в ответе — один раз.
   addStaffCard: (dto: CreateStaffCardDto) =>
@@ -221,6 +227,9 @@ export const api = {
     call<{ ok: boolean; dayLengthMinutes: number; cap: number }>("PUT", `${V1}/schedule/day-params`, dto),
   generate: () => call<SchedulePreviewDto>("POST", `${V1}/schedule/generate`),
   cancelGeneration: () => call<{ ok: boolean }>("POST", `${V1}/schedule/generate/cancel`),
+  skeleton: () => call<DaySkeletonDto>("GET", `${V1}/schedule/skeleton`),
+  setSkeleton: (dto: SetSkeletonDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/skeleton`, dto),
+  swapSlots: (dto: SwapSlotsDto) => call<SchedulePreviewDto>("PUT", `${V1}/schedule/template/swap`, dto),
   preview: () => call<SchedulePreviewDto>("GET", `${V1}/schedule/preview`),
   confirm: (dto: ConfirmScheduleDto) =>
     call<{ ok: boolean; detached: number; materialized: number }>("POST", `${V1}/schedule/confirm`, dto),

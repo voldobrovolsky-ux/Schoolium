@@ -4,6 +4,7 @@ import type {
   AdminCabinetDto,
   AuditEntryDto,
   BindTeacherDto,
+  BindTeacherManualDto,
   ConfirmScheduleDto,
   CreateClassesDto,
   CreateGuardianDto,
@@ -17,6 +18,7 @@ import type {
   SetLoadDto,
   SetPrioritiesDto,
   SetTermsDto,
+  SwapSlotsDto,
   UpsertStudentDto,
 } from '@edustore/shared';
 import { RequirePermission } from '../common/authz/require-permission.decorator';
@@ -366,6 +368,13 @@ export class SubjectsController {
     return this.svc.bindTeacher(id, body, actorOf(req));
   }
 
+  /** §11 строка 15а · `S-21.btn.bindManual` (AR-177): ручная привязка — тот же `TeacherBinding`, что скан. */
+  @RequirePermission('subject.write')
+  @Post(':id/teachers/manual')
+  bindManual(@Req() req: Req0, @Param('id') id: string, @Body() body: BindTeacherManualDto) {
+    return this.svc.bindTeacherManual(id, body, actorOf(req));
+  }
+
   /** §11 строка 16 · `S-21.btn.unbind`. */
   @RequirePermission('subject.write')
   @Delete(':id/teachers/:tid')
@@ -588,8 +597,11 @@ export class ScheduleController {
     return this.svc.load();
   }
 
-  /** §11 строка 18 · `S-41` экран 2. Несёт версию агрегата (AR-109). */
-  @RequirePermission('schedule.build')
+  /**
+   * §11 строка 18 · раздел «Нагрузка». Несёт версию агрегата (AR-109).
+   * Открыт и завучу: годовые нормы часов — его единственное право УТЦ (AR-174).
+   */
+  @RequirePermission(['schedule.build', 'schedule.load.write'])
   @Put('load')
   setLoad(@Req() req: Req0, @Body() body: SetLoadDto) {
     return this.svc.setLoad(body, actorOf(req));
@@ -621,6 +633,13 @@ export class ScheduleController {
   @Put('skeleton')
   setSkeleton(@Req() req: Req0, @Body() body: SetSkeletonDto) {
     return this.svc.setSkeleton(body, actorOf(req));
+  }
+
+  /** §11 строка 24б · `S-43`: перестановка в черновике; материализует только confirm (AR-18). */
+  @RequirePermission('schedule.build')
+  @Put('template/swap')
+  swapSlots(@Req() req: Req0, @Body() body: SwapSlotsDto) {
+    return this.svc.swapSlots(body, actorOf(req));
   }
 
   /** §11 строка 21 · `S-41.btn.generate`: результат — предложение (AR-18). */

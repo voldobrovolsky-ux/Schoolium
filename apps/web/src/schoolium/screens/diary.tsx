@@ -7,18 +7,26 @@
  * Колонки ДЗ нет вовсе — появится инкрементом №2, пустая колонка не рисуется.
  */
 import { useEffect, useState } from "react";
-import { slotTimes, type DiaryChildDto, type DiaryWeekDto, type SubjectAverageDto } from "@edustore/shared";
+import { type DiaryChildDto, type DiaryWeekDto, type SubjectAverageDto } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
-import { useAsync } from "../hooks";
-import { Badge, Button, EmptyState, ErrorState, MarkChip, Skeletons } from "../ui";
+import { useIsMobile } from "../hooks";
+import { Badge, Button, EmptyState, ErrorState, Skeletons } from "../ui";
 import { navigate } from "../router";
+import {
+  addDays,
+  buildDayRows,
+  DAY_NAMES,
+  DayLessonList,
+  Days33,
+  DayStrip,
+  dayMonth,
+  mondayOf,
+  weekRange,
+  WeekStrip,
+  type DayCell,
+} from "../schedule-view";
 
-const DAY_NAMES = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
-const dayName = (isoDay: string): string => DAY_NAMES[(new Date(`${isoDay}T00:00:00.000Z`).getUTCDay() + 6) % 7];
-const fmtDay = (isoDay: string): string => {
-  const [, m, d] = isoDay.split("-");
-  return `${d}.${m}`;
-};
+const DAY_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
 
 export function DiaryScreen() {
   const [children, setChildren] = useState<DiaryChildDto[] | null>(null);
@@ -53,7 +61,8 @@ export function DiaryScreen() {
   }, [child, week]);
 
   return (
-    <div className="sch" style={{ maxWidth: 720, margin: "0 auto", padding: "var(--sp-16)" }}>
+    // 1080, не 720: десктопная неделя 3+3 (AR-175) в двух колонках карточек
+    <div className="sch" style={{ maxWidth: 1080, margin: "0 auto", padding: "var(--sp-16)" }}>
       <div className="sch-page-head">
         <h1 data-testid="S-90.header">Дневник</h1>
         <Button
@@ -130,34 +139,41 @@ export function DiaryScreen() {
 }
 
 /**
- * Раскладка — лента дней + уроки выбранного дня (правка владельца 2026-08-30,
- * по референсам): чипы дней недели со стрелками недель по краям, выбранный
- * день заполнен фирменным цветом, уроки — карточками с номером слева.
+ * Неделя дневника (AR-175, УТЦ v1.4 фаза II) — тем же общим модулем, что
+ * расписание `S-40`: строка «N. Предмет» несёт отметку СРАЗУ после названия,
+ * времена — из скелета дня (AR-171), без скелета — `slotTimes`. Мобайл — лента
+ * дней с датой только под открытым; десктоп — лента недель и неделя 3+3.
  */
-const DAY_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"];
-const dayShort = (isoDay: string): string => DAY_SHORT[(new Date(`${isoDay}T00:00:00.000Z`).getUTCDay() + 6) % 7];
-const MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-const dayMonth = (isoDay: string): string => `${Number(isoDay.slice(8))} ${MONTHS[Number(isoDay.slice(5, 7)) - 1]}`;
-
-/** «1 — 5 сентября» либо «29 сентября — 3 октября» — индикатор недели. */
-export const weekRange = (from: string, to: string): string =>
-  from.slice(5, 7) === to.slice(5, 7) ? `${Number(from.slice(8))} — ${dayMonth(to)}` : `${dayMonth(from)} — ${dayMonth(to)}`;
-
 function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) => void }) {
+  const mobile = useIsMobile();
   const idx = data.weeks.findIndex((w) => w.monday === data.monday);
   const prev = idx > 0 ? data.weeks[idx - 1] : null;
   const next = idx >= 0 && idx < data.weeks.length - 1 ? data.weeks[idx + 1] : null;
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [selected, setSelected] = useState<string | null>(null);
-  const day = data.days.find((d) => d.date === selected) ?? data.days.find((d) => d.date === todayIso) ?? data.days[0] ?? null;
-  const first = data.days[0]?.date ?? data.monday;
-  const last = data.days[data.days.length - 1]?.date ?? data.monday;
+  const [selected, setSelected] = useState<number | null>(null);
+
+  const cellsFor = (dayNo: number): Map<number, DayCell[]> => {
+    const date = addDays(data.monday, dayNo);
+    const map = new Map<number, DayCell[]>();
+    for (const l of data.days.find((d) => d.date === date)?.lessons ?? []) {
+      const cells = map.get(l.slotNo) ?? [];
+      cells.push({ key: l.lessonId, title: l.subjectName, sub: l.topic, mark: l.mark });
+      map.set(l.slotNo, cells);
+    }
+    return map;
+  };
+  const rowsFor = (dayNo: number) =>
+    buildDayRows({ skeleton: data.skeleton, grid: data.grid, dayNo, cellsByLesson: cellsFor(dayNo) });
+
+  const firstBusy = data.days[0]?.date ? (new Date(`${data.days[0].date}T00:00:00.000Z`).getUTCDay() + 6) % 7 : 0;
+  const day =
+    selected ?? (mondayOf(todayIso) === data.monday ? (new Date(`${todayIso}T00:00:00.000Z`).getUTCDay() + 6) % 7 : firstBusy);
 
   return (
     <div className="sch-stack" data-testid="S-90.week">
       {data.days.length === 0 ? (
         <EmptyState testId="S-90.emptyWeek" title="Уроков на этой неделе нет" />
-      ) : (
+      ) : mobile ? (
         <>
           <div className="sch-weekbar">
             <button
@@ -170,7 +186,7 @@ function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) =>
               ‹
             </button>
             <span className="sch-weekrange" data-testid="S-90.weekRange">
-              {weekRange(first, last)}
+              {weekRange(data.monday, addDays(data.monday, 5))}
             </span>
             <button
               className="sch-weeknav"
@@ -183,53 +199,42 @@ function WeekView({ data, onWeek }: { data: DiaryWeekDto; onWeek: (m: string) =>
             </button>
           </div>
 
-          <div className="sch-daystrip" data-testid="S-90.daystrip">
-            {data.days.map((d) => (
-              <button
-                key={d.date}
-                className={day?.date === d.date ? "sch-daychip sch-daychip--active" : "sch-daychip"}
-                onClick={() => setSelected(d.date)}
-              >
-                <small>{dayShort(d.date)}</small>
-                <span>{Number(d.date.slice(8))}</span>
-              </button>
-            ))}
-          </div>
+          <DayStrip
+            testId="S-90.daystrip"
+            days={[0, 1, 2, 3, 4, 5, 6].map((d) => ({
+              dayNo: d,
+              label: DAY_NAMES[d],
+              date: addDays(data.monday, d),
+              muted: rowsFor(d).length === 0,
+            }))}
+            open={day}
+            onOpen={setSelected}
+          />
 
-          {day ? (
-            <section className="sch-stack" data-testid="S-90.day" aria-label={`${dayName(day.date)} ${fmtDay(day.date)}`}>
-              {day.lessons.map((l, i) => {
-                const t = data.grid ? slotTimes(data.grid, l.slotNo) : null;
-                const nextLesson = day.lessons[i + 1];
-                return (
-                  <div key={l.lessonId} className="sch-stack" style={{ gap: 0 }}>
-                    <div className="sch-lesson">
-                      {t ? (
-                        <div className="sch-lesson-time">
-                          <b>{t.start}</b>
-                          <span>{t.end}</span>
-                        </div>
-                      ) : (
-                        <div className="sch-lesson-no">{l.slotNo}</div>
-                      )}
-                      <div className="sch-lesson-body">
-                        <b>{l.subjectName}</b>
-                        {l.topic ? <span>{l.topic}</span> : null}
-                      </div>
-                      {l.mark ? <MarkChip value={l.mark} /> : null}
-                    </div>
-                    {t && nextLesson ? (
-                      <div className="sch-break">
-                        {nextLesson.slotNo === l.slotNo + 1
-                          ? `перемена ${t.breakAfterMin} мин`
-                          : "окно"}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </section>
-          ) : null}
+          <section aria-label={`${DAY_FULL[day]} ${dayMonth(addDays(data.monday, day))}`}>
+            {/* key: смена дня перезапускает раскрытие сверху вниз (`sch-unfold`) */}
+            <DayLessonList key={day} rows={rowsFor(day)} testId="S-90.day" />
+          </section>
+        </>
+      ) : (
+        <>
+          {/* десктоп: недели журнала лентой (`S-90.weekRange` живёт в ленте недель) */}
+          <WeekStrip
+            testId="S-90.weeks"
+            weeks={data.weeks.map((w) => ({
+              monday: w.monday,
+              label: weekRange(w.monday, addDays(w.monday, 5)),
+              muted: !w.hasLessons,
+            }))}
+            open={data.monday}
+            onOpen={onWeek}
+          />
+          <Days33
+            testId="S-90.day"
+            dayNos={[0, 1, 2, 3, 4, 5]}
+            header={(d) => `${DAY_NAMES[d]} · ${dayMonth(addDays(data.monday, d))}`}
+            render={(d) => <DayLessonList rows={rowsFor(d)} />}
+          />
         </>
       )}
     </div>
