@@ -26,6 +26,11 @@ COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
+# Разовые операционные команды (school:bootstrap, school:import) идут через
+# ts-node прямо в проде — им нужны исходники и tsconfig, не только dist.
+COPY --from=build /app/apps/api/scripts ./apps/api/scripts
+COPY --from=build /app/apps/api/src ./apps/api/src
+COPY --from=build /app/apps/api/tsconfig.json ./apps/api/
 WORKDIR /app/apps/api
 EXPOSE 3000
 # применяем миграции и запускаем (сид — отдельной командой при первом деплое)
