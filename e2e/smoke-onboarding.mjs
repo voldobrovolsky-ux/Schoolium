@@ -1283,6 +1283,65 @@ async function main() {
     await phone.goto(`${WEB}/journal`).catch(() => undefined);
     await phoneCtx.close();
 
+    // ── PWA · релиз доезжает до устройства (AR-185) ──
+    // Ворота именно того дефекта, из-за которого владелец 31.08 не увидел
+    // задеплоенный пакет: воркер отдавал прошлую оболочку, и обновление
+    // страницы не помогало. Проверяется в ОДНОМ контексте, поверх уже
+    // установленного воркера — чистый браузер этот класс дефектов не ловит.
+    console.log('▶ PWA · доставка релиза');
+    await page.goto(`${WEB}/`);
+    const swOk = await page
+      .evaluate(() => navigator.serviceWorker.ready.then(() => true))
+      .catch(() => false);
+    if (swOk) console.log('    ✅ service worker зарегистрирован (прод-сборка)');
+    else { console.error('    ❌ service worker не поднялся — PWA-контур не проверен'); failures++; }
+
+    if (swOk) {
+      // Имя кеша обязано нести идентификатор СБОРКИ: пока оно было константой
+      // «schoolium-shell-v1», байты sw.js не менялись, браузер не находил
+      // обновления и install/activate не выполнялись ни разу.
+      const bundle = (await page.evaluate(
+        () => [...document.querySelectorAll('script[src]')].map((s) => s.getAttribute('src')).join(' '),
+      )) || '';
+      const buildId = (bundle.match(/assets\/(index-[A-Za-z0-9_-]+)\.js/) || [])[1] ?? '';
+      const cacheNames = await page.evaluate(() => caches.keys());
+      const shell = cacheNames.filter((n) => n.startsWith('schoolium-shell-'));
+      if (buildId && shell.length === 1 && shell[0] === `schoolium-shell-${buildId}`)
+        console.log(`    ✅ кеш оболочки версионирован сборкой: ${shell[0]}`);
+      else { console.error(`    ❌ кеши оболочки ${JSON.stringify(shell)} не отвечают сборке ${buildId}`); failures++; }
+
+      // Навигация — СЕТЬЮ: подменяем оболочку на диске и требуем, чтобы
+      // ОБЫЧНАЯ перезагрузка показала новое. Со старой стратегией
+      // «cached || network» этот шаг красный.
+      const indexFile = path.join(ROOT, 'apps/web/dist/index.html');
+      const original = fs.readFileSync(indexFile, 'utf8');
+      try {
+        fs.writeFileSync(indexFile, original.replace('</head>', '<meta name="sch-release" content="v2" /></head>'));
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        const seen = await page.evaluate(
+          () => document.querySelector('meta[name="sch-release"]')?.getAttribute('content') ?? null,
+        );
+        if (seen === 'v2') console.log('    ✅ новая оболочка видна с ПЕРВОЙ обычной перезагрузки — релиз доезжает');
+        else { console.error(`    ❌ после перезагрузки отдана прошлая оболочка (маркер: ${seen}) — релиз залипает в кеше`); failures++; }
+      } finally {
+        fs.writeFileSync(indexFile, original);
+        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined);
+      }
+
+      // Ответы /api/ в Cache Storage не попадают ни при какой стратегии:
+      // вчерашние отметки, показанные как сегодняшние, — ложь журналу.
+      const apiCached = await page.evaluate(async () => {
+        const out = [];
+        for (const n of await caches.keys()) {
+          const c = await caches.open(n);
+          for (const r of await c.keys()) if (new URL(r.url).pathname.startsWith('/api/')) out.push(r.url);
+        }
+        return out;
+      });
+      if (apiCached.length === 0) console.log('    ✅ ответов /api/ в кеше нет — журнал не показывает вчерашнее');
+      else { console.error(`    ❌ в кеше лежат ответы API: ${apiCached.slice(0, 3).join(', ')}`); failures++; }
+    }
+
     // ── реестр модалок §3 пройден перечислением, а не «в целом» ──
     const missOpen = MODALS.filter((m) => !modalsOpened.has(m));
     const missClose = MODALS.filter((m) => !modalsClosed.has(m));

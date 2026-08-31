@@ -1,10 +1,44 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
+
+/**
+ * Сборка service worker'а с идентификатором сборки (AR-185).
+ *
+ * Раньше `sw.js` лежал в `public/` и копировался в `dist` БЕЗ обработки —
+ * значит был байт-в-байт одинаков во всех релизах. Браузер ищет обновление
+ * воркера сравнением байтов: одинаковые байты = «обновления нет», `install` и
+ * `activate` не выполняются никогда, и прод отдавал прошлую оболочку из кеша
+ * (дефект 2026-08-31: владелец не увидел релиз ни с телефона, ни с десктопа).
+ *
+ * Идентификатор берётся из имени входного чанка — оно уже несёт хеш
+ * содержимого и меняется тогда и только тогда, когда изменился код приложения.
+ */
+function swBuild(): Plugin {
+  const source = fileURLToPath(new URL("./src/sw-source.js", import.meta.url));
+  return {
+    name: "schoolium-sw-build",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const entry = Object.values(bundle).find(
+        (c): c is typeof c & { isEntry: true } => c.type === "chunk" && c.isEntry,
+      );
+      // Фолбэк на длину бандла не выдумывает версию, а называет то же, что
+      // отличает сборки: без входного чанка релиза не бывает.
+      const buildId = entry ? entry.fileName.replace(/^.*[/\\]|\.js$/g, "") : `b${Object.keys(bundle).length}`;
+      this.emitFile({
+        type: "asset",
+        fileName: "sw.js",
+        source: readFileSync(source, "utf8").replace(/__BUILD_ID__/g, buildId),
+      });
+    },
+  };
+}
 
 // Алиасы: @ → src, @edustore/shared → пакет контрактов (как TS-исходник, без сборки).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), swBuild()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

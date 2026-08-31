@@ -108,9 +108,14 @@ jobs:
           set -e
           cd ~/schoolium
           set -a; . ./.env.prod; set +a
+          # `< /dev/null` обязателен: `exec -T` пробрасывает stdin в контейнер, а
+          # stdin здесь — сам heredoc. Без него psql съедал ОСТАТОК скрипта
+          # (строку `restart api`), висел в ожидании EOF и убивал прогон по
+          # таймауту SSH — так упал run №17 (15 минут, «Broken pipe»), и
+          # перезапуск api не выполнялся ни в одном прогоне.
           docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T postgres \
             psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-            -c "ALTER USER \"$POSTGRES_USER\" WITH PASSWORD '$POSTGRES_PASSWORD';"
+            -c "ALTER USER \"$POSTGRES_USER\" WITH PASSWORD '$POSTGRES_PASSWORD';" < /dev/null
           docker compose -f docker-compose.prod.yml --env-file .env.prod restart api
           REMOTE
 
@@ -120,6 +125,32 @@ jobs:
           $SSH_CMD 'sleep 5; code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/api/healthz || true);
             echo "API /health: $code";
             docker compose -f ~/schoolium/docker-compose.prod.yml --env-file ~/schoolium/.env.prod logs --tail=20 api'
+
+      # «Задеплоено» обязано значить «доехало до браузера» (AR-185). До этого
+      # шага пайплайн гейтился ТОЛЬКО на /api/healthz и о веб-контейнере не знал
+      # ничего: прогон №18 был зелёным, пока прод отдавал прошлую оболочку.
+      # Проверяется то, что реально видит устройство: бандл из index.html
+      # существует, воркер несёт идентификатор ЭТОЙ сборки, оболочка не кешируется.
+      - name: Проверка веб-контейнера (релиз доехал до браузера)
+        if: inputs.action == 'deploy'
+        run: |
+          $SSH_CMD bash -s <<'REMOTE'
+          set -e
+          W=http://127.0.0.1:8080
+          html=$(curl -sS "$W/index.html")
+          bundle=$(printf '%s' "$html" | grep -o 'assets/index-[A-Za-z0-9_-]*\.js' | head -1)
+          [ -n "$bundle" ] || { echo "index.html не называет бандл — оболочка сломана"; exit 1; }
+          echo "бандл оболочки: $bundle"
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$W/$bundle")
+          [ "$code" = "200" ] || { echo "бандл $bundle отдаёт $code — на проде лежит ЧУЖАЯ оболочка"; exit 1; }
+          build_id=$(printf '%s' "$bundle" | sed 's|assets/||; s|\.js$||')
+          sw=$(curl -sS "$W/sw.js")
+          printf '%s' "$sw" | grep -q "$build_id" || {
+            echo "sw.js не несёт идентификатор сборки $build_id — воркер не обновится у вернувшегося устройства"; exit 1; }
+          cc=$(curl -sSI "$W/index.html" | tr -d '\r' | grep -i '^cache-control:' || true)
+          case "$cc" in *no-cache*) ;; *) echo "index.html без no-cache ($cc) — браузер покажет старую оболочку"; exit 1;; esac
+          echo "web OK: бандл на месте, воркер версионирован ($build_id), оболочка не кешируется"
+          REMOTE
 
       # Снапшоты деплоя (решение владельца 2026-08-30, вместо веток-копий): после
       # зелёного health-check workflow сам ставит неизменяемый тег
