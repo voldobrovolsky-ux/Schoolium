@@ -26,7 +26,7 @@ on:
         required: true
         default: deploy
         type: choice
-        options: [deploy, bootstrap, provision, import, status]
+        options: [deploy, bootstrap, provision, import, schedule-clear, status]
       school:
         description: 'bootstrap: название школы'
         required: false
@@ -44,7 +44,7 @@ on:
         required: false
         default: 'false'
       workspace:
-        description: 'import/provision: workspace id (печатает bootstrap; provision при единственной школе найдёт сам)'
+        description: 'import/provision/schedule-clear: workspace id (печатает bootstrap; provision при единственной школе найдёт сам)'
         required: false
         default: ''
       admin:
@@ -178,6 +178,16 @@ jobs:
           if [ -n "${{ inputs.workspace }}" ]; then ARGS="$ARGS --workspace='${{ inputs.workspace }}'"; fi
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run school:provision -- $ARGS"
+
+      # Очистка ОШИБОЧНОЙ сетки (решение владельца 2026-08-31): удаляет шаблоны
+      # и пустые уроки школы, уроки с отметками отвязывает; классы, предметы,
+      # привязки, нагрузку и учеников не трогает. Требует workspace id.
+      - name: Очистить сетку расписания школы (schedule-clear)
+        if: inputs.action == 'schedule-clear'
+        run: |
+          test -n "${{ inputs.workspace }}" || { echo 'нужен inputs.workspace'; exit 1; }
+          $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            npm run schedule:clear -- --workspace='${{ inputs.workspace }}'"
 
       - name: Залить данные школы (import)
         if: inputs.action == 'import'

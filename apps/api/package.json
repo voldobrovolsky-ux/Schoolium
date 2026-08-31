@@ -24,6 +24,7 @@
     "timetable:check": "ts-node scripts/timetable-authoring-check.ts",
     "school:bootstrap": "ts-node scripts/school-bootstrap.ts",
     "school:provision": "ts-node scripts/school-provision.ts",
+    "schedule:clear": "ts-node scripts/school-schedule-clear.ts",
     "access:check": "ts-node scripts/access-circuit-check.ts",
     "onboarding:check": "ts-node scripts/onboarding-check.ts",
     "generator:check": "ts-node scripts/generator-check.ts",

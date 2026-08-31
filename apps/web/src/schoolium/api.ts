@@ -22,6 +22,8 @@ import type {
   SubjectAverageDto,
   BindTeacherDto,
   BindTeacherManualDto,
+  SaveCompetenceDto,
+  SaveCompetenceResultDto,
   ClassDto,
   ConfirmScheduleDto,
   CreateClassesDto,
@@ -149,6 +151,9 @@ export const api = {
     call<SubjectDto>("DELETE", `${V1}/subjects/${id}/teachers/${teacherId}`),
   scan: (token: string) =>
     call<{ ok: boolean; subject: string; classLabel: string }>("POST", `${V1}/subjects/scan`, { token }),
+  // Компетенции педагога (AR-179): галочки «предмет × класс», замена и открепление.
+  saveCompetence: (dto: SaveCompetenceDto) =>
+    call<SaveCompetenceResultDto>("POST", `${V1}/subjects/competence`, dto),
 
   // ─── персонал ───
   staff: () => call<StaffCardDto[]>("GET", `${V1}/staff`),
@@ -251,7 +256,7 @@ export const api = {
   admin: () => call<AdminCabinetDto>("GET", `${V1}/admin`),
 };
 
-/** Строка экрана 2 мастера расписания: пара «педагог × предмет × класс/группа». */
+/** Строка норм часов: пара «педагог × предмет × класс/группа» (AR-180). */
 export interface LoadEntry {
   bindingId: string;
   teacherId: string;
@@ -263,4 +268,5 @@ export interface LoadEntry {
   scope: "class" | "group";
   groupNos: number[];
   hoursPerWeek: number;
+  hoursPerYear: number;
 }

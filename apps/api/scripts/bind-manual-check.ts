@@ -1,5 +1,5 @@
 /**
- * G-78 — **ручная привязка педагога доказана** (AR-177, УТЦ v1.4 фаза V).
+ * G-78 — **ручная привязка и компетенции педагога доказаны** (AR-177, AR-179).
  *
  * QR остаётся основным каналом; ручная привязка из карточки предмета обязана
  * давать ТОТ ЖЕ `TeacherBinding` и ТО ЖЕ событие `teacher.bound.v1`, что скан —
@@ -11,7 +11,11 @@
  *   3. взаимоисключение Д6 держится: групповая поверх классовой — отказ;
  *   4. пользователь без активного членства — отказ, привязка не создаётся;
  *   5. привязка видна карточке предмета (покрытие полное);
- *   6. открепление ручной привязки работает тем же `unbind`, что у скановой.
+ *   6. открепление ручной привязки работает тем же `unbind`, что у скановой;
+ *   7-12. компетенции (AR-179): галочка ставит класс-привязку; снятая галочка
+ *   открепляет; занятая позиция без `replace` — конфликт с фамилиями и НИ
+ *   ОДНОЙ мутации; с `replace` — замена (прежний откреплён, новый привязан) и
+ *   события обеих операций; позиция с групповыми привязками не трогается.
  *
  * Запуск: npm --workspace apps/api run bindmanual:check
  */
@@ -79,9 +83,53 @@ async function main(): Promise<never> {
     await subjects.unbind(subject.id, teacher.userId, school.moderator);
     const left = await prisma.teacherBinding.count({ where: { subjectId: subject.id } });
     check(left === 0, 'открепление ручной привязки работает тем же путём, что у скановой');
+
+    // ---------- 7-12. компетенции (AR-179) ----------
+    const second = await makeStaff(b, school, ['teacher'], 'Сидорова Ольга');
+    const subj2 = await subjects.create({ name: 'Русский язык', classId: cls.id });
+
+    // 7. галочки ставят класс-привязки разом
+    const r1 = await subjects.saveCompetence({ teacherId: teacher.userId, subjectIds: [subject.id, subj2.id] }, school.moderator);
+    check(r1.ok && r1.bound === 2, 'компетенции: две галочки — две класс-привязки одним заходом');
+
+    // 8. снятая галочка открепляет
+    const r2 = await subjects.saveCompetence({ teacherId: teacher.userId, subjectIds: [subject.id] }, school.moderator);
+    check(r2.ok && r2.unbound === 1 && (await prisma.teacherBinding.count({ where: { subjectId: subj2.id } })) === 0,
+      'компетенции: снятая галочка открепила позицию');
+
+    // 9. занятая позиция без replace — конфликт с фамилией и ни одной мутации
+    const r3 = await subjects.saveCompetence({ teacherId: second.userId, subjectIds: [subject.id] }, school.moderator);
+    check(!r3.ok && (r3.conflicts?.[0]?.teacherNames ?? []).length > 0 && r3.bound === 0,
+      'компетенции: занятая позиция вернулась конфликтом с фамилией, мутаций нет');
+    const still = await prisma.teacherBinding.findFirst({ where: { subjectId: subject.id } });
+    check(still?.teacherId === teacher.userId, 'компетенции: без replace прежний педагог на месте');
+
+    // 10-11. replace выполняет замену и издаёт события обеих операций
+    const r4 = await subjects.saveCompetence({ teacherId: second.userId, subjectIds: [subject.id], replace: true }, school.moderator);
+    const nowRow = await prisma.teacherBinding.findFirst({ where: { subjectId: subject.id } });
+    check(r4.ok && nowRow?.teacherId === second.userId, 'компетенции: replace заменил педагога на позиции');
+    const unboundEvt = await TenantContext.runAsSystem(() =>
+      prisma.outboxEvent.findFirst({
+        where: { type: 'subject.teacher.unbound.v1', workspaceId: school.workspaceId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    );
+    const up = (unboundEvt?.payload ?? {}) as { teacherId?: string };
+    check(up.teacherId === teacher.userId, 'компетенции: замена издала teacher.unbound.v1 по прежнему педагогу');
+
+    // 12. позиция с групповыми привязками этим каналом не трогается (Д6)
+    const grpCls = await prisma.schoolClass.create({
+      data: { workspaceId: school.workspaceId, parallel: 6, letter: 'А', label: '6А', groupCount: 2 },
+    });
+    const grpSubj = await subjects.create({ name: 'Английский язык', classId: grpCls.id });
+    await subjects.bindTeacherManual(grpSubj.id, { teacherId: teacher.userId, scope: 'group', groupNos: [1] }, school.moderator);
+    const r5 = await subjects.saveCompetence({ teacherId: second.userId, subjectIds: [grpSubj.id] }, school.moderator);
+    const grpRows = await prisma.teacherBinding.findMany({ where: { subjectId: grpSubj.id } });
+    check(r5.ok && grpRows.length === 1 && grpRows[0].scope === 'group',
+      'компетенции: позиция с групповыми привязками не тронута — группы из карточки предмета (Д6)');
   });
 
-  return report('G-78 · РУЧНАЯ ПРИВЯЗКА ПЕДАГОГА');
+  return report('G-78 · РУЧНАЯ ПРИВЯЗКА И КОМПЕТЕНЦИИ ПЕДАГОГА');
 }
 
 void main();

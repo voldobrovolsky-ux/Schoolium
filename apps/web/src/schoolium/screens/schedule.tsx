@@ -14,7 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DAY_MINUTES_CAP,
   recommendedTerms,
+  SCHOOL_YEAR_WEEKS,
   slotTimes,
+  weeklyOfYear,
   type GridKind,
   type SchedulePreviewDto,
   type SkeletonKind,
@@ -68,8 +70,11 @@ export function ScheduleScreen() {
             Настроить расписание
           </Button>
         ) : null}
-        {mayLoadOnly ? (
-          <Button kind="primary" testId="S-40.btn.load" onClick={() => setLoadOpen(true)}>
+        {/* Нормы часов (AR-174, AR-180): экран годовых норм — завуча, но право
+            «любое из» открывает его и строителю; у завуча это ЕДИНСТВЕННАЯ
+            кнопка панели. */}
+        {mayBuild || mayLoadOnly ? (
+          <Button kind={mayLoadOnly ? "primary" : "secondary"} testId="S-40.btn.load" onClick={() => setLoadOpen(true)}>
             Нормы часов
           </Button>
         ) : null}
@@ -608,8 +613,9 @@ function rowsFromPositions(positions: SkeletonPositionDto[]): Map<number, SkelRo
 /**
  * Форма настройки — ОДНА, из двух мест: полноэкранная модалка `M-08` (первая
  * настройка и правка) и вкладка «Настройка» результата `S-42`. Все разделы
- * видны сразу; «Сгенерировать» сохраняет их по порядку (четверти → нагрузка →
- * приоритеты → скелет → параметры дня) и запускает генерацию.
+ * видны сразу; «Сгенерировать» сохраняет их по порядку (четверти → приоритеты
+ * → скелет → параметры дня) и запускает генерацию. Нагрузка здесь ЧИТАЕТСЯ
+ * (AR-180): годовые нормы живут в «Нормах часов» (`M-22`).
  */
 function SettingsForm({
   onGenerated,
@@ -689,16 +695,6 @@ function SettingsForm({
   const dirty = JSON.stringify(day) !== day0 || prioTouched || skelTouched || touched;
   useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
 
-  /** Часы одной привязки: одно место правки — и для поля, и для шаговых кнопок. */
-  const setHours = (bindingId: string, hours: number) => {
-    setTouched(true);
-    setLoad((cur) =>
-      cur
-        ? { ...cur, entries: cur.entries.map((x) => (x.bindingId === bindingId ? { ...x, hoursPerWeek: Math.max(0, hours) } : x)) }
-        : cur,
-    );
-  };
-
   const termsValid = terms.every((t) => t.dateFrom && t.dateTo);
   const loadValid = !!load && load.entries.every((e) => e.hoursPerWeek > 0);
   const canGenerate = termsValid && loadValid && day.slotsPerDay !== "" && (priorities.length > 0 || noPriority || !ready);
@@ -721,11 +717,8 @@ function SettingsForm({
     setError(null);
     try {
       await api.setTerms(terms);
-      const l1 = await api.load();
-      await api.setLoad({
-        entries: load!.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: e.hoursPerWeek })),
-        version: l1.version,
-      });
+      // Нагрузку форма НЕ шлёт (AR-180): нормы принадлежат «Нормам часов»,
+      // здесь они только читаются.
       if (prioTouched || priorities.length > 0 || noPriority) {
         await api.setPriorities({ subjectIds: priorities, explicitNone: noPriority || priorities.length === 0 });
       }
@@ -809,10 +802,36 @@ function SettingsForm({
         </div>
       </section>
 
-      {/* ── Нагрузка: аккордеон по педагогу, окошки на каждую его пару. ── */}
+      {/* ── Нагрузка — ЧТЕНИЕ (AR-180): годовые нормы ставит завуч в «Нормах
+             часов» на экране расписания; модератор здесь видит производные
+             недельные часы и знает, чего не хватает генератору. ── */}
       <section data-section="load" className="sch-stack">
         <h3 className="sch-section-title">Нагрузка</h3>
-        <LoadSection load={load} setHours={setHours} />
+        <div className="sch-card sch-stack" data-testid="S-41.load.summary" style={{ gap: "var(--sp-8)" }}>
+          {!load || load.entries.length === 0 ? (
+            <p className="sch-muted">Привязок педагогов пока нет — привяжите их в «Предметах»</p>
+          ) : (
+            load.entries.map((e) => (
+              <div className="sch-row sch-row--between" key={e.bindingId}>
+                <span>
+                  {e.subjectName} · {e.classLabel} класс
+                  {e.scope === "group" ? `, группа ${e.groupNos.join(", ")}` : ""} — {e.teacherName}
+                </span>
+                {e.hoursPerWeek > 0 ? (
+                  <span className="sch-muted">
+                    {e.hoursPerYear} ч/год · {e.hoursPerWeek} ч/нед
+                  </span>
+                ) : (
+                  <span className="sch-warning-text">норма не задана</span>
+                )}
+              </div>
+            ))
+          )}
+          <p className="sch-muted">
+            Годовые нормы часов задаёт завуч — кнопка «Нормы часов» на экране расписания. Недельные часы для
+            генератора считаются из них автоматически.
+          </p>
+        </div>
       </section>
 
       {/* ── Приоритеты + ЯВНЫЙ отказ (AR-77). ── */}
@@ -1113,19 +1132,25 @@ function SettingsForm({
   );
 }
 
-/** Раздел «Нагрузка» — общий для формы настройки и модалки завуча (AR-174). */
+/**
+ * Редактор норм часов — В ГОД (AR-180): под каждым полем видна производная
+ * «= N ч/нед», по которой генератор и укладывает. Живёт только в `M-22`.
+ */
 function LoadSection({
   load,
-  setHours,
+  setYear,
 }: {
   load: { entries: LoadEntry[]; version: number } | null;
-  setHours: (bindingId: string, hours: number) => void;
+  setYear: (bindingId: string, hoursPerYear: number) => void;
 }) {
   if (!load) return <Skeletons count={3} kind="row" />;
+  if (load.entries.length === 0) {
+    return <p className="sch-muted">Привязок педагогов пока нет — нормы появятся вместе с привязками в «Предметах»</p>;
+  }
   return (
     <>
       {[...new Map(load.entries.map((e) => [e.teacherId, e.teacherName])).entries()].map(([tid, tname]) => (
-        <details className="sch-accordion" key={tid} data-testid="S-41.accordion.teacher" open>
+        <details className="sch-accordion" key={tid} data-testid="S-40.accordion.teacher" open>
           <summary>{tname}</summary>
           <div>
             {load.entries
@@ -1135,41 +1160,47 @@ function LoadSection({
                   <label htmlFor={`h-${e.bindingId}`}>
                     {e.subjectName} · {e.classLabel} класс
                     {e.scope === "group" ? `, группа ${e.groupNos.join(", ")}` : ""}
+                    <br />
+                    <span className="sch-muted">
+                      {e.hoursPerYear > 0 ? `= ${weeklyOfYear(e.hoursPerYear)} ч/нед` : "часов в год"}
+                    </span>
                   </label>
                   {/* Шаговые кнопки 44×44 рядом с полем часов (§7) —
-                      на мобайле; на десктопе CSS их не рендерит. */}
+                      на мобайле; на десктопе CSS их не рендерит. Шаг — 34
+                      (учебный год): минус/плюс двигают на один недельный час. */}
                   <div className="sch-stepper">
                     <Button
                       kind="secondary"
                       className="sch-btn--stepper"
                       aria-label={`${e.subjectName}: меньше часов`}
-                      disabled={e.hoursPerWeek <= 0}
-                      onClick={() => setHours(e.bindingId, e.hoursPerWeek - 1)}
+                      disabled={e.hoursPerYear <= 0}
+                      onClick={() => setYear(e.bindingId, Math.max(0, e.hoursPerYear - SCHOOL_YEAR_WEEKS))}
                     >
                       −
                     </Button>
                     <input
                       id={`h-${e.bindingId}`}
                       className="sch-input"
-                      data-testid="S-41.input.hours"
+                      data-testid="S-40.input.loadHours"
                       data-binding-id={e.bindingId}
                       inputMode="numeric"
-                      value={e.hoursPerWeek || ""}
-                      onChange={(ev) => setHours(e.bindingId, Number(ev.target.value) || 0)}
+                      value={e.hoursPerYear || ""}
+                      onChange={(ev) => setYear(e.bindingId, Number(ev.target.value) || 0)}
                     />
                     <Button
                       kind="secondary"
                       className="sch-btn--stepper"
                       aria-label={`${e.subjectName}: больше часов`}
-                      onClick={() => setHours(e.bindingId, e.hoursPerWeek + 1)}
+                      onClick={() => setYear(e.bindingId, e.hoursPerYear + SCHOOL_YEAR_WEEKS)}
                     >
                       +
                     </Button>
                   </div>
                 </div>
               ))}
-            <p className="sch-muted" data-testid="S-41.summary.class">
-              {tname}: {load.entries.filter((e) => e.teacherId === tid).reduce((a, e) => a + e.hoursPerWeek, 0)} часов
+            <p className="sch-muted" data-testid="S-40.summary.teacher">
+              {tname}: {load.entries.filter((e) => e.teacherId === tid).reduce((a, e) => a + e.hoursPerYear, 0)} ч/год ·{" "}
+              {load.entries.filter((e) => e.teacherId === tid).reduce((a, e) => a + weeklyOfYear(e.hoursPerYear), 0)} ч/нед
             </p>
           </div>
         </details>
@@ -1179,9 +1210,10 @@ function LoadSection({
 }
 
 /**
- * `M-22` — модалка завуча (AR-174): годовые нормы часов по предмету и ничего
- * больше. Сохранение роняет подтверждённую сетку в `stale` — пересобирает её
- * модератор, не завуч.
+ * `M-22` — нормы часов (AR-174, AR-180): годовые нормы по предмету и ничего
+ * больше. Вводится ГОД («Словесность — 340 часов в год»), недельные часы для
+ * генератора — производная. Открывают и завуч, и модератор (право «любое из»,
+ * AR-174); сохранение роняет подтверждённую сетку в `stale`.
  */
 function LoadHoursModal({ onClose }: { onClose: () => void }) {
   const [load, setLoad] = useState<{ entries: LoadEntry[]; version: number } | null>(null);
@@ -1196,16 +1228,16 @@ function LoadHoursModal({ onClose }: { onClose: () => void }) {
       .catch((e) => setError(e instanceof SchoolApiError ? e.message : "Не удалось открыть нагрузку"));
   }, []);
 
-  const setHours = (bindingId: string, hours: number) =>
+  const setYear = (bindingId: string, hoursPerYear: number) =>
     setLoad((cur) =>
       cur
-        ? { ...cur, entries: cur.entries.map((x) => (x.bindingId === bindingId ? { ...x, hoursPerWeek: Math.max(0, hours) } : x)) }
+        ? { ...cur, entries: cur.entries.map((x) => (x.bindingId === bindingId ? { ...x, hoursPerYear: Math.max(0, hoursPerYear) } : x)) }
         : cur,
     );
 
   return (
     <Modal
-      title="Годовые нормы часов"
+      title="Нормы часов — в год"
       width={720}
       onClose={onClose}
       testId="M-22"
@@ -1215,7 +1247,7 @@ function LoadHoursModal({ onClose }: { onClose: () => void }) {
           <Button
             kind="primary"
             testId="S-40.btn.saveLoad"
-            disabled={!load || load.entries.some((e) => !e.hoursPerWeek)}
+            disabled={!load || load.entries.length === 0 || load.entries.some((e) => !e.hoursPerYear)}
             loading={busy}
             onClick={async () => {
               setBusy(true);
@@ -1223,10 +1255,10 @@ function LoadHoursModal({ onClose }: { onClose: () => void }) {
               try {
                 const fresh = await api.load();
                 await api.setLoad({
-                  entries: load!.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: e.hoursPerWeek })),
+                  entries: load!.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: e.hoursPerYear })),
                   version: fresh.version,
                 });
-                showToast("Нагрузка сохранена — сетку пересоберёт модератор");
+                showToast("Нормы сохранены — сетку пересоберёт модератор");
                 onClose();
               } catch (e) {
                 setError(e instanceof SchoolApiError ? e.message : "Не получилось");
@@ -1240,7 +1272,11 @@ function LoadHoursModal({ onClose }: { onClose: () => void }) {
         </div>
       }
     >
-      <LoadSection load={load} setHours={setHours} />
+      <p className="sch-muted">
+        Нормы вводятся часами В ГОД, как в учебном плане. Недельные часы для генератора считаются автоматически: год ÷
+        {SCHOOL_YEAR_WEEKS} учебные недели.
+      </p>
+      <LoadSection load={load} setYear={setYear} />
       {error ? (
         <p className="sch-danger-text" role="alert">
           {error}

@@ -132,7 +132,7 @@ async function main(): Promise<void> {
     // ─── шаг 7: нагрузка ───
     const load = await schedule.load();
     await schedule.setLoad(
-      { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: 4 })), version: load.version },
+      { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: 4 * 34 })), version: load.version },
       mod,
     );
     check((await state.resolve()) === 'load_set', 'состояние load_set: часы проставлены каждой паре');

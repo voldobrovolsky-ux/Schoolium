@@ -845,6 +845,46 @@
 .sch-weekrange { font-weight: var(--fw-semibold); }
 .sch-break { text-align: center; color: var(--c-ink-muted); font-size: var(--fs-xs); padding: var(--sp-4) 0; }
 
+/* ─── S-20 два вида + компетенции (AR-179, правка владельца 2026-08-31) ─── */
+
+/* Строка позиции «предмет × класс» внутри карточки дисциплины/класса. */
+.sch-subject-row {
+  display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap;
+  width: 100%; min-height: var(--tap-min); padding: var(--sp-8) var(--sp-12);
+  border: 0; border-radius: var(--r-md); background: transparent;
+  font: inherit; color: var(--c-ink-primary); cursor: pointer; text-align: left;
+}
+.sch-subject-row:hover { background: var(--c-brand-violet-050); }
+.sch-subject-row-label { font-weight: var(--fw-medium); }
+
+/* Алфавитный указатель: узкая колонка букв, закреплена справа поверх списка.
+   Внутри модалки прижимается к краю её тела (position: absolute от stack). */
+.sch-alpha {
+  position: fixed; right: 2px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; z-index: 20;
+  background: color-mix(in srgb, var(--c-surface-card) 82%, transparent);
+  border-radius: var(--r-pill); padding: var(--sp-4) 0;
+}
+.sch-modal .sch-alpha { position: absolute; right: 0; top: 0; transform: none; }
+.sch-alpha button {
+  border: 0; background: none; cursor: pointer; padding: 1px 6px;
+  font-size: var(--fs-xs); color: var(--c-brand-violet-700); font-family: inherit;
+}
+
+/* Кнопка-ссылка «‹ Мои журналы» и подобные текстовые возвраты. */
+.sch-linklike {
+  background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+  color: var(--c-brand-violet-700); min-height: var(--tap-min); display: inline-flex; align-items: center;
+}
+
+/* Строка-галочка позиции в «Управлении компетенцией» (M-25). */
+.sch-check-row {
+  display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap;
+  min-height: var(--tap-min); padding: 0 var(--sp-8); cursor: pointer;
+}
+.sch-check-row input { width: 20px; height: 20px; accent-color: var(--c-brand-violet-600); }
+.sch-check-row input:disabled + span { color: var(--c-ink-muted); }
+
 /* ─── УТЦ v1.4 фаза II (AR-175): ленты дней и недель, неделя 3+3, строки по скелету ─── */
 /* Пикер дня (правка владельца 2026-08-31): слот открытого дня НЕПОДВИЖЕН —
    второе место ленты, — а лента учебных дней едет под ним со снапом. Вся

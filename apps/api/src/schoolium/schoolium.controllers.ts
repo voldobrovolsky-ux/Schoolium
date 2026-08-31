@@ -5,6 +5,7 @@ import type {
   AuditEntryDto,
   BindTeacherDto,
   BindTeacherManualDto,
+  SaveCompetenceDto,
   ConfirmScheduleDto,
   CreateClassesDto,
   CreateGuardianDto,
@@ -373,6 +374,13 @@ export class SubjectsController {
   @Post(':id/teachers/manual')
   bindManual(@Req() req: Req0, @Param('id') id: string, @Body() body: BindTeacherManualDto) {
     return this.svc.bindTeacherManual(id, body, actorOf(req));
+  }
+
+  /** §11 строка 15б · `M-25` (AR-179): компетенции педагога галочками, с заменой и откреплением. */
+  @RequirePermission('subject.write')
+  @Post('competence')
+  competence(@Req() req: Req0, @Body() body: SaveCompetenceDto) {
+    return this.svc.saveCompetence(body, actorOf(req));
   }
 
   /** §11 строка 16 · `S-21.btn.unbind`. */

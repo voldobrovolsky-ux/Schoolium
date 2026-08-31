@@ -53,7 +53,15 @@ const LESSON_NOT_HELD = "Урок ещё не прошёл";
 const LESSON_DETACHED = "Урок вне расписания: отметки сохранены, изменить их нельзя";
 const STUDENT_INACTIVE = "Ученик деактивирован";
 
-export function JournalScreen({ classId, subjectId }: { classId: string | null; subjectId: string | null }) {
+export function JournalScreen({
+  classId,
+  subjectId,
+  groupNo,
+}: {
+  classId: string | null;
+  subjectId: string | null;
+  groupNo?: number | null;
+}) {
   const me = useSession();
   const userId = me.state.status === "authed" ? me.state.me.userId : "";
   const [refs, reloadRefs] = useAsync(async () => {
@@ -96,6 +104,19 @@ export function JournalScreen({ classId, subjectId }: { classId: string | null; 
    * Последние два — для модератора и завуча, у которых привязок нет по роли.
    */
   const mine = subjects.filter((s) => s.bindings.some((b) => b.teacherId === userId));
+
+  /*
+   * Педагог входит через КАРТОЧКИ СВОИХ журналов (правка владельца 2026-08-31,
+   * AR-181): «Английский язык · 5 класс · группа 1» — по карточке на каждую
+   * позицию, у группового предмета — на каждую группу. Селекты «класс ×
+   * предмет» остаются модератору и завучу: у них привязок нет по роли, их
+   * объект — вся школа. Явный `classId` в адресе открывает сам журнал.
+   */
+  const isManager = me.can("school.manage");
+  if (!isManager && mine.length > 0 && !classId) {
+    return <TeacherJournalCards mine={mine} />;
+  }
+
   const withSubjects = classes.filter((c) => subjects.some((s) => s.classId === c.id));
   const cls =
     classes.find((c) => c.id === classId) ??
@@ -110,7 +131,62 @@ export function JournalScreen({ classId, subjectId }: { classId: string | null; 
     forClass[0] ??
     null;
 
-  return <JournalBody key={`${cls.id}:${subj?.id ?? "-"}`} classes={classes} cls={cls} forClass={forClass} subj={subj} />;
+  return (
+    <JournalBody
+      key={`${cls.id}:${subj?.id ?? "-"}:${groupNo ?? 0}`}
+      classes={classes}
+      cls={cls}
+      forClass={forClass}
+      subj={subj}
+      groupNo={groupNo ?? null}
+      backToCards={!isManager && mine.length > 0}
+    />
+  );
+}
+
+/** Карточки журналов педагога (AR-181): только свои позиции, группы — отдельно. */
+function TeacherJournalCards({ mine }: { mine: SubjectDto[] }) {
+  const me = useSession();
+  const userId = me.state.status === "authed" ? me.state.me.userId : "";
+  const cards = mine
+    .flatMap((s) => {
+      const own = s.bindings.filter((b) => b.teacherId === userId);
+      return own.flatMap((b) =>
+        b.scope === "group"
+          ? b.groupNos.map((g) => ({ s, groupNo: g as number | null }))
+          : [{ s, groupNo: null as number | null }],
+      );
+    })
+    .sort((a, b) => a.s.name.localeCompare(b.s.name, "ru") || a.s.classLabel.localeCompare(b.s.classLabel, "ru", { numeric: true }));
+
+  return (
+    <>
+      <div className="sch-page-head">
+        <h1>Журнал</h1>
+      </div>
+      {cards.length === 0 ? (
+        <EmptyState testId="S-50.empty" title="Журналов пока нет" hint="Карточки появятся, когда вас привяжут к предметам" />
+      ) : (
+        <div className="sch-cards--3" data-testid="S-50.grid.mine">
+          {cards.map(({ s, groupNo }) => (
+            <button
+              key={`${s.id}:${groupNo ?? 0}`}
+              className="sch-card sch-card--clickable"
+              data-testid="S-50.card.mine"
+              onClick={() =>
+                navigate(`/journal?classId=${s.classId}&subjectId=${s.id}${groupNo ? `&groupNo=${groupNo}` : ""}`)
+              }
+            >
+              <div className="sch-card-title">{s.name}</div>
+              <div className="sch-card-sub">
+                {s.classLabel} класс{groupNo ? ` · группа ${groupNo}` : ""}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
 function JournalBody({
@@ -118,11 +194,17 @@ function JournalBody({
   cls,
   forClass,
   subj,
+  groupNo = null,
+  backToCards = false,
 }: {
   classes: ClassDto[];
   cls: ClassDto;
   forClass: SubjectDto[];
   subj: SubjectDto | null;
+  /** Журнал одной группы (AR-181): колонки и строки чужой группы не рендерятся. */
+  groupNo?: number | null;
+  /** Педагог пришёл из карточек своих журналов — возврат к ним, селектов нет. */
+  backToCards?: boolean;
 }) {
   /* Неделю выбирает человек, но НАЧАЛЬНУЮ выбирает сервер: он один знает
      календарь и то, идёт ли сейчас учебный год. Пока выбора не было — `null`,
@@ -181,15 +263,28 @@ function JournalBody({
   return (
     <>
       <div className="sch-page-head">
-        <h1>Журнал</h1>
+        <h1>
+          {backToCards
+            ? `${subj?.name ?? "Журнал"} · ${cls.label} класс${groupNo ? ` · группа ${groupNo}` : ""}`
+            : "Журнал"}
+        </h1>
       </div>
-      {selects}
+      {backToCards ? (
+        <p style={{ marginBottom: "var(--sp-12)" }}>
+          <button className="sch-linklike" data-testid="S-50.btn.backToCards" onClick={() => navigate("/journal")}>
+            ‹ Мои журналы
+          </button>
+        </p>
+      ) : (
+        selects
+      )}
       {state.status === "loading" ? <Skeletons count={8} kind="row" /> : null}
       {state.status === "error" ? <ErrorState message={state.message} onRetry={reload} /> : null}
       {state.status === "ready" ? (
         <JournalTable
           data={state.data}
           subjectName={subj?.name ?? ""}
+          groupNo={groupNo}
           onChanged={reload}
           onWeek={setWeek}
           showToast={showToast}
@@ -207,18 +302,30 @@ type Layer =
   | { kind: "mark"; col: JournalColumnDto; row: JournalRowDto; anchor: DOMRect };
 
 function JournalTable({
-  data,
+  data: raw,
   subjectName,
+  groupNo = null,
   onChanged,
   onWeek,
   showToast,
 }: {
   data: import("@edustore/shared").JournalDto | null;
   subjectName: string;
+  groupNo?: number | null;
   onChanged: () => void;
   onWeek: (monday: string) => void;
   showToast: (t: string) => void;
 }) {
+  // Журнал ОДНОЙ группы (AR-181): чужие колонки и строки не рендерятся —
+  // фильтр здесь, чтобы нумерация «4.09 (1)» считалась по видимым урокам.
+  const data = useMemo(() => {
+    if (!raw || groupNo == null) return raw;
+    return {
+      ...raw,
+      columns: raw.columns.filter((c) => c.groupNo === groupNo || c.groupNo === 0),
+      rows: raw.rows.filter((r) => r.groupNo === null || r.groupNo === groupNo),
+    };
+  }, [raw, groupNo]);
   const me = useSession();
   const mobile = useIsMobile();
   const userId = me.state.status === "authed" ? me.state.me.userId : "";

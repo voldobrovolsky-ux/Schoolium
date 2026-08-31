@@ -264,6 +264,7 @@ export function BindScreen({ token }: { token: string }) {
 
 export function ScanScreen() {
   const mobile = useIsMobile();
+  const { can } = useSession();
   const [denied, setDenied] = useState(false);
   const [result, setResult] = useState<{ subject: string; classLabel: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -306,6 +307,12 @@ export function ScanScreen() {
           // Чужой код — не «ошибка сервера», а не тот код: экран привязки к
           // предмету не должен молча пытаться скормить контракту токен входа.
           const qr = parseQr(raw);
+          // Личный QR педагога (AR-179): модератора ведём в «Управление
+          // компетенцией», остальным называем, чей это канал.
+          if (qr?.kind === "teacher") {
+            if (can("subject.write")) return navigate(`/subjects?competence=${encodeURIComponent(qr.value)}`);
+            return setError("Это личный QR педагога — компетенции назначает модератор");
+          }
           if (qr?.kind !== "bind") return setError("Это не код привязки к предмету");
           try {
             const r = await api.scan(qr.value);

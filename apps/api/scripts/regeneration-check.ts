@@ -53,7 +53,7 @@ async function main(): Promise<void> {
     // ─── меняем нагрузку так, чтобы прежние уроки не нашли себя в новом шаблоне ───
     const load = await schedule.load();
     await schedule.setLoad(
-      { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: 1 })), version: load.version },
+      { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: 1 * 34 })), version: load.version },
       s.moderator,
     );
     await drain();

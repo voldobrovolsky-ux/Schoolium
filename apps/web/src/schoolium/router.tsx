@@ -52,6 +52,12 @@ export function parse(pathname: string, search: string): Route {
     params.token = bindTok[1];
     path = "/bind/:token";
   }
+  // Личный QR педагога (AR-179): камера телефона открывает ссылку сама.
+  const comp = path.match(/^\/competence\/([^/]+)$/);
+  if (comp) {
+    params.teacherId = comp[1];
+    path = "/competence/:teacherId";
+  }
   const loginCode = path.match(/^\/login\/code\/([0-9]{6})$/);
   if (loginCode) {
     params.code = loginCode[1];

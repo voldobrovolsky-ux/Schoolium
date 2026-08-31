@@ -234,7 +234,7 @@ export async function readySchool(b: Bench, name = 'Школа приёмки'):
     const load = await schedule.load();
     // Восемь часов на пятидневке при четырёх уроках в день дают дни с ДВУМЯ
     // уроками одного предмета — это и есть «две колонки под одним числом» (AR-74).
-    await schedule.setLoad({ entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: 8 })), version: load.version }, school.moderator);
+    await schedule.setLoad({ entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: 8 * 34 })), version: load.version }, school.moderator);
     await schedule.setPriorities({ subjectIds: [], explicitNone: true });
     const reg = await state.register();
     await schedule.setDayParams(

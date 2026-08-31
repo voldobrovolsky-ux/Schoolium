@@ -528,6 +528,12 @@ async function main() {
     modalsClosed.add('M-03');
     console.log('    ✅ M-03 закрыта');
     await hasAll(page, ['S-20.grid.subjects', 'S-20.card.subject', 'S-20.card.subject.badge']);
+    // Два вида (правка 2026-08-31): дисциплины со строчками классов и классы
+    // со строчками предметов; фильтр и кнопка компетенций стоят на экране.
+    await hasAll(page, ['S-20.view', 'S-20.group.subject', 'S-20.btn.competence']);
+    await page.locator('[data-testid="S-20.view"] button', { hasText: 'По классам' }).click();
+    await has(page, 'S-20.group.class', 'вид «По классам»: карточка класса со строчками предметов');
+    await page.locator('[data-testid="S-20.view"] button', { hasText: 'По дисциплинам' }).click();
     await shot(page, 'S-20-subjects');
 
     // ── S-30 · персонал ──
@@ -694,10 +700,41 @@ async function main() {
     await page.keyboard.press('Escape');
     await modalClosed(page, 'M-04');
 
+    // ── M-25 · управление компетенцией (AR-179): педагог уже есть ──
+    console.log('▶ M-25 · управление компетенцией');
+    await click(page, 'S-20.btn.competence');
+    await page.waitForSelector('[data-testid="M-25"]', { timeout: 20_000 });
+    await modalOpen(page, 'M-25');
+    await page.waitForSelector('[data-testid="M-25.select.teacher"] select', { timeout: 20_000 });
+    // выбор педагога открывает чеклист; его текущая позиция уже отмечена
+    await page.locator('[data-testid="M-25.select.teacher"] select').selectOption({ index: 1 });
+    await page.waitForSelector('[data-testid="M-25.list.subjects"]', { timeout: 20_000 });
+    await page.locator('[data-testid="M-25.group.subject"]').first().click(); // раскрыть дисциплину
+    const pre = await page.locator('[data-testid="M-25.check.position"]:checked').count();
+    if (pre >= 1) console.log(`    ✅ текущие позиции педагога предотмечены (${pre})`);
+    else { console.error('    ❌ чеклист не предзаполнен текущими привязками'); failures++; }
+    await shot(page, 'M-25-competence');
+    await page.keyboard.press('Escape');
+    await modalClosed(page, 'M-25');
+
     // ── S-40 · расписание: до сборки уроков нет ──
     console.log('▶ S-40 · расписание');
     await page.goto(`${WEB}/schedule`);
     await page.waitForSelector('[data-testid="S-40.empty"], [data-testid="S-40.grid.week"]');
+
+    // ── Нормы часов — В ГОД, через M-22 (AR-180): из настройки они убраны ──
+    console.log('▶ M-22 · нормы часов (в год)');
+    await click(page, 'S-40.btn.load');
+    await page.waitForSelector('[data-testid="M-22"]');
+    await page.waitForSelector('[data-testid="S-40.input.loadHours"]', { timeout: 20_000 });
+    await hasAll(page, ['S-40.accordion.teacher', 'S-40.input.loadHours', 'S-40.summary.teacher']);
+    const loadHours = page.locator('[data-testid="S-40.input.loadHours"]');
+    for (let i = 0; i < await loadHours.count(); i++) await loadHours.nth(i).fill('136'); // 136 ч/год = 4 ч/нед
+    const weekly = await page.locator('[data-testid="S-40.summary.teacher"]').first().innerText();
+    if (/ч\/нед/.test(weekly)) console.log(`    ✅ производная «ч/нед» видна: ${weekly.replace(/\s+/g, ' ').trim()}`);
+    else { console.error(`    ❌ итог педагога без недельной производной: «${weekly}»`); failures++; }
+    await click(page, 'S-40.btn.saveLoad');
+    await modalClosed(page, 'M-22');
     await has(page, 'S-40.empty', 'сетки ещё нет');
     await shot(page, 'S-40-empty');
 
@@ -725,9 +762,11 @@ async function main() {
     await has(page, 'S-41.term.check', 'заполненная четверть отмечена галочкой');
 
     // Все разделы видны РАЗОМ — без «Далее» (решение владельца 2026-08-30).
-    await hasAll(page, ['S-41.accordion.teacher', 'S-41.input.hours', 'S-41.summary.class']);
-    const hours = page.locator('[data-testid="S-41.input.hours"]');
-    for (let i = 0; i < await hours.count(); i++) await hours.nth(i).fill('4');
+    // Нагрузка — ЧТЕНИЕМ (AR-180): сводка с часами, окошек ввода нет.
+    await has(page, 'S-41.load.summary', 'нагрузка в настройке — сводкой, нормы у завуча');
+    const loadInputsInForm = await page.locator('[data-testid="M-08"] [data-testid="S-40.input.loadHours"]').count();
+    if (loadInputsInForm === 0) console.log('    ✅ окошек норм в настройке нет — их место в «Нормах часов»');
+    else { console.error(`    ❌ в настройке ${loadInputsInForm} окошек норм — они должны жить только в M-22`); failures++; }
 
     await hasAll(page, ['S-41.chips.priority', 'S-41.btn.noPriority']);
     await click(page, 'S-41.btn.noPriority');
@@ -1022,7 +1061,9 @@ async function main() {
       await fill(page, 'M-03.input.name', 'Черчение');
       await click(page, 'M-03.create');
       await page.waitForSelector('[data-testid="M-03"]', { state: 'detached', timeout: 20_000 });
-      await page.locator('[data-testid="S-20.card.subject"]', { hasText: 'Черчение' }).click();
+      // строка позиции живёт внутри карточки дисциплины (правка 2026-08-31):
+        // имя — в заголовке карточки, строка несёт класс
+        await page.locator('[data-testid="S-20.group.subject"]', { hasText: 'Черчение' }).locator('[data-testid="S-20.card.subject"]').first().click();
       await page.waitForSelector('[data-testid="S-21.btn.deleteSubject"]', { timeout: 20_000 });
       await page.locator('[data-testid="S-21.btn.deleteSubject"]').click();
       await page.waitForSelector('[data-testid="M-04"]', { state: 'detached', timeout: 20_000 });
@@ -1048,11 +1089,11 @@ async function main() {
       await click(page, 'S-40.btn.setup');
       await page.waitForSelector('[data-testid="M-08"]', { timeout: 20_000 });
       await modalOpen(page, 'M-08');
-      await page.waitForSelector('[data-testid="S-41.input.hours"]', { timeout: 20_000 });
-      await page.locator('[data-testid="S-41.input.hours"]').first().fill('3');
+      await page.waitForSelector('[data-testid="S-41.input.slotsPerDay"]', { timeout: 20_000 });
+      await page.locator('[data-testid="S-41.input.slotsPerDay"]').first().fill('6');
       // Esc ловит карточка модалки (реактовский onKeyDown): клик возвращает
       // фокус внутрь — Esc с фокусом вне карточки честно уходит в никуда.
-      await page.locator('[data-testid="S-41.input.hours"]').first().click();
+      await page.locator('[data-testid="S-41.input.slotsPerDay"]').first().click();
       await page.keyboard.press('Escape');
       await page.waitForSelector('[data-testid="M-14"]', { timeout: 20_000 });
       await modalOpen(page, 'M-14');
@@ -1080,7 +1121,7 @@ async function main() {
       // Все разделы в одной форме: нагрузка предзаполнена с сервера, выбор
       // приоритетов обязателен явно (AR-77); параметры дня предзаполнены из
       // прошлого шаблона — '5' здесь перезаписывает то же значение.
-      await page.waitForSelector('[data-testid="S-41.input.hours"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="S-41.input.slotsPerDay"]', { timeout: 20_000 });
       await click(page, 'S-41.btn.noPriority');
       await fill(page, 'S-41.input.slotsPerDay', '5');
       await click(page, 'S-41.btn.generate');
@@ -1147,13 +1188,27 @@ async function main() {
     console.log('▶ оболочка педагога · права видны по составу элементов');
     await phone.goto(`${WEB}/journal`);
     await phone.waitForSelector(MOBILE ? '[data-testid="L.tabbar"]' : '[data-testid="L.sidebar"]', { timeout: 30_000 });
+    // Журнал педагога — карточки СВОИХ позиций (AR-181), не селекты всей школы.
+    await phone.waitForSelector('[data-testid="S-50.grid.mine"]', { timeout: 30_000 });
+    const mineCards = await phone.locator('[data-testid="S-50.card.mine"]').count();
+    if (mineCards >= 1) console.log(`    ✅ S-50.grid.mine: у педагога карточки своих журналов (${mineCards})`);
+    else { console.error('    ❌ карточек своих журналов у педагога нет'); failures++; }
+    const teacherSelects = await phone.locator('[data-testid="S-50.select.class"]').count();
+    if (teacherSelects === 0) console.log('    ✅ селекторов класса у педагога нет — они у модератора и завуча');
+    else { console.error('    ❌ педагог видит селектор класса'); failures++; }
+    await phone.locator('[data-testid="S-50.card.mine"]').first().click();
+    await phone.waitForSelector('[data-testid="S-50.btn.backToCards"]', { timeout: 30_000 });
+    await phone.waitForSelector('[data-testid="S-50.table"], [data-testid="S-50.empty"], [data-testid="S-50.empty.holidays"]', { timeout: 30_000 });
+    console.log('    ✅ карточка открывает журнал позиции, возврат — «‹ Мои журналы»');
+    await phone.locator('[data-testid="S-50.btn.backToCards"]').click();
+    await phone.waitForSelector('[data-testid="S-50.grid.mine"]', { timeout: 30_000 });
     const adminId = MOBILE ? 'L.header.admin' : 'L.sidebar.item.admin';
     const scanId = MOBILE ? 'L.header.scan' : 'L.topbar.scan';
     const admin = await phone.locator(`[data-testid="${adminId}"]`).count();
     if (admin === 0) console.log(`    ✅ «Кабинет» (${adminId}) у педагога ОТСУТСТВУЕТ, а не «серый и некликабельный» (AR-69)`);
     else { console.error('    ❌ педагог видит раздел «Кабинет»'); failures++; }
     const scan = await phone.locator(`[data-testid="${scanId}"]`).count();
-    if (scan === 1) console.log(`    ✅ ${scanId} виден педагогу (модератор показывает коды, а не сканирует)`);
+    if (scan === 1) console.log(`    ✅ ${scanId} виден педагогу (сканер теперь у всех ролей — AR-179)`);
     else { console.error(`    ❌ кнопок сканера в шапке педагога ${scan}, ожидалась одна`); failures++; }
     if (MOBILE) {
       // Пять вкладок одинаковы у ВСЕХ шести ролей (§2.2) — различие ролей

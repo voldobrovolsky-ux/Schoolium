@@ -164,17 +164,19 @@ export function CameraDenied({ testId }: { testId: string }) {
 
 /**
  * Разбор содержимого QR — ОДИН на систему (AR-36: контракт живёт в одном
- * месте). Кодов четыре вида, и после перехода на ссылки своего origin они
+ * месте). Кодов пять видов, и после перехода на ссылки своего origin они
  * приходят двумя формами: `https://<origin>/<путь>/<значение>` и старой
  * схемой `schoolium:<вид>:<значение>`. Обе разбираются здесь, чтобы ни один
- * экран не занимался строковой арифметикой сам.
+ * экран не занимался строковой арифметикой сам. `teacher` — ЛИЧНЫЙ QR
+ * педагога (AR-179): идентификация для «Управления компетенцией», не
+ * credential — права даёт сессия модератора, который его сканирует.
  */
-export type QrKind = "link" | "bind" | "code" | "join";
+export type QrKind = "link" | "bind" | "code" | "join" | "teacher";
 
 export function parseQr(raw: string): { kind: QrKind; value: string } | null {
   const s = raw.trim();
 
-  const scheme = s.match(/^schoolium:(link|bind|code|join):(.+)$/);
+  const scheme = s.match(/^schoolium:(link|bind|code|join|teacher):(.+)$/);
   if (scheme) return { kind: scheme[1] as QrKind, value: scheme[2] };
 
   try {
@@ -185,6 +187,8 @@ export function parseQr(raw: string): { kind: QrKind; value: string } | null {
     const path = u.pathname.replace(/\/+$/, "");
     const m = path.match(/^\/(link|bind|join)\/([^/]+)$/);
     if (m) return { kind: m[1] as QrKind, value: m[2] };
+    const t = path.match(/^\/competence\/([^/]+)$/);
+    if (t) return { kind: "teacher", value: t[1] };
     const code = path.match(/^\/login\/code\/([0-9]{6})$/);
     if (code) return { kind: "code", value: code[1] };
   } catch {

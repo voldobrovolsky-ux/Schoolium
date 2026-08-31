@@ -14,8 +14,9 @@
  *     (§2.2) — признак ставит сам слой, оболочка его только читает.
  */
 import { useEffect, useState, type ReactNode } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import { ROLE_LABELS, type SchoolRole } from "@edustore/shared";
-import { Avatar, Button, PopoverOrSheet } from "./ui";
+import { Avatar, Button, Modal, PopoverOrSheet } from "./ui";
 import { useIsMobile } from "./hooks";
 import { useSession } from "./session";
 import { navigate } from "./router";
@@ -49,6 +50,7 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
     }
   });
   const [menu, setMenu] = useState<DOMRect | null>(null);
+  const [myQr, setMyQr] = useState(false);
 
   useEffect(() => {
     try {
@@ -61,6 +63,7 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
   if (state.status !== "authed") return null;
   const me = state.me;
   const isModerator = me.roles.includes("moderator");
+  const isTeacher = me.roles.includes("teacher");
 
   const userMenu = menu ? (
     /* M-15 — меню пользователя: поповер 240px на десктопе, нижний лист на
@@ -75,6 +78,20 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
       onClose={() => setMenu(null)}
     >
       <div className="sch-stack">
+        {/* «Мой QR» — над «Устройства» (AR-179): личный код педагога для
+            «Управления компетенцией» модератора. */}
+        {isTeacher ? (
+          <Button
+            kind="ghost"
+            testId="M-15.myqr"
+            onClick={() => {
+              setMenu(null);
+              setMyQr(true);
+            }}
+          >
+            Мой QR
+          </Button>
+        ) : null}
         <Button
           kind="ghost"
           testId="M-15.devices"
@@ -90,6 +107,19 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
         </Button>
       </div>
     </PopoverOrSheet>
+  ) : null;
+
+  /* M-24 — личный QR педагога (AR-179): постоянная ссылка-идентификатор, не
+     credential — компетенции применяет сессия модератора с `subject.write`. */
+  const myQrModal = myQr ? (
+    <Modal title="Мой QR" width={360} onClose={() => setMyQr(false)} testId="M-24" mobile="sheet">
+      <div className="sch-qr">
+        <div className="sch-qr-frame" data-testid="M-24.qr">
+          <QRCodeSVG value={`${window.location.origin}/competence/${me.userId}`} size={240} />
+        </div>
+        <p className="sch-muted">Покажите модератору — он привяжет вас к вашим предметам через «Управление компетенцией»</p>
+      </div>
+    </Modal>
   ) : null;
 
   if (mobile) {
@@ -113,16 +143,16 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
             </span>
           )}
           <span className="sch-topbar-spacer" />
+          {/* Сканер — ВСЕМ ролям, ЛЕВЕЕ шестерёнки (правка владельца
+              2026-08-31): модератор сканирует личный QR педагога для
+              «Управления компетенцией». */}
+          <Button kind="icon" testId="L.header.scan" aria-label="Сканер QR" onClick={() => navigate("/scan")}>
+            ⛶
+          </Button>
           {/* Кабинет модератора — иконка хедера, не вкладка (§2.2). */}
           {isModerator ? (
             <Button kind="icon" testId="L.header.admin" aria-label="Кабинет модератора" onClick={() => navigate("/admin")}>
               ⚙
-            </Button>
-          ) : null}
-          {/* Сканер — всем, КРОМЕ модератора: он показывает коды, а не сканирует. */}
-          {!isModerator ? (
-            <Button kind="icon" testId="L.header.scan" aria-label="Сканер QR" onClick={() => navigate("/scan")}>
-              ⛶
             </Button>
           ) : null}
           <button
@@ -157,6 +187,7 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
         </nav>
 
         {userMenu}
+        {myQrModal}
       </div>
     );
   }
@@ -237,12 +268,11 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
             </span>
           ) : null}
           <span className="sch-topbar-spacer" />
-          {/* Сканер — всем ролям, КРОМЕ модератора: он показывает коды, а не сканирует. */}
-          {!isModerator ? (
-            <Button kind="icon" testId="L.topbar.scan" aria-label="Сканер QR" onClick={() => navigate("/scan")}>
-              ⛶
-            </Button>
-          ) : null}
+          {/* Сканер — ВСЕМ ролям (правка владельца 2026-08-31): модератору он
+              нужен для личного QR педагога; десктоп объяснит, что сканирует телефон. */}
+          <Button kind="icon" testId="L.topbar.scan" aria-label="Сканер QR" onClick={() => navigate("/scan")}>
+            ⛶
+          </Button>
         </header>
         <main className="sch-content">
           <div className="sch-page">{children}</div>
@@ -250,6 +280,7 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
       </div>
 
       {userMenu}
+      {myQrModal}
     </div>
   );
 }

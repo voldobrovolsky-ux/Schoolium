@@ -255,9 +255,11 @@ async function main(): Promise<void> {
     // завуч распределит академическую часть при сборке сетки после события.
     try {
       const load = await schedule.load();
+      // AR-180: нагрузка вводится годом — недельные часы штатки умножаются на
+      // учебные недели, обратную конверсию сделает setLoad.
       const entries = load.entries.map((e) => ({
         bindingId: e.bindingId,
-        hoursPerWeek: bindingHours.get(e.subjectId) ?? e.hoursPerWeek ?? 1,
+        hoursPerYear: (bindingHours.get(e.subjectId) ?? e.hoursPerWeek ?? 1) * 34,
       }));
       if (entries.length > 0) {
         await schedule.setLoad({ entries, version: load.version }, actor);

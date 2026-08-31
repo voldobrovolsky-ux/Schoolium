@@ -70,12 +70,12 @@ async function main(): Promise<void> {
     const load = await schedule.load();
     const staleVersion = load.version;
     await schedule.setLoad(
-      { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: 6 })), version: staleVersion },
+      { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: 6 * 34 })), version: staleVersion },
       other,
     );
     await refuses(
       () => schedule.setLoad(
-        { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: 3 })), version: staleVersion },
+        { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: 3 * 34 })), version: staleVersion },
         s.moderator,
       ),
       'CONCURRENT_EDIT',
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     );
     try {
       await schedule.setLoad(
-        { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerWeek: 3 })), version: staleVersion },
+        { entries: load.entries.map((e) => ({ bindingId: e.bindingId, hoursPerYear: 3 * 34 })), version: staleVersion },
         s.moderator,
       );
     } catch (e) {

@@ -16,7 +16,7 @@ import { Shell } from "./shell";
 import { Skeletons } from "./ui";
 import { BootstrapScreen, JoinScreen, LandingScreen, LoginCodeScreen, LoginScreen, PhotoScreen, SchoolDirectoryScreen } from "./screens/auth";
 import { ClassScreen, ClassesScreen } from "./screens/classes";
-import { SubjectsScreen } from "./screens/subjects";
+import { CompetenceLink, SubjectsScreen } from "./screens/subjects";
 import { StaffScreen } from "./screens/staff";
 import { ScheduleScreen } from "./screens/schedule";
 import { JournalScreen } from "./screens/journal";
@@ -127,7 +127,7 @@ function AppScreen({
     case "/subjects":
       return (
         <Shell active="subjects" title="Предметы">
-          <SubjectsScreen />
+          <SubjectsScreen competenceId={query.get("competence")} />
         </Shell>
       );
     case "/subjects/:subjectId":
@@ -173,7 +173,11 @@ function AppScreen({
     case "/journal":
       return (
         <Shell active="journal" title="Журнал">
-          <JournalScreen classId={query.get("classId")} subjectId={query.get("subjectId")} />
+          <JournalScreen
+            classId={query.get("classId")}
+            subjectId={query.get("subjectId")}
+            groupNo={query.get("groupNo") ? Number(query.get("groupNo")) : null}
+          />
         </Shell>
       );
     case "/admin":
@@ -205,6 +209,14 @@ function AppScreen({
       return (
         <Shell active="" title="Привязка к предмету">
           <BindScreen token={params.token} />
+        </Shell>
+      );
+    // Личный QR педагога отсканирован камерой телефона (AR-179): модератора
+    // ведём в «Управление компетенцией», остальным — объяснение, не 403.
+    case "/competence/:teacherId":
+      return (
+        <Shell active="subjects" title="Компетенции">
+          <CompetenceLink teacherId={params.teacherId} />
         </Shell>
       );
     default:

@@ -16,6 +16,7 @@ import {
   type SetPrioritiesDto,
   type SwapSlotsDto,
   type TemplateSlotDto,
+  weeklyOfYear,
 } from '@edustore/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
@@ -143,6 +144,7 @@ export class ScheduleService implements OnModuleInit {
         scope: b.scope,
         groupNos: b.groupNos,
         hoursPerWeek: b.hoursPerWeek,
+        hoursPerYear: b.hoursPerYear,
       })),
     );
     const reg = await this.state.register();
@@ -159,9 +161,12 @@ export class ScheduleService implements OnModuleInit {
     await this.state.checkVersion('schedule', dto.version);
     const ws = TenantContext.require();
     for (const e of dto.entries) {
+      // Ввод — ГОДОВАЯ норма (AR-180); недельные часы генератора — производная
+      // одной точки конверсии, а не второй ввод.
+      const year = Math.max(0, e.hoursPerYear);
       await this.prisma.teacherBinding.updateMany({
         where: { id: e.bindingId },
-        data: { hoursPerWeek: Math.max(0, e.hoursPerWeek) },
+        data: { hoursPerYear: year, hoursPerWeek: weeklyOfYear(year) },
       });
     }
     const input = await this.buildInput(0);

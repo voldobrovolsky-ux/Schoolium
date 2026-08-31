@@ -377,6 +377,40 @@ export interface BindingDto {
   scope: BindingScope;
   groupNos: number[];
   hoursPerWeek: number;
+  /** Годовая норма, введённая завучем (AR-180); недельная — производная. */
+  hoursPerYear: number;
+}
+
+// ─────────────────────────── компетенции педагога (AR-179) ───────────────────────────
+
+/**
+ * Массовое назначение компетенций (AR-179): модератор сканирует ЛИЧНЫЙ QR
+ * педагога (или выбирает его из списка) и галочками закрывает позиции
+ * «предмет × класс» на весь класс. Снятая галочка ОТКРЕПЛЯЕТ педагога от
+ * позиции; занятая другим позиция при `replace=false` возвращается конфликтом,
+ * при `replace=true` прежние педагоги открепляются тем же событием
+ * `subject.teacher.unbound.v1`. Позиции с групповыми привязками этим каналом
+ * не трогаются — группы назначаются из карточки предмета (Д6).
+ */
+export interface SaveCompetenceDto {
+  teacherId: string;
+  /** Позиции «предмет × класс», которые педагог ДОЛЖЕН вести классом. */
+  subjectIds: string[];
+  replace?: boolean;
+}
+
+export interface CompetenceConflictDto {
+  subjectName: string;
+  classLabels: string[];
+  teacherNames: string[];
+}
+
+export interface SaveCompetenceResultDto {
+  ok: boolean;
+  /** Заполнено при `ok=false`: занятые позиции, ждущие подтверждения замены. */
+  conflicts?: CompetenceConflictDto[];
+  bound: number;
+  unbound: number;
 }
 
 export interface CreateSubjectDto {
@@ -654,9 +688,19 @@ export interface SetTermsDto {
 
 // ─────────────────────────── расписание ───────────────────────────
 
+/**
+ * Учебных недель в году — 34 (график ФООП) [дефолт]. Единственная точка
+ * конверсии годовой нормы часов в недельную (AR-180): завуч вводит ГОД,
+ * генератор потребляет НЕДЕЛЮ.
+ */
+export const SCHOOL_YEAR_WEEKS = 34;
+export const weeklyOfYear = (hoursPerYear: number): number =>
+  hoursPerYear > 0 ? Math.max(1, Math.round(hoursPerYear / SCHOOL_YEAR_WEEKS)) : 0;
+
+/** Ввод норм — ГОДОВЫМИ часами (AR-180); недельные — производная `weeklyOfYear`. */
 export interface LoadEntryDto {
   bindingId: string;
-  hoursPerWeek: number;
+  hoursPerYear: number;
 }
 
 export interface SetLoadDto {
@@ -807,6 +851,8 @@ export interface JournalColumnDto {
   slotNo: number;
   subjectId: string;
   teacherId: string;
+  /** 0 — урок всего класса; N — урок группы N (AR-181: журнал на группу). */
+  groupNo: number;
   topic: string | null;
   /** Урок ещё не прошёл — гейт в контракте, UI лишь отражает (AR-74). */
   future: boolean;
@@ -821,6 +867,8 @@ export interface JournalRowDto {
   middleName: string | null;
   sex: Sex | null;
   deactivated: boolean;
+  /** Группа ученика по предмету с группами; null — деления нет (AR-181). */
+  groupNo: number | null;
   marks: Record<string, MarkValue>; // lessonId → отметка
   /**
    * Средний балл **за четверть**, в которую попадает открытая неделя, — по всем

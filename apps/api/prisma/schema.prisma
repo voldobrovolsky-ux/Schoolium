@@ -1319,7 +1319,8 @@ model SchoolSubject {
 }
 
 /// Привязка педагога к карточке предмета: весь класс либо перечисленные группы
-/// (взаимоисключаемы, Д6). `hoursPerWeek` — нагрузка экрана 2 мастера.
+/// (взаимоисключаемы, Д6). Нормы вводятся ГОДОМ (`hoursPerYear`, AR-180);
+/// `hoursPerWeek` — производная `weeklyOfYear`, её потребляет генератор.
 model TeacherBinding {
   id           String        @id @default(cuid())
   workspaceId  String
@@ -1329,6 +1330,7 @@ model TeacherBinding {
   scope        String // 'class' | 'group'
   groupNos     Int[] // пусто при scope='class'
   hoursPerWeek Int           @default(0)
+  hoursPerYear Int           @default(0)
   createdAt    DateTime      @default(now())
 
   @@index([workspaceId])

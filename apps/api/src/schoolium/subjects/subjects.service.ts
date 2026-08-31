@@ -118,7 +118,7 @@ export class SubjectsService implements OnModuleInit {
   }
 
   private toDto(
-    s: { id: string; name: string; classId: string; priority: boolean; bindings: { id: string; teacherId: string; scope: string; groupNos: number[]; hoursPerWeek: number }[] },
+    s: { id: string; name: string; classId: string; priority: boolean; bindings: { id: string; teacherId: string; scope: string; groupNos: number[]; hoursPerWeek: number; hoursPerYear: number }[] },
     classes: { id: string; label: string; groupCount: number }[],
     users: Map<string, { displayName: string; avatarUrl: string | null }>,
   ): SubjectDto {
@@ -131,6 +131,7 @@ export class SubjectsService implements OnModuleInit {
       scope: b.scope as 'class' | 'group',
       groupNos: b.groupNos,
       hoursPerWeek: b.hoursPerWeek,
+      hoursPerYear: b.hoursPerYear,
     }));
     const uncovered = uncoveredGroups(
       s.id,
@@ -339,6 +340,110 @@ export class SubjectsService implements OnModuleInit {
       );
     });
     return this.get(subjectId);
+  }
+
+  /**
+   * §11 строка 15б · компетенции педагога (AR-179): модератор галочками
+   * закрывает позиции «предмет × класс» НА ВЕСЬ КЛАСС. Снятая галочка
+   * открепляет; занятая другим позиция при `replace=false` возвращается
+   * КОНФЛИКТОМ (не ошибкой — человеку задают вопрос «Заменить всех?»), при
+   * `replace=true` прежние открепляются. Позиции с групповыми привязками этим
+   * каналом не трогаются (Д6): группы назначаются из карточки предмета.
+   * События и аудит — те же `teacher.bound/unbound.v1`, канал не различим.
+   */
+  async saveCompetence(dto: import('@edustore/shared').SaveCompetenceDto, actor: SchoolActor) {
+    const ws = TenantContext.require();
+    const membership = await this.prisma.membership.findFirst({
+      where: { workspaceId: ws, userId: dto.teacherId, deactivatedAt: null },
+    });
+    if (!membership) throw new NotFoundException('педагог с активным членством в школе не найден');
+
+    const [subjects, classes, users] = await Promise.all([
+      this.prisma.schoolSubject.findMany({ include: { bindings: true } }),
+      this.contingent.classes(),
+      this.teachersById(),
+    ]);
+    const target = new Set(dto.subjectIds);
+    const label = (classId: string) => classes.find((c) => c.id === classId)?.label ?? '—';
+
+    const toBind: { id: string; classId: string }[] = [];
+    const toUnbind: { id: string; classId: string }[] = [];
+    const conflicts: { subjectId: string; subjectName: string; classLabel: string; teacherIds: string[] }[] = [];
+    for (const s of subjects) {
+      const own = s.bindings.some((b) => b.teacherId === dto.teacherId && b.scope === 'class');
+      const groupBound = s.bindings.some((b) => b.scope === 'group');
+      if (groupBound) continue; // группы — из карточки предмета (Д6)
+      const others = s.bindings.filter((b) => b.scope === 'class' && b.teacherId !== dto.teacherId);
+      if (target.has(s.id)) {
+        if (own) continue;
+        if (others.length) {
+          conflicts.push({ subjectId: s.id, subjectName: s.name, classLabel: label(s.classId), teacherIds: others.map((b) => b.teacherId) });
+        } else {
+          toBind.push({ id: s.id, classId: s.classId });
+        }
+      } else if (own) {
+        toUnbind.push({ id: s.id, classId: s.classId });
+      }
+    }
+
+    if (conflicts.length && !dto.replace) {
+      // группировка «предмет z в классах x и y уже ведёт учитель N» — по
+      // предмету и составу занявших его педагогов
+      const grouped = new Map<string, { subjectName: string; classLabels: string[]; teacherNames: string[] }>();
+      for (const c of conflicts) {
+        const names = [...new Set(c.teacherIds.map((t) => users.get(t)?.displayName ?? '—'))].sort();
+        const key = `${c.subjectName}·${names.join('|')}`;
+        const g = grouped.get(key) ?? { subjectName: c.subjectName, classLabels: [], teacherNames: names };
+        g.classLabels.push(c.classLabel);
+        grouped.set(key, g);
+      }
+      return { ok: false, conflicts: [...grouped.values()], bound: 0, unbound: 0 };
+    }
+
+    let bound = 0;
+    let unbound = 0;
+    const bind = async (subjectId: string, classId: string) => {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.teacherBinding.create({
+          data: { workspaceId: ws, subjectId, teacherId: dto.teacherId, scope: 'class', groupNos: [] },
+        });
+        await this.outbox.enqueue(
+          tx,
+          newEvent<TeacherBoundV1>({
+            type: SCHOOL_EVENTS.teacherBound,
+            workspaceId: ws,
+            actor: actor.userId,
+            payload: { subjectId, classId, teacherId: dto.teacherId, scope: 'class', groupNos: [] },
+          }),
+        );
+      });
+      bound += 1;
+    };
+    const unbindOne = async (subjectId: string, classId: string, teacherId: string) => {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.teacherBinding.deleteMany({ where: { subjectId, teacherId } });
+        await this.outbox.enqueue(
+          tx,
+          newEvent<TeacherUnboundV1>({
+            type: SCHOOL_EVENTS.teacherUnbound,
+            workspaceId: ws,
+            actor: actor.userId,
+            payload: { subjectId, classId, teacherId, reason: 'manual' },
+          }),
+        );
+      });
+      unbound += 1;
+    };
+
+    for (const s of toBind) await bind(s.id, s.classId);
+    for (const s of toUnbind) await unbindOne(s.id, s.classId, dto.teacherId);
+    for (const c of conflicts) {
+      const subj = subjects.find((s) => s.id === c.subjectId)!;
+      for (const t of c.teacherIds) await unbindOne(c.subjectId, subj.classId, t);
+      await bind(c.subjectId, subj.classId);
+    }
+    this.log.log(`компетенции ${dto.teacherId}: привязано ${bound}, откреплено ${unbound}`);
+    return { ok: true, bound, unbound };
   }
 
   /** §11 строка 16 · `S-21.btn.unbind`: открепление. Обратная — привязать заново. */
