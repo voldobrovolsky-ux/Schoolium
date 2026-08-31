@@ -271,13 +271,22 @@ export async function readySchool(b: Bench, name = 'Школа приёмки'):
 export async function ensurePastLesson(b: Bench, workspaceId: string): Promise<void> {
   await TenantContext.runAsSystem(async () => {
     const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
-    const past = await b.prisma.schoolLesson.count({ where: { workspaceId, date: { lte: today } } });
+    // Открытая неделя журнала — ТЕКУЩАЯ: непрошедший урок нужен внутри неё,
+    // урок в прошлой неделе сценариям не виден. Поэтому и проверка, и перенос
+    // ограничены понедельником текущей недели: в понедельник «вчера» — это
+    // воскресенье ПРОШЛОЙ недели, и прежний перенос туда ронял чеки ровно по
+    // понедельникам (поймано CI 2026-08-31) — переносим на сегодня: дневной
+    // гейт школы без скелета принимает отметку с 00:01 (доказано G-75).
+    const monday = new Date(today);
+    monday.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
+    const past = await b.prisma.schoolLesson.count({ where: { workspaceId, date: { lte: today, gte: monday } } });
     if (past > 0) return;
     const first = await b.prisma.schoolLesson.findFirst({ where: { workspaceId }, orderBy: { date: 'asc' } });
     if (!first) return;
     const yesterday = new Date(today);
     yesterday.setUTCDate(today.getUTCDate() - 1);
-    await b.prisma.schoolLesson.update({ where: { id: first.id }, data: { date: yesterday } });
-    await b.prisma.journalColumn.updateMany({ where: { lessonId: first.id }, data: { date: yesterday } });
+    const target = yesterday >= monday ? yesterday : today;
+    await b.prisma.schoolLesson.update({ where: { id: first.id }, data: { date: target } });
+    await b.prisma.journalColumn.updateMany({ where: { lessonId: first.id }, data: { date: target } });
   });
 }
