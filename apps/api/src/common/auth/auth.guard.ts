@@ -1,10 +1,10 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { IS_PUBLIC } from './public.decorator';
 import { FlorService, type SessionUser } from './flor.service';
 import { DEFAULT_TEACHER_ID } from './dev-auth.guard';
-import { SCHOOL_COOKIE, SchoolSessionService } from './school-session.service';
+import { SCHOOL_COOKIE, SchoolSessionService, schoolCookieOptions } from './school-session.service';
 
 /**
  * Единый guard: сессия Флёруса (cookie flor_sid) → request.user.
@@ -32,6 +32,12 @@ export class AuthGuard implements CanActivate {
     if (schoolToken) {
       const session = await this.school.read(schoolToken);
       if (session) {
+        // Кука скользит вместе с серверным продлением (не чаще раза в час):
+        // устройство живёт «до удаления приложения», а не 90 календарных дней
+        // с первого входа.
+        if (session.renewed) {
+          ctx.switchToHttp().getResponse<Response>().cookie(SCHOOL_COOKIE, schoolToken, schoolCookieOptions());
+        }
         req.user = session;
         req.sessionId = session.sessionId;
         req.teacherId = session.florusUserId;
@@ -42,6 +48,10 @@ export class AuthGuard implements CanActivate {
         req.contour = 'schoolium';
         return true;
       }
+      // Мёртвая кука (сессия истекла/отозвана) стирается СРАЗУ: httpOnly не
+      // даёт клиенту, явный logout с невалидной сессией недостижим, а висящая
+      // постоянная кука (AR-183) ломала бы гейт «чужой сессии» активации.
+      ctx.switchToHttp().getResponse<Response>().clearCookie(SCHOOL_COOKIE, { path: '/' });
     }
 
     const sid = req.cookies?.flor_sid as string | undefined;

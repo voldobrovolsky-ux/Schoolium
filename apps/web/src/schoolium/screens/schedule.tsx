@@ -633,7 +633,10 @@ function SettingsForm({
   const [terms, setTerms] = useState<TermDto[]>(emptyTerms);
   const [ready, setReady] = useState(false);
   const [load, setLoad] = useState<{ entries: LoadEntry[]; version: number } | null>(null);
-  const [priorities, setPriorities] = useState<string[]>([]);
+  // Приоритеты выбираются ПО ИМЕНАМ дисциплин (правка владельца 2026-08-31:
+  // «просто математика», не «математика 1..3»); в контракт при генерации имя
+  // разворачивается в subjectId всех карточек этого имени во всех классах.
+  const [prioNames, setPrioNames] = useState<string[]>([]);
   const [noPriority, setNoPriority] = useState(false);
   const [prioTouched, setPrioTouched] = useState(false);
   const [day, setDay] = useState(() =>
@@ -659,6 +662,10 @@ function SettingsForm({
   const { toast, showToast } = useToast();
 
   const [subjects] = useAsync(() => api.subjects());
+  const subjNames =
+    subjects.status === "ready"
+      ? [...new Set(subjects.data.map((s) => s.name))].sort((a, b) => a.localeCompare(b, "ru"))
+      : [];
 
   /**
    * Всё разом при открытии: четверти (свои или рекомендованный график ФООП —
@@ -697,7 +704,7 @@ function SettingsForm({
 
   const termsValid = terms.every((t) => t.dateFrom && t.dateTo);
   const loadValid = !!load && load.entries.every((e) => e.hoursPerWeek > 0);
-  const canGenerate = termsValid && loadValid && day.slotsPerDay !== "" && (priorities.length > 0 || noPriority || !ready);
+  const canGenerate = termsValid && loadValid && day.slotsPerDay !== "" && (prioNames.length > 0 || noPriority || !ready);
 
   const dayLength = (): number => {
     const slots = Number(day.slotsPerDay) || 0;
@@ -719,8 +726,12 @@ function SettingsForm({
       await api.setTerms(terms);
       // Нагрузку форма НЕ шлёт (AR-180): нормы принадлежат «Нормам часов»,
       // здесь они только читаются.
-      if (prioTouched || priorities.length > 0 || noPriority) {
-        await api.setPriorities({ subjectIds: priorities, explicitNone: noPriority || priorities.length === 0 });
+      if (prioTouched || prioNames.length > 0 || noPriority) {
+        // Имя → subjectId всех карточек имени: приоритет ставится предмету
+        // сразу во всех классах, контракт SetPrioritiesDto не меняется.
+        const ids =
+          subjects.status === "ready" ? subjects.data.filter((s) => prioNames.includes(s.name)).map((s) => s.id) : [];
+        await api.setPriorities({ subjectIds: ids, explicitNone: noPriority || ids.length === 0 });
       }
       if (skelTouched) {
         const sk = await api.skeleton();
@@ -838,22 +849,20 @@ function SettingsForm({
       <section data-section="priorities" className="sch-stack">
         <h3 className="sch-section-title">Приоритетные предметы</h3>
         <div className="sch-chips" data-testid="S-41.chips.priority">
-          {subjects.status === "ready"
-            ? subjects.data.map((s) => (
-                <Button
-                  key={s.id}
-                  kind="chip"
-                  aria-pressed={priorities.includes(s.id)}
-                  onClick={() => {
-                    setPrioTouched(true);
-                    setNoPriority(false);
-                    setPriorities((cur) => (cur.includes(s.id) ? cur.filter((x) => x !== s.id) : [...cur, s.id]));
-                  }}
-                >
-                  {s.name} · {s.classLabel}
-                </Button>
-              ))
-            : null}
+          {subjNames.map((name) => (
+            <Button
+              key={name}
+              kind="chip"
+              aria-pressed={prioNames.includes(name)}
+              onClick={() => {
+                setPrioTouched(true);
+                setNoPriority(false);
+                setPrioNames((cur) => (cur.includes(name) ? cur.filter((x) => x !== name) : [...cur, name]));
+              }}
+            >
+              {name}
+            </Button>
+          ))}
         </div>
         <Button
           kind="off"
@@ -862,7 +871,7 @@ function SettingsForm({
           onClick={() => {
             setPrioTouched(true);
             setNoPriority(true);
-            setPriorities([]);
+            setPrioNames([]);
           }}
         >
           ⌀ Без приоритетов

@@ -509,6 +509,20 @@ async function main() {
       if (last === 'Абрамов') { modalsClosed.add('M-02'); console.log('    ✅ M-02 закрыта'); }
     }
     if (MOBILE) await tapTargets(page, 'S-12 · контингент');
+    if (MOBILE) {
+      // Панель действий обязана лежать НАД sticky-ячейками таблицы (z-index 1):
+      // строки списка просвечивали сквозь кнопки (правка владельца 2026-08-31).
+      // После сохранения ученика экран мигает скелетонами — панель ждём, а не ловим.
+      await page.waitForSelector('.sch-sticky-actions', { timeout: 20_000 });
+      const z = await page.$eval('.sch-sticky-actions', (el) => getComputedStyle(el).zIndex).catch(() => null);
+      if (z === '2') console.log('    ✅ панель действий S-12 над таблицей (z-index 2 > sticky-ячеек)');
+      else { console.error(`    ❌ z-index панели действий: ${z}, ждали 2`); failures++; }
+      // AR-184: вертикальная overscroll-цепочка скроллпорта доходит до
+      // вьюпорта — иначе Chrome Android не показывает pull-to-refresh.
+      const oy = await page.$eval('.sch-shell--mobile .sch-content', (el) => getComputedStyle(el).overscrollBehaviorY).catch(() => null);
+      if (oy === 'auto') console.log('    ✅ скроллпорт не глушит overscroll — нативный pull-to-refresh работает');
+      else { console.error(`    ❌ overscroll-behavior-y скроллпорта: ${oy}, ждали auto`); failures++; }
+    }
     await shot(page, 'S-12-filled');
 
     // ── S-20 · предметы ──
@@ -540,7 +554,9 @@ async function main() {
     console.log('▶ S-30 · персонал');
     await page.goto(`${WEB}/staff`);
     await page.waitForSelector('[data-testid="S-30.section.level3"]');
-    await hasAll(page, ['S-30.section.level1', 'S-30.section.level2', 'S-30.section.level3', 'S-30.btn.addTeacher']);
+    await hasAll(page, ['S-30.section.level1', 'S-30.section.level2', 'S-30.section.level3', 'S-30.btn.addTeacher',
+      // Замы ДОБАВЛЯЮТСЯ (AR-182): кнопки секции 2, единственность держит сервер.
+      'S-30.btn.addDeputyAcademic', 'S-30.btn.addDeputyUpbringing']);
     await shot(page, 'S-30-staff');
 
     // ── S-31 · карточка сотрудника и именной QR (1.2.0, AR-154/AR-161) ──
@@ -549,6 +565,16 @@ async function main() {
     // «Добавить» открывает форму заведения учётки: ФИО + юзернейм + пароль.
     await page.waitForSelector('[data-testid="M-16"]', { timeout: 20_000 });
     await modalOpen(page, 'M-16');
+    // AR-184: тяга в теле модалки не должна доходить до вьюпорта (pull-to-refresh
+    // не перезагружает страницу с введённой формой).
+    const mob = await page.$eval('.sch-modal-body', (el) => getComputedStyle(el).overscrollBehaviorY).catch(() => null);
+    const ovl = await page.$eval('.sch-overlay', (el) => {
+      const cs = getComputedStyle(el);
+      return `${cs.overflow}/${cs.overscrollBehaviorY}`;
+    }).catch(() => null);
+    if (mob === 'contain' && ovl === 'hidden/contain')
+      console.log('    ✅ слой и тело модалки держат overscroll (contain) — PTR не съест форму');
+    else { console.error(`    ❌ overscroll: тело=${mob} (ждали contain), слой=${ovl} (ждали hidden/contain)`); failures++; }
     await hasAll(page, ['M-16.input.lastName', 'M-16.input.firstName', 'M-16.input.username', 'M-16.input.password']);
     await fill(page, 'M-16.input.lastName', 'Смирнов');
     await fill(page, 'M-16.input.firstName', 'Олег');
@@ -565,6 +591,10 @@ async function main() {
     const teacherCards = page.locator('[data-testid="S-30.section.level3"] [data-testid="S-30.card.person"]');
     await teacherCards.first().waitFor({ timeout: 20_000 });
     await has(page, 'S-30.card.person');
+    // Карточка по эскизу владельца (2026-08-31): плашка-фото со срезом.
+    const plaques = await page.locator('[data-testid="S-30.card.person"] .sch-staff-plaque').count();
+    if (plaques > 0) console.log(`    ✅ карточки персонала несут градиентную плашку (${plaques})`);
+    else { console.error('    ❌ у карточек персонала нет .sch-staff-plaque — эскизная раскладка потеряна'); failures++; }
     await teacherCards.last().click();
     await page.waitForSelector('[data-testid="M-06"]', { timeout: 20_000 });
     await modalOpen(page, 'M-06');
@@ -769,6 +799,13 @@ async function main() {
     else { console.error(`    ❌ в настройке ${loadInputsInForm} окошек норм — они должны жить только в M-22`); failures++; }
 
     await hasAll(page, ['S-41.chips.priority', 'S-41.btn.noPriority']);
+    // Чипы — по ИМЕНАМ дисциплин: один на имя, без «· класс» (правка владельца).
+    await page.locator('[data-testid="S-41.chips.priority"] button').first().waitFor({ timeout: 20_000 });
+    const chipLabels = (await page.locator('[data-testid="S-41.chips.priority"] button').allInnerTexts()).map((t) => t.trim());
+    const uniqChips = new Set(chipLabels);
+    if (uniqChips.size === chipLabels.length && !chipLabels.some((t) => t.includes('·')))
+      console.log(`    ✅ чипы приоритетов — уникальные имена дисциплин (${chipLabels.length}), классов в подписях нет`);
+    else { console.error(`    ❌ чипы приоритетов с дублями или классами: ${chipLabels.join(' | ')}`); failures++; }
     await click(page, 'S-41.btn.noPriority');
 
     await hasAll(page, ['S-41.input.slotsPerDay', 'S-41.input.lessonMin', 'S-41.input.breakMin', 'S-41.input.days', 'S-41.select.bigBreakAfter', 'S-41.input.bigBreakMin', 'S-41.calc.dayLength']);

@@ -9,11 +9,16 @@ import type { SessionUser } from './flor.service';
 export const SCHOOL_COOKIE = 'sch_sid';
 
 /**
- * Флаги cookie сессии — ОДНО место на оба маршрута, которые её ставят (вход по
- * коду и вход по ссылке bootstrap). Раздельные литералы уже расходились бы:
- * `secure` там был выведен из `NODE_ENV`, и на стенде по голому IP вход молча
- * не срабатывал — браузер не сохранял cookie, а экран показывал не ошибку, а
- * возврат на форму.
+ * Флаги cookie сессии — ОДНО место на ВСЕ маршруты, которые её ставят (входы
+ * `v1/auth/*`, активация `staff/join/:token`, продление в guard). Раздельные
+ * литералы уже расходились: `secure` был выведен из `NODE_ENV`, и на стенде по
+ * голому IP вход молча не срабатывал; позже `join/:token` ставил куку БЕЗ
+ * `maxAge` — сессионную, и установленное на телефон приложение просило «Войти»
+ * после каждого закрытия (правка владельца 2026-08-31).
+ *
+ * `maxAge` обязателен: без него кука живёт до закрытия браузера, какой бы
+ * долгой ни была серверная сессия. Срок равен серверному `sessionDays` и
+ * скользит вместе с ним — guard перевыставляет куку при продлении сессии.
  *
  * `COOKIE_INSECURE=1` снимает `secure` и предназначен ТОЛЬКО для стенда без
  * TLS (демо по IP, локальная проверка). С реальными данными школы он
@@ -23,6 +28,8 @@ export const schoolCookieOptions = () => ({
   httpOnly: true,
   sameSite: 'lax' as const,
   secure: process.env.NODE_ENV === 'production' && process.env.COOKIE_INSECURE !== '1',
+  maxAge: ACCESS_PARAMS.sessionDays * 24 * 3600 * 1000,
+  path: '/',
 });
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -73,7 +80,7 @@ export class SchoolSessionService {
    * либо членство деактивировано: деактивация закрывает вход немедленно, а не
    * через 90 дней (AR-92).
    */
-  async read(token: string): Promise<(SessionUser & { sessionId: string }) | null> {
+  async read(token: string): Promise<(SessionUser & { sessionId: string; renewed?: boolean }) | null> {
     return TenantContext.runAsSystem(async () => {
       const s = await this.prisma.appSession.findUnique({ where: { token } });
       if (!s || s.revokedAt || s.expiresAt < new Date()) return null;
@@ -93,8 +100,13 @@ export class SchoolSessionService {
         this.prisma.user.findUnique({ where: { id: s.userId } }),
         this.prisma.workspace.findUnique({ where: { id: s.workspaceId } }),
       ]);
-      // продление при активности — без записи на каждый запрос чаще раза в час
+      // продление при активности — без записи на каждый запрос чаще раза в час.
+      // `renewed` сообщает guard'у перевыставить куку: без этого даже
+      // 90-дневная кука истекала на клиенте ровно через 90 календарных дней
+      // при живой серверной сессии.
+      let renewed = false;
       if (Date.now() - s.lastSeenAt.getTime() > 3600_000) {
+        renewed = true;
         void this.prisma.appSession
           .update({
             where: { id: s.id },
@@ -106,6 +118,7 @@ export class SchoolSessionService {
           .catch(() => undefined);
       }
       return {
+        renewed,
         sessionId: s.id,
         florusUserId: s.userId,
         workspaceId: s.workspaceId,

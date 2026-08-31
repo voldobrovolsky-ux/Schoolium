@@ -55,17 +55,20 @@ export const STAFF_ROLES: SchoolRole[] = [
 ];
 
 /**
- * Секции экрана «Персонал» (`S-30`). Кнопка «Добавить» стоит только у
- * множественных ролей — учредители и преподаватели (AR-60): директор и оба зама
- * существуют в одном экземпляре, и «для симметрии» кнопка не добавляется.
+ * Секции экрана «Персонал» (`S-30`). `addable` — роли, которые заводятся
+ * кнопкой «Добавить» этой секции (AR-182: замы ДОБАВЛЯЮТСЯ — школе без
+ * bootstrap-слотов завуча иначе не создать; единственность синглтонов держит
+ * сервер, а не отсутствие кнопки). У директора своей кнопки нет: его роль
+ * выдаётся существующему сотруднику через `M-07`, единственность держит тот
+ * же серверный синглтон.
  */
 export const STAFF_SECTIONS = [
-  { level: 1, title: 'Учредители и директор', roles: ['founder', 'director'] as SchoolRole[], addable: 'founder' as SchoolRole | null },
-  { level: 2, title: 'Заместители', roles: ['deputy_academic', 'deputy_upbringing'] as SchoolRole[], addable: null },
-  { level: 3, title: 'Преподаватели', roles: ['teacher'] as SchoolRole[], addable: 'teacher' as SchoolRole | null },
+  { level: 1, title: 'Учредители и директор', roles: ['founder', 'director'] as SchoolRole[], addable: ['founder'] as SchoolRole[] },
+  { level: 2, title: 'Заместители', roles: ['deputy_academic', 'deputy_upbringing'] as SchoolRole[], addable: ['deputy_academic', 'deputy_upbringing'] as SchoolRole[] },
+  { level: 3, title: 'Преподаватели', roles: ['teacher'] as SchoolRole[], addable: ['teacher'] as SchoolRole[] },
 ] as const;
 
-/** Роли, существующие в школе в единственном экземпляре (карточка одна). */
+/** Роли, существующие в школе не более чем в одном экземпляре (AR-182). */
 export const SINGLETON_ROLES: SchoolRole[] = ['director', 'deputy_academic', 'deputy_upbringing'];
 
 // ─────────────────────────── права (13 кодов, AR-69, AR-88) ───────────────────────────

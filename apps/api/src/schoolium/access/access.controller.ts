@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ACCESS_PARAMS, safeNext, startScreenFor, type MeDto, type SchoolRole, type SessionDto } from '@edustore/shared';
+import { safeNext, startScreenFor, type MeDto, type SchoolRole, type SessionDto } from '@edustore/shared';
 import { Public } from '../../common/auth/public.decorator';
 import type { SessionUser } from '../../common/auth/flor.service';
 import { SCHOOL_COOKIE, schoolCookieOptions, SchoolSessionService } from '../../common/auth/school-session.service';
@@ -40,11 +40,8 @@ export class SchoolAuthController {
   ) {}
 
   private setCookie(res: Response, token: string): void {
-    res.cookie(SCHOOL_COOKIE, token, {
-      ...schoolCookieOptions(),
-      maxAge: ACCESS_PARAMS.sessionDays * 24 * 3600 * 1000,
-      path: '/',
-    });
+    // maxAge и path живут в schoolCookieOptions() — одно место на все маршруты.
+    res.cookie(SCHOOL_COOKIE, token, schoolCookieOptions());
   }
 
   /** §11 строка 1 · `S-01`: страница входа заводит токен привязки (аноним). */

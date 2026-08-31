@@ -11,30 +11,86 @@ export type Async<T> =
   | { status: "error"; message: string }
   | { status: "ready"; data: T };
 
+/** Тихое самообновление — не чаще раза в N мс: «синхронные изменения» — это
+ *  возврат к вкладке со свежими данными, а не поллинг сервера. */
+const REVALIDATE_MIN_MS = 15_000;
+
 export function useAsync<T>(load: () => Promise<T>, deps: unknown[] = []): [Async<T>, () => void, (d: T) => void] {
   const [state, setState] = useState<Async<T>>({ status: "loading" });
   const [nonce, setNonce] = useState(0);
   const fn = useRef(load);
   fn.current = load;
+  // Поколение вместо флага `alive`: и cleanup, и смена deps, и тихий рефетч
+  // обесценивают ответы предыдущих запросов одним инкрементом.
+  const gen = useRef(0);
+  const lastAt = useRef(0);
+  const busy = useRef(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
-    let alive = true;
+    const g = ++gen.current;
     setState({ status: "loading" });
     fn.current()
-      .then((data) => alive && setState({ status: "ready", data }))
-      .catch((e: unknown) =>
-        alive &&
+      .then((data) => {
+        if (g !== gen.current) return;
+        lastAt.current = Date.now();
+        setState({ status: "ready", data });
+      })
+      .catch((e: unknown) => {
+        if (g !== gen.current) return;
+        lastAt.current = Date.now();
         setState({
           status: "error",
           // Причина СЛОВАМИ: «произошла ошибка» — дефект (§0).
           message: e instanceof SchoolApiError ? e.message : "Неизвестная ошибка",
-        }),
-      );
+        });
+      });
     return () => {
-      alive = false;
+      gen.current++;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nonce, ...deps]);
+
+  // Самообновление при возврате в приложение (правка владельца 2026-08-31:
+  // «нужны синхронные изменения») — ТИХОЕ, без `status: "loading"`: скелетоны
+  // размонтировали бы всё поддерево вместе с открытыми модалками и введённым
+  // в них. Пропускается, пока открыт любой слой (.sch-overlay/.sch-popover):
+  // часть экранов выводит сущность модалки из state.data, и подмена данных
+  // под открытой формой её бы закрыла или переписала.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const wake = () => {
+      if (document.visibilityState === "hidden") return;
+      if (busy.current) return;
+      if (Date.now() - lastAt.current < REVALIDATE_MIN_MS) return;
+      if (stateRef.current.status !== "ready") return;
+      if (document.querySelector(".sch-overlay, .sch-popover")) return;
+      const g = gen.current;
+      busy.current = true;
+      fn.current()
+        .then((data) => {
+          if (g !== gen.current) return;
+          // Слой мог ОТКРЫТЬСЯ, пока ответ летел: данные под открытой формой
+          // не подменяем — гвард на старте это окно не закрывает.
+          if (document.querySelector(".sch-overlay, .sch-popover")) return;
+          setState({ status: "ready", data });
+        })
+        // Ошибка тихого рефетча не показывается: на экране остаются
+        // прежние данные, у явной загрузки есть свой Retry.
+        .catch(() => undefined)
+        .finally(() => {
+          busy.current = false;
+          lastAt.current = Date.now();
+        });
+    };
+    window.addEventListener("focus", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      window.removeEventListener("focus", wake);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, []);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const patch = useCallback((data: T) => setState({ status: "ready", data }), []);

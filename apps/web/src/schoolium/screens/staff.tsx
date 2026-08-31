@@ -2,10 +2,15 @@
  * Персонал: `S-30` три секции карточек, `S-31` карточка сотрудника (`M-06`) с
  * QR-активацией и кодом входа, `M-07` добавление роли.
  *
- * Кнопка «Добавить» стоит ТОЛЬКО у множественных ролей — учредители и
- * преподаватели (AR-60): директор и оба зама существуют в одном экземпляре, и
- * «для симметрии» кнопка не добавляется. Отдельной секции «Модераторы» нет:
- * модератор — уровень доступа, а не должность (AR-102).
+ * Кнопки «Добавить» — по массиву `addable` секции (AR-182): учредители,
+ * преподаватели и ОБА зама (bootstrap слотов замов не создаёт, а школа без
+ * завуча не живёт); единственность синглтонов держит сервер. У директора
+ * своей кнопки нет — роль выдаётся через `M-07`. Отдельной секции
+ * «Модераторы» нет: модератор — уровень доступа, а не должность (AR-102).
+ *
+ * Карточка `S-30.card.person` — по эскизу владельца (2026-08-31): фото на
+ * срезанной градиентной плашке слева, справа «Фамилия И.», роль строчными и —
+ * у педагога с привязками — «классы:» кружками и «предмет:» именами.
  */
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
@@ -27,9 +32,24 @@ import { navigate } from "../router";
 /** Роли, которые можно ДОБАВИТЬ карточке зарегистрированного сотрудника (AR-102). */
 const ADDABLE_ROLES: SchoolRole[] = ["founder", "director", "deputy_academic", "deputy_upbringing", "teacher", "moderator", "admin"];
 
+/** Подписи кнопок заведения карточек по ролям секций (AR-182): в секции 2 их
+ *  две, поэтому «Добавить» без уточнения там не работает. */
+const ADD_LABELS: Partial<Record<SchoolRole, string>> = {
+  founder: "Добавить",
+  teacher: "Добавить",
+  deputy_academic: "Добавить завуча (УР)",
+  deputy_upbringing: "Добавить зама (ВР)",
+};
+
+/** Привязки педагога для карточки: из `api.subjects()` по `binding.teacherId`. */
+type TeacherMeta = { classLabels: string[]; subjects: string[] };
+
 export function StaffScreen({ openId }: { openId?: string }) {
   const { can } = useSession();
   const [state, reload] = useAsync(() => api.staff());
+  // Обогащение карточек привязками — ОТДЕЛЬНЫМ запросом: его ошибка не валит
+  // экран, карточки без меты просто короче.
+  const [subjState] = useAsync(() => api.subjects());
   const [expanded, setExpanded] = useState(false);
   /** M-16: форма заведения учётки (AR-154) — роль добавляемой карточки. */
   const [adding, setAdding] = useState<SchoolRole | null>(null);
@@ -46,6 +66,24 @@ export function StaffScreen({ openId }: { openId?: string }) {
   const cards = state.data;
   const open = openId ? cards.find((c) => c.id === openId) ?? null : null;
   const shown = expanded || cards.length > 0;
+
+  // userId педагога → его классы и дисциплины (джойн binding.teacherId ↔ card.userId).
+  const teacherMeta = new Map<string, TeacherMeta>();
+  if (subjState.status === "ready") {
+    const acc = new Map<string, { classes: Set<string>; names: Set<string> }>();
+    for (const s of subjState.data)
+      for (const b of s.bindings) {
+        const cur = acc.get(b.teacherId) ?? { classes: new Set<string>(), names: new Set<string>() };
+        cur.classes.add(s.classLabel);
+        cur.names.add(s.name);
+        acc.set(b.teacherId, cur);
+      }
+    for (const [id, v] of acc)
+      teacherMeta.set(id, {
+        classLabels: [...v.classes].sort((a, b) => parseInt(a, 10) - parseInt(b, 10) || a.localeCompare(b, "ru")),
+        subjects: [...v.names].sort((a, b) => a.localeCompare(b, "ru")),
+      });
+  }
 
   return (
     <>
@@ -102,23 +140,35 @@ export function StaffScreen({ openId }: { openId?: string }) {
                 ) : (
                   <h2 className="sch-section-title">{sec.title}</h2>
                 )}
-                {/* Только у множественных ролей (AR-60). */}
-                {mayManage && sec.addable ? (
-                  <Button
-                    kind="secondary"
-                    testId={sec.addable === "founder" ? "S-30.btn.addFounder" : "S-30.btn.addTeacher"}
-                    onClick={() => setAdding(sec.addable as SchoolRole)}
-                  >
-                    Добавить
-                  </Button>
-                ) : null}
+                {/* Кнопка на каждую заводимую роль секции (AR-182). Смок стоит
+                    на addFounder/addTeacher — их не переименовывать. */}
+                {mayManage
+                  ? sec.addable.map((role) => (
+                      <Button
+                        key={role}
+                        kind="secondary"
+                        testId={
+                          role === "founder"
+                            ? "S-30.btn.addFounder"
+                            : role === "teacher"
+                              ? "S-30.btn.addTeacher"
+                              : role === "deputy_academic"
+                                ? "S-30.btn.addDeputyAcademic"
+                                : "S-30.btn.addDeputyUpbringing"
+                        }
+                        onClick={() => setAdding(role)}
+                      >
+                        {ADD_LABELS[role] ?? "Добавить"}
+                      </Button>
+                    ))
+                  : null}
               </div>
               {mobile && collapsed.has(sec.level) ? null : (
                 <div className="sch-cards--3">
                   {cards
                     .filter((c) => c.section === sec.level)
                     .map((c) => (
-                      <PersonCard key={c.id} card={c} />
+                      <PersonCard key={c.id} card={c} meta={c.userId ? teacherMeta.get(c.userId) : undefined} />
                     ))}
                 </div>
               )}
@@ -154,31 +204,53 @@ export function StaffScreen({ openId }: { openId?: string }) {
   );
 }
 
-function PersonCard({ card }: { card: StaffCardDto }) {
+function PersonCard({ card, meta }: { card: StaffCardDto; meta?: TeacherMeta }) {
+  // «Фамилия И.» — как на эскизе; полное имя живёт в карточке M-06.
+  const title =
+    card.filled && card.lastName && card.firstName
+      ? `${card.lastName} ${card.firstName[0]}.`
+      : card.name ?? "Учётка не заведена";
   return (
     <button
-      className={card.registered ? "sch-card sch-card--clickable" : "sch-card sch-card--clickable sch-card--locked"}
+      className={
+        card.registered
+          ? "sch-card sch-card--staff sch-card--clickable"
+          : "sch-card sch-card--staff sch-card--clickable sch-card--locked"
+      }
       data-testid="S-30.card.person"
       data-card-id={card.id}
       onClick={() => navigate(`/staff/${card.id}`)}
     >
-      <div className="sch-row">
-        {card.filled ? <Avatar name={card.name} url={card.avatarUrl} /> : <span aria-hidden="true">🔒</span>}
-        <span>
-          <span className="sch-card-title">{card.name ?? "Учётка не заведена"}</span>
-          <br />
-          <span className="sch-card-sub">{card.roles.map((r) => ROLE_LABELS[r]).join(", ")}</span>
-        </span>
-      </div>
-      {card.deactivated ? (
-        <div style={{ marginTop: "var(--sp-12)" }}>
-          <Badge muted>доступ закрыт</Badge>
-        </div>
-      ) : card.filled && !card.registered ? (
-        <div style={{ marginTop: "var(--sp-12)" }}>
-          <Badge muted>не авторизован</Badge>
-        </div>
-      ) : null}
+      <span className={card.filled ? "sch-staff-plaque" : "sch-staff-plaque sch-staff-plaque--locked"} aria-hidden="true">
+        {card.filled ? <Avatar large name={card.name} url={card.avatarUrl} /> : <span>🔒</span>}
+      </span>
+      <span className="sch-staff-body">
+        <span className="sch-card-title">{title}</span>
+        <span className="sch-card-sub sch-staff-role">{card.roles.map((r) => ROLE_LABELS[r]).join(", ")}</span>
+        {/* Строки привязок — ТОЛЬКО у педагога с позициями: «классы: —» не рендерим. */}
+        {meta && meta.classLabels.length > 0 ? (
+          <span className="sch-staff-line">
+            классы:
+            {meta.classLabels.map((l) => (
+              <span key={l} className="sch-class-dot">
+                {l}
+              </span>
+            ))}
+          </span>
+        ) : null}
+        {meta && meta.subjects.length > 0 ? (
+          <span className="sch-staff-line">предмет: {meta.subjects.join(", ")}</span>
+        ) : null}
+        {card.deactivated ? (
+          <span className="sch-staff-line">
+            <Badge muted>доступ закрыт</Badge>
+          </span>
+        ) : card.filled && !card.registered ? (
+          <span className="sch-staff-line">
+            <Badge muted>не авторизован</Badge>
+          </span>
+        ) : null}
+      </span>
     </button>
   );
 }

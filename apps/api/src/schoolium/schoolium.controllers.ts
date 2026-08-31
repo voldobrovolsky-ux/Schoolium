@@ -42,7 +42,7 @@ import { AUDIT_LABELS, type SchoolEventType } from './schoolium.contract';
 import { AuditService } from '../common/audit/audit.service';
 import { PrismaService } from '../common/prisma/prisma.service';
 
-type Req0 = Request & { user?: SessionUser };
+type Req0 = Request & { user?: SessionUser; contour?: 'schoolium' | 'legacy' };
 
 /**
  * Контроллеры Schoolium 1.1.1. Каждая мутация несёт `@RequirePermission` из
@@ -420,14 +420,17 @@ export class StaffController {
   @Public()
   @Post('join/:token')
   async join(@Req() req: Req0, @Param('token') token: string) {
-    const openedByOtherSession = Boolean(req.cookies?.[SCHOOL_COOKIE]);
+    // «Чужая сессия» — по ВАЛИДНОСТИ (guard уже провалидировал куку и заполнил
+    // req.user/contour), а не по наличию куки (AR-170 (2)): с постоянной кукой
+    // (AR-183) мёртвая sch_sid иначе блокировала бы переактивацию с того же
+    // телефона на 90 дней вперёд, сжигая каждый перевыпущенный QR.
+    const openedByOtherSession = req.contour === 'schoolium' && Boolean(req.user);
     const ua = String(req.headers['user-agent'] ?? '');
     const r = await this.svc.activate(token, { openedByOtherSession, deviceHint: ua.slice(0, 80) });
     if (r.sessionToken) {
-      (req.res as import('express').Response).cookie(SCHOOL_COOKIE, r.sessionToken, {
-        ...schoolCookieOptions(),
-        path: '/',
-      });
+      // Постоянная кука (maxAge из schoolCookieOptions): это главный маршрут
+      // входа с телефона, сессионная кука тут умирала при закрытии приложения.
+      (req.res as import('express').Response).cookie(SCHOOL_COOKIE, r.sessionToken, schoolCookieOptions());
     }
     return { ok: true, hasSession: Boolean(r.sessionToken) };
   }

@@ -138,14 +138,19 @@ export class StaffService {
     );
   }
 
-  /** `S-30.btn.addFounder` / `S-30.btn.addTeacher`: карточка + учётка сразу. */
+  /**
+   * `S-30.btn.addFounder` / `addTeacher` / `addDeputyAcademic` /
+   * `addDeputyUpbringing`: карточка + учётка сразу. Синглтоны (AR-182)
+   * ЗАВОДЯТСЯ, пока роль свободна: bootstrap слотов замов не создаёт, и
+   * безусловный запрет оставлял школу без завуча.
+   */
   async addCard(dto: CreateStaffCardDto): Promise<{ card: StaffCardDto; credentials: CredentialsDto }> {
     const role = dto.role;
-    if (SINGLETON_ROLES.includes(role)) {
+    const ws = TenantContext.require();
+    if (SINGLETON_ROLES.includes(role) && (await this.singletonTaken(ws, role))) {
       throw new ForbiddenException(`роль ${role} существует в школе в единственном экземпляре`);
     }
-    const ws = TenantContext.require();
-    const section = role === 'founder' ? 1 : role === 'teacher' ? 3 : 2;
+    const section = role === 'founder' || role === 'director' ? 1 : role === 'teacher' ? 3 : 2;
     const seq = await this.prisma.staffCard.count({ where: { section } });
     const { userId, credentials } = await this.createAccount(ws, dto, [role]);
     const c = await this.prisma.staffCard.create({
@@ -331,10 +336,15 @@ export class StaffService {
 
   // ─────────────── роли (§11 строки 7, 32; AR-102) ───────────────
 
-  /** `S-31.btn.addRole`. Роль `moderator` выдаётся любому — так появляется второй. */
+  /** `S-31.btn.addRole`. Роль `moderator` выдаётся любому — так появляется второй.
+   *  Синглтоны и здесь держит сервер (AR-182, П-4): без этой проверки M-07
+   *  позволял второго завуча, и «единственность» оставалась декларацией. */
   async addRole(cardId: string, role: SchoolRole, actor: SchoolActor) {
-    const { membership } = await this.registered(cardId);
+    const { membership, workspaceId } = await this.registered(cardId);
     if (membership.roles.includes(role)) return this.get(cardId);
+    if (SINGLETON_ROLES.includes(role) && (await this.singletonTaken(workspaceId, role))) {
+      throw new ForbiddenException(`роль ${role} существует в школе в единственном экземпляре`);
+    }
     await TenantContext.runAsSystem(() =>
       this.prisma.membership.update({ where: { id: membership.id }, data: { roles: [...membership.roles, role] } }),
     );
@@ -378,6 +388,24 @@ export class StaffService {
         where: { workspaceId, deactivatedAt: null, roles: { has: 'moderator' } },
       }),
     );
+  }
+
+  /**
+   * Синглтон занят, если роль несёт живое членство ЛИБО намечена на карточке
+   * без учётки (пустой bootstrap-слот — тоже носитель: заполнится этой ролью).
+   * Деактивированные не считаются — их слот освобождён (AR-89, AR-182).
+   */
+  private async singletonTaken(workspaceId: string, role: SchoolRole): Promise<boolean> {
+    return TenantContext.runAsSystem(async () => {
+      const member = await this.prisma.membership.count({
+        where: { workspaceId, deactivatedAt: null, roles: { has: role } },
+      });
+      if (member > 0) return true;
+      const slot = await this.prisma.staffCard.count({
+        where: { workspaceId, userId: null, plannedRoles: { has: role } },
+      });
+      return slot > 0;
+    });
   }
 
   // ─────────────── удаление, деактивация, реактивация (§11 строки 29–31) ───────────────
@@ -433,9 +461,18 @@ export class StaffService {
     return this.get(cardId);
   }
 
-  /** Реактивация возвращает доступ; сессии не воскресают — вход заново. */
+  /**
+   * Реактивация возвращает доступ; сессии не воскресают — вход заново.
+   * Синглтоны перепроверяются (AR-182): пока сотрудник был деактивирован, его
+   * роль могла уйти другому — реактивация не даёт двух живых завучей.
+   */
   async reactivate(cardId: string, actor: SchoolActor) {
     const { membership, workspaceId, userId } = await this.registered(cardId);
+    for (const role of membership.roles as SchoolRole[]) {
+      if (SINGLETON_ROLES.includes(role) && (await this.singletonTaken(workspaceId, role))) {
+        throw new ForbiddenException(`роль ${role} существует в школе в единственном экземпляре`);
+      }
+    }
     await TenantContext.runAsSystem(() =>
       this.prisma.membership.update({ where: { id: membership.id }, data: { deactivatedAt: null } }),
     );

@@ -219,6 +219,37 @@
    от классов/предметов, поэтому колонки не заданы жёстко. */
 .sch-cards--auto { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--sp-24); }
 
+/* ─── карточка сотрудника S-30 по эскизу владельца (2026-08-31): фото на
+   срезанной градиентной плашке слева, справа имя, роль и привязки ─── */
+.sch-card--staff { display: flex; align-items: stretch; gap: var(--sp-16); padding: 0; overflow: hidden; min-height: 104px; }
+.sch-staff-plaque {
+  flex: 0 0 96px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--c-brand-violet-600), var(--c-brand-pink-500));
+  /* Диагональный срез правого края — как нарисовано на эскизе. */
+  clip-path: polygon(0 0, 100% 0, calc(100% - 20px) 100%, 0 100%);
+}
+.sch-staff-plaque--locked { background: var(--c-state-disabled-bg); }
+/* Штатный `--lg` 120px в плашку 96px не помещается — своя мерка. */
+.sch-staff-plaque .sch-avatar--lg { width: 64px; height: 64px; font-size: var(--fs-lg); }
+.sch-staff-body {
+  padding: var(--sp-12) var(--sp-16) var(--sp-12) 0; min-width: 0;
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  justify-content: center; align-items: flex-start;
+}
+.sch-staff-role { text-transform: lowercase; margin-top: 0; }
+.sch-staff-line {
+  font-size: var(--fs-sm); color: var(--c-ink-secondary);
+  display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap;
+}
+/* «классы: ④⑤…» — номер класса в кружке, как на эскизе. */
+.sch-class-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 4px; border-radius: var(--r-pill);
+  border: 1px solid var(--c-brand-violet-500);
+  color: var(--c-brand-violet-700); background: var(--c-brand-violet-050);
+  font-size: var(--fs-xs); font-weight: var(--fw-medium);
+}
+
 .sch-progress { height: 4px; border-radius: var(--r-pill); background: var(--c-state-disabled-bg); margin-top: var(--sp-12); overflow: hidden; }
 .sch-progress > span { display: block; height: 100%; background: var(--c-brand-violet-500); }
 
@@ -250,6 +281,12 @@
   display: flex; align-items: center; justify-content: center;
   padding: var(--sp-24);
   animation: sch-fade 150ms ease-out;
+  /* Слой — ловушка overscroll ЦЕЛИКОМ (AR-184): тяга по шапке, футеру или
+     ручке листа не должна доходить до скроллпорта и дёргать pull-to-refresh
+     с потерей введённой формы. `overflow: hidden` делает слой
+     скролл-контейнером — без него `contain` в цепочке не участвует. */
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 @keyframes sch-fade { from { opacity: 0; } to { opacity: 1; } }
 .sch-modal {
@@ -266,7 +303,10 @@
    содержимого (значение `min-height: auto` у флекс-элемента), карточка растёт
    за свои `max-height`, а футер уезжает под контент и перестаёт нажиматься.
    Найдено мобильным смоком: `S-31.btn.close` перекрывали кнопки тела. */
-.sch-modal-body { padding: var(--sp-24); overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+/* `overscroll-behavior-y: contain` — парная правка к pull-to-refresh: тяга
+   вниз в прокручиваемом теле модалки при scrollTop=0 не должна доходить до
+   вьюпорта и перезагружать страницу с введённой формой. */
+.sch-modal-body { padding: var(--sp-24); overflow-y: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior-y: contain; }
 .sch-modal-foot { padding: var(--sp-16) var(--sp-24); border-top: 1px solid var(--c-border-default); flex: 0 0 auto; }
 
 /* Поповер — второй способ показать слой; ловушка фокуса та же (§3). */
@@ -313,8 +353,11 @@
 /* ─────────────────────────── таблицы ─────────────────────────── */
 
 /* Железное правило прокрутки: `body` не скроллится по горизонтали НИКОГДА —
-   широкое содержимое скроллится внутри собственного контейнера (§6). */
-.sch-tablewrap { overflow-x: auto; border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); }
+   широкое содержимое скроллится внутри собственного контейнера (§6).
+   `isolation: isolate` — sticky-ячейки таблицы (шапка, колонка «Фамилия»)
+   несут z-index и обязаны спорить только МЕЖДУ СОБОЙ: без изоляции они
+   всплывали над соседями таблицы (панель `.sch-sticky-actions` на S-12). */
+.sch-tablewrap { overflow-x: auto; border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); isolation: isolate; }
 .sch-table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
 .sch-table th, .sch-table td { padding: var(--sp-12); text-align: left; border-bottom: 1px solid var(--c-border-default); }
 .sch-table th { color: var(--c-ink-secondary); font-weight: var(--fw-medium); background: var(--c-surface-canvas); position: sticky; top: 0; z-index: 1; }
@@ -467,6 +510,9 @@
 .sch-fullscreen {
   position: fixed; inset: 0; z-index: 50; background: var(--c-surface-page);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--sp-24);
+  /* Та же ловушка overscroll, что у .sch-overlay (AR-184). */
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 /* ─────────────────────────── тосты (§5) ─────────────────────────── */
@@ -609,7 +655,11 @@
     min-height: 0;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
+    /* НЕ `contain`: вертикальная цепочка overscroll обязана доходить до
+       вьюпорта, иначе Chrome Android не показывает нативный pull-to-refresh
+       (правка владельца 2026-08-31: «нужна возможность перезагрузки»). */
+    overscroll-behavior-y: auto;
+    overscroll-behavior-x: contain;
   }
   .sch-page { max-width: none; }
 
@@ -688,9 +738,12 @@
   .sch-table--roster tr.sch-row--boy td:nth-child(2) { background: var(--c-sex-boy-bg); }
   .sch-table--roster tr.sch-row--girl td:nth-child(2) { background: var(--c-sex-girl-bg); }
   .sch-table--roster th:first-child, .sch-table--roster td:first-child { display: none; }
-  /* Кнопки действий карточки класса — прилипающая панель снизу (§6). */
+  /* Кнопки действий карточки класса — прилипающая панель снизу (§6).
+     `z-index: 2` — панель обязана лежать НАД sticky-ячейками таблицы
+     (их z-index: 1), иначе строки списка просвечивали сквозь кнопки. */
   .sch-sticky-actions {
     position: sticky; bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+    z-index: 2;
     background: var(--c-surface-page);
     padding: var(--sp-12) 0;
     border-top: 1px solid var(--c-border-default);
@@ -968,7 +1021,7 @@
   background: var(--c-surface-page); color: var(--c-ink-secondary);
 }
 .sch-studiotab--active { background: var(--c-surface-card); color: var(--c-ink-primary); border-color: var(--c-brand-violet-600); }
-.sch-studio-body { flex: 1; overflow-y: auto; padding: var(--sp-16); width: 100%; max-width: 1200px; margin: 0 auto; }
+.sch-studio-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: var(--sp-16); width: 100%; max-width: 1200px; margin: 0 auto; }
 .sch-studio-foot {
   flex: none; display: flex; gap: var(--sp-12); justify-content: flex-end;
   padding: var(--sp-12) var(--sp-16); border-top: 1px solid var(--c-border-default); background: var(--c-surface-card);

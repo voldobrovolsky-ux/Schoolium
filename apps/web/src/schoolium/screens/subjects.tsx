@@ -842,7 +842,12 @@ function CompetenceModal({
                 <p className="sch-muted">Педагогов с заведённой учёткой пока нет — заведите их в «Персонале»</p>
               ) : null}
               {teachers.length > 0 ? (
-                <div className="sch-row" style={{ alignItems: "flex-end", gap: "var(--sp-8)" }}>
+                /* Мобайл: кнопка §4 растягивается на всю ширину и в ряду
+                   ужимала селект до пары букв — складываемся в колонку. */
+                <div
+                  className={mobile ? "sch-stack" : "sch-row"}
+                  style={mobile ? { gap: "var(--sp-8)" } : { alignItems: "flex-end", gap: "var(--sp-8)" }}
+                >
                   <div className="sch-field" style={{ flex: "1 1 auto" }} data-testid="M-25.select.teacher">
                     <span className="sch-field-label">Педагог</span>
                     <select className="sch-input" value={cur} onChange={(e) => setTeacherId(e.target.value)}>

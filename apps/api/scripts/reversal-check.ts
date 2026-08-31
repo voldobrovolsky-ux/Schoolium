@@ -1,5 +1,6 @@
 /**
- * G-43 (AR-89, AR-90, AR-78, AR-102) — **обратимость операций и каскад удаления.**
+ * G-43 (AR-89, AR-90, AR-78, AR-102, AR-182) — **обратимость операций и каскад
+ * удаления.**
  *
  *   · у КАЖДОЙ операции реестра есть обратная либо записанная причина её
  *     отсутствия; необратимых пять, и каждая необратима по построению;
@@ -123,6 +124,44 @@ async function main(): Promise<void> {
     const solo = await makeStaff(b, s, ['teacher'], 'Сидоров Олег');
     await refuses(() => staff.removeRole(solo.cardId, 'teacher', s.moderator), 'LAST_ROLE',
       'последняя роль сотрудника не снимается — для закрытия доступа есть деактивация');
+
+    // ─── синглтоны: замы ЗАВОДЯТСЯ, пока роль свободна (AR-182) ───
+    const dep = await staff.addCard({ role: 'deputy_academic', lastName: 'Волкова', firstName: 'Ирина' });
+    check(dep.card.section === 2 && dep.card.roles.includes('deputy_academic'),
+      'завуч (УР) заведён кнопкой секции 2 — bootstrap слотов замов не создаёт (AR-182)');
+    const dup = await staff
+      .addCard({ role: 'deputy_academic', lastName: 'Дублёва', firstName: 'Анна' })
+      .then(() => null, (e: Error) => e);
+    check(dup !== null && /единственном экземпляре/.test(dup.message),
+      'второй завуч (УР) отклонён сервером — единственность держит addCard, а не отсутствие кнопки');
+    const dupRole = await staff
+      .addRole(s.teacher.cardId, 'deputy_academic', s.moderator)
+      .then(() => null, (e: Error) => e);
+    check(dupRole !== null && /единственном экземпляре/.test(dupRole.message),
+      'выдача занятой роли-синглтона через M-07 отклонена — единственность не декларация (П-4)');
+    const depUp = await staff.addCard({ role: 'deputy_upbringing', lastName: 'Соловьёва', firstName: 'Вера' });
+    check(depUp.card.roles.includes('deputy_upbringing'),
+      'зам (ВР) — отдельный синглтон: занятость завуча (УР) его не блокирует');
+    await staff.remove(dep.card.id, s.moderator);
+    await drain();
+    const slotDup = await staff
+      .addCard({ role: 'deputy_academic', lastName: 'Повторова', firstName: 'Дарья' })
+      .then(() => null, (e: Error) => e);
+    check(slotDup !== null && /единственном экземпляре/.test(slotDup.message),
+      'после удаления носителя карточка остаётся ПУСТЫМ СЛОТОМ — роль занята слотом, вторая карточка не заводится');
+    const refill = await staff.fillCard(dep.card.id, { lastName: 'Соловьёва', firstName: 'Ирина' });
+    check(refill.card.roles.includes('deputy_academic'),
+      'пустой слот зама заполняется заново через карточку (fillCard) — канал AR-60 живёт');
+
+    // ─── обратный переход: реактивация тоже перепроверяет синглтон (AR-182) ───
+    await staff.deactivate(dep.card.id, s.moderator);
+    await drain();
+    const depB = await staff.addCard({ role: 'deputy_academic', lastName: 'Пятницкая', firstName: 'Анна' });
+    check(depB.card.roles.includes('deputy_academic'),
+      'деактивация освобождает синглтон — новый завуч заводится (AR-89, AR-182)');
+    const resurrect = await staff.reactivate(dep.card.id, s.moderator).then(() => null, (e: Error) => e);
+    check(resurrect !== null && /единственном экземпляре/.test(resurrect.message),
+      'реактивация при занятой роли отклонена — путь «деактивировать → завести → реактивировать» двух завучей не даёт');
 
     // ─── сотрудник без истории удаляется ───
     const fresh = await makeStaff(b, s, ['founder'], 'Кузнецов Пётр');

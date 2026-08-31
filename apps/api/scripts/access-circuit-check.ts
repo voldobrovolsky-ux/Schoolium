@@ -1,6 +1,6 @@
 /**
- * G-24 (AR-46, AR-47, AR-49, AR-65, AR-66, AR-94) — **контур доступа без SMS
- * перечислением.**
+ * G-24 (AR-46, AR-47, AR-49, AR-65, AR-66, AR-94, AR-183) — **контур доступа
+ * без SMS перечислением.**
  *
  *   · регистрация по QR создаёт `User` + `Membership` + сессию 90 дней;
  *   · телефон уникален на всю инсталляцию (AR-47), принадлежность школе — через
@@ -77,6 +77,16 @@ async function main(): Promise<void> {
   check(/authMode === 'dev' \|\| authMode === 'test' \|\| authMode === 'ci'/.test(guardSrc),
     'bypass включается ТОЛЬКО явным dev|test|ci — опечатка в env не открывает аутентификацию молча');
   check(/return false;/.test(guardSrc), 'иначе — отказ: fail-closed по построению');
+
+  // ─── 3а. кука сессии постоянная и скользит вместе с продлением (AR-170, AR-183) ───
+  const cookieSrc = readFileSync(join(ROOT, 'apps/api/src/common/auth/school-session.service.ts'), 'utf8');
+  check(/maxAge:\s*ACCESS_PARAMS\.sessionDays/.test(cookieSrc),
+    'schoolCookieOptions несёт maxAge = sessionDays — кука постоянная, а не сессионная (AR-183)');
+  const staffCtrlSrc = readFileSync(join(ROOT, 'apps/api/src/schoolium/schoolium.controllers.ts'), 'utf8');
+  check(/cookie\(SCHOOL_COOKIE, r\.sessionToken, schoolCookieOptions\(\)\)/.test(staffCtrlSrc),
+    'маршрут активации join/:token ставит куку ровно флагами schoolCookieOptions — без локальных переопределений (П-5)');
+  check(/session\.renewed/.test(guardSrc) && /cookie\(SCHOOL_COOKIE, schoolToken, schoolCookieOptions\(\)\)/.test(guardSrc),
+    'guard перевыставляет куку при скользящем продлении сессии — устройство живёт «до удаления приложения» (AR-183)');
 
   // ─── 4. учётку заводит модератор; активация одним сканом — сессия 90 дней ───
   const school = await bootstrapSchool(b, 'Школа доступа');
