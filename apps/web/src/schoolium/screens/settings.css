@@ -1,0 +1,55 @@
+/*
+ * `S-82` · настройки и `S-81` · приложение (AR-191): раскладки.
+ *
+ * Здесь только то, чего в `app.css` нет: карточка профиля с крупным аватаром,
+ * карточки платформ установки, список шагов. Списки переходов, бейджи, QR —
+ * из `app.css`, второй реализации у них не появляется.
+ *
+ * Цвета — только токенами (G-37, AR-42). Анимаций нет: раскрытие шагов —
+ * ответ на нажатие, а не украшение.
+ */
+
+.sch-set-stack { display: flex; flex-direction: column; gap: var(--sp-24); max-width: 720px; }
+
+/* ─── S-82 · профиль: аватар, ФИО, роли, школа — одной колонкой в обеих раскладках (§6) ─── */
+.sch-set-profile { display: flex; flex-direction: column; align-items: center; gap: var(--sp-16); text-align: center; }
+.sch-set-profile-text { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.sch-set-profile-text .sch-card-title { overflow-wrap: anywhere; }
+.sch-set-actions { flex-wrap: wrap; justify-content: center; }
+.sch-set-about { margin: 0; }
+
+/* ─── S-81 · приложение ─── */
+.sch-set-head { flex-wrap: wrap; }
+.sch-set-status { display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap; padding-top: var(--sp-4); }
+
+/* Мобайл — одна колонка, карточка своей платформы первой; с 768px — обе рядом. */
+.sch-set-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-16); align-items: start; }
+@media (min-width: 768px) {
+  .sch-set-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.sch-set-card { display: flex; flex-direction: column; gap: var(--sp-12); min-width: 0; }
+.sch-set-card > p { margin: 0; }
+.sch-set-card-head { display: flex; align-items: center; gap: var(--sp-12); }
+.sch-set-card-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; flex: 0 0 auto;
+  border-radius: var(--r-md);
+  background: var(--c-brand-violet-050); color: var(--c-brand-violet-700);
+}
+
+/* Шаги установки: нумерация несёт порядок, поэтому <ol>, а не чипы. */
+.sch-set-steps {
+  margin: 0; padding: var(--sp-12) var(--sp-16) var(--sp-12) var(--sp-32);
+  display: flex; flex-direction: column; gap: var(--sp-8);
+  background: var(--c-brand-violet-050); border-radius: var(--r-md);
+  font-size: var(--fs-sm); color: var(--c-ink-primary);
+}
+.sch-set-steps li::marker { color: var(--c-brand-violet-700); font-weight: var(--fw-semibold); }
+
+.sch-set-qr { align-items: flex-start; }
+
+/* Кнопки во всю ширину на телефоне (75-adaptive §6). */
+@media (max-width: 767px) {
+  .sch-set-card .sch-btn, .sch-set-actions .sch-btn { width: 100%; }
+}

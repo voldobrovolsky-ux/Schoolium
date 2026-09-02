@@ -36,7 +36,8 @@ const AUDITED: Record<string, { categories: string[]; subject: (p: Record<string
   // AR-88 назвал цену полномочий: модератор — единственная точка, из которой
   // достижим любой аккаунт школы. Сдерживающий механизм один — полный аудит его
   // действий, поэтому аудит перестаёт быть фоновой функцией и получает
-  // собственные ворота (G-41). Здесь перечислены ВСЕ 22 события версии: каждое
+  // собственные ворота (G-41). Здесь перечислены ВСЕ 22 события версии (и три
+  // события 1.3.0 ниже): каждое
   // ложится в леджер с идентичностью действующего из конверта (AR-21, AR-30).
   [SCHOOL_EVENTS.classCreated]: { categories: ['identity'], subject: () => undefined },
   [SCHOOL_EVENTS.classDeleted]: { categories: ['identity'], subject: () => undefined },
@@ -60,6 +61,12 @@ const AUDITED: Record<string, { categories: string[]; subject: (p: Record<string
   [SCHOOL_EVENTS.markPosted]: { categories: ['learning'], subject: (p) => p.studentId as string },
   [SCHOOL_EVENTS.markRemoved]: { categories: ['learning'], subject: (p) => p.studentId as string },
   [SCHOOL_EVENTS.topicSet]: { categories: ['process'], subject: () => undefined },
+  // ─── Schoolium 1.3.0: кабинет администратора (AR-186, AR-188, AR-189) ───
+  // Администратор держит полные права школы; противовес тот же, что у
+  // модератора (AR-88): каждое его действие — строка леджера с его идентичностью.
+  [SCHOOL_EVENTS.loginLinkIssued]: { categories: ['identity'], subject: (p) => p.userId as string },
+  [SCHOOL_EVENTS.policySet]: { categories: ['process'], subject: () => undefined },
+  [SCHOOL_EVENTS.registryChanged]: { categories: ['process'], subject: () => undefined },
 };
 
 /** Перечисление для ворот G-41: какие типы событий попадают в аудит. */

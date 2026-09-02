@@ -69,7 +69,8 @@ async function main(): Promise<void> {
   check(ACCESS_PARAMS.bindTokenTtlMinutes === 5, `QR привязки к предмету — ${ACCESS_PARAMS.bindTokenTtlMinutes} минут`);
   check(ACCESS_PARAMS.loginCodeTtlMinutes === 5 && ACCESS_PARAMS.loginCodeDigits === 6,
     `код входа — ${ACCESS_PARAMS.loginCodeDigits} цифр, ${ACCESS_PARAMS.loginCodeTtlMinutes} минут (AR-92)`);
-  check(ACCESS_PARAMS.bootstrapLinkTtlHours === 24, `ссылка bootstrap — ${ACCESS_PARAMS.bootstrapLinkTtlHours} часа (AR-93)`);
+  check(ACCESS_PARAMS.bootstrapLinkTtlHours === 48, `ссылка bootstrap — ${ACCESS_PARAMS.bootstrapLinkTtlHours} часов (AR-93, AR-189)`);
+  check(ACCESS_PARAMS.loginLinkTtlHours === 48, `ссылка входа с карточки — ${ACCESS_PARAMS.loginLinkTtlHours} часов (AR-189)`);
   check(ACCESS_PARAMS.pollIntervalMs === 2000, `ожидание скана — поллинг раз в ${ACCESS_PARAMS.pollIntervalMs / 1000} секунды (AR-87)`);
 
   // ─── 3. bypass fail-closed при неизвестном AUTH_MODE ───

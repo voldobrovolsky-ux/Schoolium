@@ -23,6 +23,9 @@ import { PilotOwner } from "@/pilot/PilotOwner";
 import { PilotLogin } from "@/pilot/PilotLogin";
 import { SchooliumApp } from "@/schoolium/SchooliumApp";
 import { isAppPath, PUBLIC_PATHS } from "@/schoolium/router";
+// Перехват `beforeinstallprompt` обязан стоять ДО первого рендера (AR-191):
+// браузер шлёт событие один раз и рано, экран «Приложение» его уже не увидит.
+import "@/schoolium/pwa";
 
 // Роутинг кабинета по роли (ADR-0005). teacher и admin — готовые кабинеты,
 // остальные роли — минимальные кабинеты (навигация + главная).

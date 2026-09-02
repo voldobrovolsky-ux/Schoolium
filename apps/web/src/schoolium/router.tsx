@@ -20,7 +20,27 @@ export interface Route {
  * `/login?next=…` и возвращается сюда после входа — а не упирается в белый
  * экран с непонятной ошибкой.
  */
-export const APP_PREFIXES = ["/classes", "/subjects", "/staff", "/guardians", "/schedule", "/journal", "/diary", "/admin", "/scan", "/settings", "/link", "/bind"];
+export const APP_PREFIXES = [
+  "/classes",
+  "/subjects",
+  "/staff",
+  "/guardians",
+  "/schedule",
+  "/journal",
+  "/diary",
+  // три кабинета (AR-186): администратор, модератор, завуч
+  "/admin",
+  "/moderator",
+  "/deputy",
+  "/scan",
+  "/settings",
+  "/link",
+  "/bind",
+];
+
+/** Разделы кабинета администратора (`S-62`, AR-186) — отражаются в URL (AR-41). */
+export const ADMIN_SECTIONS = ["overview", "devices", "roles", "network", "audit", "policy"] as const;
+export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 
 /** Публичные маршруты контура входа — показываются БЕЗ оболочки (§2.3). */
 export const PUBLIC_PATHS = ["/", "/schools", "/login", "/login/code", "/join", "/bootstrap"];
@@ -88,6 +108,12 @@ export function parse(pathname: string, search: string): Route {
   if (guardian) {
     params.guardianId = guardian[1];
     path = "/guardians/:guardianId";
+  }
+  // Кабинет администратора: `/admin/<раздел>`; неизвестный раздел — обзор.
+  const admin = path.match(/^\/admin\/([^/]+)$/);
+  if (admin) {
+    params.section = (ADMIN_SECTIONS as readonly string[]).includes(admin[1]) ? admin[1] : "overview";
+    path = "/admin/:section";
   }
   return { path, params, query };
 }

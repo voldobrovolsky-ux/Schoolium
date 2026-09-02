@@ -1,13 +1,13 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { safeNext, startScreenFor, type MeDto, type SchoolRole, type SessionDto } from '@edustore/shared';
+import { ACCESS_PARAMS, safeNext, startScreenFor, type MeDto, type SchoolRole, type SessionDto } from '@edustore/shared';
 import { Public } from '../../common/auth/public.decorator';
 import type { SessionUser } from '../../common/auth/flor.service';
 import { SCHOOL_COOKIE, schoolCookieOptions, SchoolSessionService } from '../../common/auth/school-session.service';
 import { AuthzService } from '../../common/authz/authz.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
-import { AccessService } from './access.service';
+import { AccessService, type SessionClient } from './access.service';
 import { SchoolStateService } from '../school-state.service';
 import { SchoolError } from '../schoolium.errors';
 
@@ -19,6 +19,27 @@ const deviceHint = (req: Request): string => {
   const os = /Android/.test(ua) ? 'Android' : /iPhone|iPad/.test(ua) ? 'iOS' : /Mac OS/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
   return os ? `${browser} · ${os}` : browser;
 };
+
+/**
+ * Что HTTP-запрос знает об устройстве (AR-187) — ОДНА функция на все маршруты,
+ * выдающие сессию (входы `v1/auth/*`, активация `staff/join/:token`):
+ *   · `clientKind` — заголовок `x-schoolium-client: pwa` ставит установленное
+ *     приложение; всё остальное — вкладка браузера;
+ *   · `ip` — первый адрес `x-forwarded-for` (за Caddy это адрес клиента), иначе
+ *     адрес сокета; обрезан до 45 знаков — длина IPv6 с зоной, а не «сколько
+ *     пришлёт прокси».
+ */
+export function clientOf(req: Request): SessionClient {
+  const kind = String(req.headers['x-schoolium-client'] ?? '').trim().toLowerCase();
+  const xff = req.headers['x-forwarded-for'];
+  const forwarded = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() ?? '';
+  const ip = forwarded || req.socket?.remoteAddress || null;
+  return {
+    deviceHint: deviceHint(req),
+    clientKind: kind === 'pwa' ? 'pwa' : 'browser',
+    ip: ip ? ip.slice(0, 45) : null,
+  };
+}
 
 /**
  * Контур входа (`S-00`, `S-01`, `S-05`, `S-80`). Мутации 1, 2, 3, 36, 38 из
@@ -72,8 +93,8 @@ export class SchoolAuthController {
     if (!u?.workspaceId) throw new SchoolError('ACCESS_REVOKED');
     return this.access.approveDeviceLink(
       body.token,
-      { userId: u.florusUserId, workspaceId: u.workspaceId, roles: u.roles ?? [] },
-      deviceHint(req),
+      { userId: u.florusUserId, workspaceId: u.workspaceId, roles: u.roles ?? [], sessionId: req.sessionId ?? null },
+      clientOf(req),
     );
   }
 
@@ -84,7 +105,7 @@ export class SchoolAuthController {
     const { session, roles } = await this.access.loginWithPassword(
       String(body?.username ?? ''),
       String(body?.password ?? ''),
-      deviceHint(req),
+      clientOf(req),
     );
     this.setCookie(res, session.token);
     const access = await this.authz.resolveForRoles(roles);
@@ -95,23 +116,26 @@ export class SchoolAuthController {
   @Public()
   @Post('login-code/verify')
   async verifyLoginCode(@Req() req: Request, @Body() body: { code: string }, @Res({ passthrough: true }) res: Response) {
-    const { session, roles } = await this.access.verifyLoginCode(String(body?.code ?? ''), deviceHint(req));
+    const { session, roles } = await this.access.verifyLoginCode(String(body?.code ?? ''), clientOf(req));
     this.setCookie(res, session.token);
     const access = await this.authz.resolveForRoles(roles);
     return { ok: true, startScreen: startScreenFor(access.permissions) };
   }
 
   /**
-   * Вход первого модератора по одноразовой ссылке платформы (AR-93). Ссылка
-   * открывает страницу приложения, а она обменивает токен здесь: мутация не
-   * прячется за GET, который браузер вправе предзагрузить.
+   * Вход по одноразовой ссылке (AR-93, AR-189): платформенной либо выпущенной
+   * администратором с карточки. Ссылка открывает страницу приложения, а она
+   * обменивает токен здесь: мутация не прячется за GET, который браузер вправе
+   * предзагрузить. Стартовый экран — по правам роли, а не `/classes`: по
+   * ссылке входит и завуч, чей день начинается с `/deputy` (AR-186).
    */
   @Public()
   @Post('bootstrap/consume')
   async bootstrap(@Req() req: Request, @Body() body: { token: string }, @Res({ passthrough: true }) res: Response) {
-    const session = await this.access.useBootstrapLink(String(body?.token ?? ''), deviceHint(req));
+    const { session, roles } = await this.access.useBootstrapLink(String(body?.token ?? ''), clientOf(req));
     this.setCookie(res, session.token);
-    return { ok: true, startScreen: '/classes' };
+    const access = await this.authz.resolveForRoles(roles);
+    return { ok: true, startScreen: startScreenFor(access.permissions) };
   }
 
   /** §11 строка 3 · `M-15`: выход из сессии (владелец). */
@@ -122,18 +146,23 @@ export class SchoolAuthController {
     return { ok: true };
   }
 
-  /** `S-80.list.sessions`: только свои устройства. */
+  /** `S-80.list.sessions`: только свои устройства — с каналом входа и видом клиента (AR-187). */
   @Get('sessions')
   async list(@Req() req: Req0): Promise<SessionDto[]> {
     const u = req.user;
     if (!u) return [];
     const rows = await this.sessions.list(u.florusUserId);
+    const onlineSince = Date.now() - ACCESS_PARAMS.sessionOnlineMinutes * 60_000;
     return rows.map((s) => ({
       id: s.id,
       deviceHint: s.deviceHint || 'устройство',
       lastSeenAt: s.lastSeenAt.toISOString(),
       createdAt: s.createdAt.toISOString(),
       current: s.id === req.sessionId,
+      via: s.via as SessionDto['via'],
+      clientKind: s.clientKind as SessionDto['clientKind'],
+      parentSessionId: s.parentSessionId,
+      online: s.lastSeenAt.getTime() >= onlineSince,
     }));
   }
 

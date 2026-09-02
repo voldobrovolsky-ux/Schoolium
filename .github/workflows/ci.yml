@@ -50,6 +50,8 @@ jobs:
         run: node tools/design/tokens-to-css.mjs --check
       - name: G-52 — экранный реестр реализован поимённо
         run: node tools/method/check-testids.mjs
+      - name: G-83 — иконки без юникод-глифов (AR-190)
+        run: node tools/design/check-icons.mjs
 
   # Слой качества расписания (G-56…G-63): чистые функции, без БД и сети.
   # Раскладка по джобам задокументирована в docs/G-CHECKS.md.

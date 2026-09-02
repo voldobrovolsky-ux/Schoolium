@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClassDto, JournalColumnDto, JournalRowDto, JournalWeekDto, MarkValue, SubjectDto } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile } from "../hooks";
+import { Icon } from "../icons";
 import {
   Badge,
   Button,
@@ -78,6 +79,7 @@ export function JournalScreen({
     // «сетка не подтверждена», только раньше по времени.
     return (
       <EmptyState
+        icon="journal"
         testId="S-50.empty"
         title="Уроки появятся после подтверждения расписания"
         hint="Сначала классы и предметы, затем расписание"
@@ -165,7 +167,7 @@ function TeacherJournalCards({ mine }: { mine: SubjectDto[] }) {
         <h1>Журнал</h1>
       </div>
       {cards.length === 0 ? (
-        <EmptyState testId="S-50.empty" title="Журналов пока нет" hint="Карточки появятся, когда вас привяжут к предметам" />
+        <EmptyState icon="journal" testId="S-50.empty" title="Журналов пока нет" hint="Карточки появятся, когда вас привяжут к предметам" />
       ) : (
         <div className="sch-cards--3" data-testid="S-50.grid.mine">
           {cards.map(({ s, groupNo }) => (
@@ -272,7 +274,8 @@ function JournalBody({
       {backToCards ? (
         <p style={{ marginBottom: "var(--sp-12)" }}>
           <button className="sch-linklike" data-testid="S-50.btn.backToCards" onClick={() => navigate("/journal")}>
-            ‹ Мои журналы
+            <Icon name="chevronLeft" size={18} />
+            Мои журналы
           </button>
         </p>
       ) : (
@@ -366,6 +369,7 @@ function JournalTable({
   if (!data) {
     return (
       <EmptyState
+        icon="journal"
         testId="S-50.empty"
         title="Уроки появятся после подтверждения расписания"
         hint="У класса нет предметов — заведите их и соберите сетку"
@@ -383,12 +387,14 @@ function JournalTable({
     // календаря (AR-68), а неподтверждённая сетка — это отсутствие уроков вовсе.
     return data.nextSchoolDay ? (
       <EmptyState
+        icon="journal"
         testId="S-50.empty.holidays"
         title="Каникулы"
         hint={`Ближайший учебный день — ${longDate(data.nextSchoolDay)}`}
       />
     ) : (
       <EmptyState
+        icon="journal"
         testId="S-50.empty"
         title="Уроки появятся после подтверждения расписания"
         hint="Сетка ещё не подтверждена — уроков в календаре нет"

@@ -9,6 +9,13 @@
  * мобильная (<768px, этап 3) живёт отдельным блоком в конце файла, а не
  * обрезкой десктопной. Порядок именно такой: мобильные правила обязаны
  * перекрывать десктопные, а не наоборот.
+ *
+ * Калибровка 1.3.0 (AR-190): одна высота у кнопок и полей (44, на мобайле
+ * 48), иконки `lucide` вместо глифов, заголовок экрана внутри оболочки —
+ * `fs-h2` (34px рядом с топбаром 64px кричал), плотнее сайдбар, карточка на
+ * hover не подпрыгивает (движение без действия — шум), а `:active` кнопки
+ * сжимается на 1.5% и уважает `prefers-reduced-motion`. Палитра не тронута:
+ * калибровка — про меру, а не про цвет.
  */
 
 /* ─────────────────────────── основа ─────────────────────────── */
@@ -25,9 +32,12 @@
 .sch *::after { box-sizing: border-box; }
 
 .sch h1, .sch h2, .sch h3 { font-family: var(--font-display); margin: 0; }
-.sch h1 { font-size: var(--fs-h1); font-weight: var(--fw-bold); }
-.sch h2 { font-size: var(--fs-h2); font-weight: var(--fw-semibold); }
-.sch h3 { font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+/* Лестница заголовков внутри оболочки (1.3.0): h1 = `fs-h2`, h2 = `fs-xl`,
+   h3 и `.sch-section-title` = `fs-lg`. `fs-h1` остаётся лендингу — там
+   заголовок один на экран и стоит на пустом фоне, а не над таблицей. */
+.sch h1 { font-size: var(--fs-h2); font-weight: var(--fw-bold); line-height: 1.2; }
+.sch h2 { font-size: var(--fs-xl); font-weight: var(--fw-semibold); line-height: 1.25; }
+.sch h3 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); line-height: 1.3; }
 .sch p { margin: 0; }
 
 /* Видимая фокус-рамка на ВС�ём интерактивном (`70-screens.md` §0): человек,
@@ -88,16 +98,20 @@
   border: 0; border-left: 3px solid transparent;
   border-radius: var(--r-md);
   background: transparent; color: var(--c-ink-secondary);
-  font-size: var(--fs-md); font-family: inherit; cursor: pointer; text-align: left;
+  /* `fs-sm` + medium, а не `fs-md`: семь пунктов при 16px читались как список
+     абзацев, а не как навигация; иконка 20 рядом держит строку 44. */
+  font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  font-family: inherit; cursor: pointer; text-align: left;
 }
 .sch-nav-item:hover { background: var(--c-brand-violet-050); }
 .sch-nav-item[aria-current='page'] {
   background: var(--c-brand-violet-100);
   color: var(--c-brand-violet-700);
   border-left-color: var(--c-brand-violet-700);
-  font-weight: var(--fw-medium);
+  font-weight: var(--fw-semibold);
 }
-.sch-nav-icon { width: var(--sp-20); text-align: center; flex: 0 0 auto; }
+/* Цвет иконки — `currentColor`: активный пункт перекрашивает её сам. */
+.sch-nav-icon { width: var(--sp-20); text-align: center; flex: 0 0 auto; color: inherit; }
 
 .sch-user {
   margin-top: auto; display: flex; align-items: center; gap: var(--sp-12);
@@ -138,15 +152,22 @@
 
 /* ─────────────────────────── кнопки (§4) ─────────────────────────── */
 
+/* Одна геометрия на все виды (1.3.0): высота `tap-min` (44), радиус `r-md`,
+   рамка 1px у КАЖДОГО вида — у ghost и danger она прозрачная, чтобы кнопка в
+   паре с secondary была той же ширины и не «ехала» при смене вида. Зазор между
+   иконкой и подписью — `sp-8`. `line-height: 1` — иначе строка `fs-md`
+   × 1.5 внутри 44px даёт подпись на пиксель ниже иконки. */
 .sch-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-8);
   height: var(--tap-min); padding: 0 var(--sp-20);
   border-radius: var(--r-md); border: 1px solid transparent;
-  font-family: inherit; font-size: var(--fs-md); font-weight: var(--fw-medium);
-  cursor: pointer; transition: background-color 120ms, transform 80ms;
+  font-family: inherit; font-size: var(--fs-md); font-weight: var(--fw-medium); line-height: 1;
+  cursor: pointer; transition: background-color 120ms, border-color 120ms, color 120ms, transform 80ms;
   white-space: nowrap;
 }
-.sch-btn:active:not(:disabled) { transform: scale(0.98); }
+/* Сжатие на нажатие — отклик на ДЕЙСТВИЕ, поэтому остаётся; 0.985, а не 0.98:
+   при 44px разница в пиксель уже читается как отклик, больше — как дрожь. */
+.sch-btn:active:not(:disabled) { transform: scale(0.985); }
 .sch-btn:disabled { cursor: not-allowed; background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); border-color: transparent; }
 
 .sch-btn--primary { background: var(--c-brand-violet-700); color: var(--c-ink-on-violet); }
@@ -162,7 +183,7 @@
 .sch-btn--ghost { background: transparent; color: var(--c-ink-secondary); }
 .sch-btn--ghost:hover:not(:disabled) { background: var(--c-brand-violet-050); }
 
-.sch-btn--danger { background: transparent; color: var(--c-state-danger); }
+.sch-btn--danger { background: transparent; border-color: transparent; color: var(--c-state-danger); }
 .sch-btn--danger:hover:not(:disabled) { background: var(--c-mark-m2-bg); }
 
 /* Явный отказ «⌀ Без литер» — выбранный получает заливку (AR-77). */
@@ -170,10 +191,12 @@
 .sch-btn--off:hover:not(:disabled) { background: var(--c-brand-violet-050); }
 .sch-btn--off[aria-pressed='true'] { background: var(--c-brand-violet-100); border-color: var(--c-brand-violet-500); color: var(--c-brand-violet-700); }
 
-.sch-btn--icon { width: 40px; height: 40px; padding: 0; border-radius: var(--r-md); background: transparent; color: var(--c-ink-secondary); }
-.sch-btn--icon:hover:not(:disabled) { background: var(--c-brand-violet-050); }
+/* `B-icon` 40×40 по реестру §4 (на мобайле 44 — ниже); `flex: 0 0 auto` — в
+   шапке модалки длинный заголовок иначе ужимал её. */
+.sch-btn--icon { width: 40px; height: 40px; padding: 0; flex: 0 0 auto; border-radius: var(--r-md); background: transparent; color: var(--c-ink-secondary); }
+.sch-btn--icon:hover:not(:disabled) { background: var(--c-brand-violet-050); color: var(--c-ink-primary); }
 
-.sch-btn--fab { width: 40px; height: 40px; padding: 0; border-radius: var(--r-pill); background: var(--c-brand-pink-600); color: var(--c-ink-on-pink); font-size: var(--fs-xl); }
+.sch-btn--fab { width: 40px; height: 40px; padding: 0; flex: 0 0 auto; border-radius: var(--r-pill); background: var(--c-brand-pink-600); color: var(--c-ink-on-pink); }
 .sch-btn--fab:hover:not(:disabled) { background: var(--c-brand-pink-700); }
 
 .sch-btn--chip {
@@ -196,6 +219,48 @@
 }
 @keyframes sch-spin { to { transform: rotate(360deg); } }
 
+/* ─────────────────────────── иконки (AR-190) ─────────────────────────── */
+
+/* Иконка — `lucide` через компонент `Icon`: размер задан пропсом, цвет —
+   наследуется от текста (`currentColor`), поэтому активный пункт навигации и
+   danger-кнопка перекрашивают иконку сами. Глифов-символов нет нигде. */
+.sch-icon { flex: 0 0 auto; display: inline-block; vertical-align: middle; }
+/* Иконка у КРАЯ кнопки на 4px заходит в паддинг — оптически подпись с иконкой
+   стоит в тех же полях, что подпись без неё; зазор до текста остаётся `sp-8`. */
+.sch-btn > .sch-icon:first-child { margin-left: calc(var(--sp-4) * -1); }
+.sch-btn > .sch-icon:last-child { margin-right: calc(var(--sp-4) * -1); }
+.sch-btn--icon .sch-icon, .sch-btn--fab .sch-icon, .sch-btn--stepper .sch-icon, .sch-btn > .sch-icon:only-child { margin: 0; }
+.sch-nav-icon { display: inline-flex; align-items: center; justify-content: center; }
+.sch-tab-icon { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ─────────────────────────── меню пользователя (M-15) ─────────────────────────── */
+
+.sch-menu { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.sch-menu-head { display: flex; align-items: center; gap: var(--sp-12); padding: var(--sp-4) var(--sp-8) var(--sp-12); }
+.sch-menu-who { display: flex; flex-direction: column; min-width: 0; }
+.sch-menu-item {
+  display: flex; align-items: center; gap: var(--sp-12);
+  min-height: var(--tap-min); padding: 0 var(--sp-12);
+  border: 0; border-radius: var(--r-md); background: transparent;
+  font: inherit; font-size: var(--fs-md); color: var(--c-ink-primary);
+  cursor: pointer; text-align: left; width: 100%;
+}
+.sch-menu-item:hover { background: var(--c-brand-violet-050); }
+.sch-menu-item .sch-icon { color: var(--c-ink-secondary); }
+.sch-menu-item--danger { color: var(--c-state-danger); }
+.sch-menu-item--danger .sch-icon { color: var(--c-state-danger); }
+.sch-menu-item--danger:hover { background: var(--c-mark-m2-bg); }
+.sch-menu-sep { height: 1px; background: var(--c-border-default); margin: var(--sp-4) var(--sp-8); }
+
+.sch-sidebar-school {
+  display: block; padding: 0 var(--sp-8); margin-top: calc(var(--sp-4) * -1);
+  font-size: var(--fs-xs); color: var(--c-ink-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sch-user-text { display: flex; flex-direction: column; }
+.sch-breadcrumb { display: inline-flex; align-items: center; gap: var(--sp-4); }
+.sch-header-title--back { display: inline-flex; align-items: center; gap: var(--sp-4); }
+
 /* ─────────────────────────── карточки (AR-77) ─────────────────────────── */
 
 .sch-card {
@@ -204,10 +269,13 @@
   border-radius: var(--r-card);
   box-shadow: var(--sh-card);
   padding: var(--sp-20);
-  transition: box-shadow 120ms, transform 120ms;
+  transition: box-shadow 120ms, border-color 120ms;
 }
+/* Hover кликабельной карточки — рамка фирменным цветом и тень, БЕЗ подъёма
+   (1.3.0): сдвиг на −2px был движением без действия, и сетка из двенадцати
+   карточек «дышала» под курсором. `--link` — та же реакция, один язык. */
 .sch-card--clickable { cursor: pointer; text-align: left; width: 100%; font: inherit; color: inherit; }
-.sch-card--clickable:hover { box-shadow: var(--sh-modal); transform: translateY(-2px); }
+.sch-card--clickable:hover { box-shadow: var(--sh-modal); border-color: var(--c-brand-violet-500); }
 .sch-card--locked { color: var(--c-ink-muted); }
 .sch-card-title { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
 .sch-card-sub { color: var(--c-ink-secondary); font-size: var(--fs-sm); margin-top: var(--sp-4); }
@@ -258,11 +326,16 @@
 .sch-field { display: flex; flex-direction: column; gap: var(--sp-4); margin-bottom: var(--sp-16); }
 .sch-field-label { font-size: var(--fs-sm); color: var(--c-ink-secondary); }
 .sch-input {
-  height: 48px; padding: 0 var(--sp-12);
+  /* 44, как у кнопок (1.3.0): поле и кнопка в одной строке инструментов
+     стояли на разной высоте. На мобайле оба вида растут до 48 ниже. */
+  height: var(--tap-min); padding: 0 var(--sp-12);
   border: 1px solid var(--c-border-default); border-radius: var(--r-md);
   background: var(--c-surface-card); color: var(--c-ink-primary);
   font-family: inherit; font-size: var(--fs-md); width: 100%;
 }
+/* `select.sch-input` — та же рамка и высота, стрелка НАТИВНАЯ: своя стрелка
+   потребовала бы `data:`-картинки с цветом мимо токенов (G-37). */
+select.sch-input { padding-right: var(--sp-8); }
 .sch-input:hover { border-color: var(--c-brand-violet-500); }
 .sch-input:focus { border-color: var(--c-border-focus); box-shadow: 0 0 0 3px var(--c-brand-violet-100); outline: none; }
 .sch-input:disabled { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
@@ -323,10 +396,11 @@
 
 .sch-state { display: flex; flex-direction: column; align-items: center; gap: var(--sp-12); padding: var(--sp-56) var(--sp-24); text-align: center; }
 .sch-state-illustration {
-  width: 96px; height: 96px; border-radius: var(--r-card);
-  border: 2px dashed var(--c-brand-violet-100);
+  width: 72px; height: 72px; border-radius: var(--r-card);
+  border: 1px solid var(--c-border-default);
+  background: var(--c-surface-canvas);
   display: flex; align-items: center; justify-content: center;
-  color: var(--c-brand-violet-500); font-size: var(--fs-h1);
+  color: var(--c-brand-violet-600);
 }
 .sch-state h2 { font-size: var(--fs-xl); }
 
@@ -363,6 +437,10 @@
 .sch-table th { color: var(--c-ink-secondary); font-weight: var(--fw-medium); background: var(--c-surface-canvas); position: sticky; top: 0; z-index: 1; }
 .sch-table tbody tr { cursor: pointer; }
 .sch-table tbody tr:hover td { box-shadow: inset 0 0 0 999px var(--c-brand-violet-050); }
+/* Широкая матрица (сеть, сессии, нагрузка): мельче и плотнее, чтобы колонки
+   помещались без горизонтальной прокрутки там, где это возможно. */
+.sch-table--compact { font-size: var(--fs-xs); }
+.sch-table--compact th, .sch-table--compact td { padding: var(--sp-8); }
 
 /* Заливка строки по полу — и текст, и позиция строки, а не один оттенок (AR-80). */
 .sch-row--boy td { background: var(--c-sex-boy-bg); color: var(--c-sex-boy-ink); }
@@ -376,6 +454,73 @@
   font-size: var(--fs-xs); font-weight: var(--fw-medium);
 }
 .sch-badge--muted { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
+.sch-badge--success { background: var(--c-mark-m5-bg); color: var(--c-mark-m5-ink); }
+.sch-badge--warning { background: var(--c-mark-m3-bg); color: var(--c-mark-m3-ink); }
+.sch-badge--danger { background: var(--c-mark-m2-bg); color: var(--c-mark-m2-ink); }
+
+/* ─── общие блоки кабинетов 1.3.0 (AR-186): плитки, разделы, копирование ─── */
+
+.sch-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: var(--sp-12); margin-bottom: var(--sp-24); }
+.sch-stat {
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-16) var(--sp-20);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-lg);
+  background: var(--c-surface-card);
+}
+.sch-stat-value { font-family: var(--font-display); font-size: var(--fs-h2); font-weight: var(--fw-bold); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sch-stat-label { font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-stat--success .sch-stat-value { color: var(--c-state-success); }
+.sch-stat--warning .sch-stat-value { color: var(--c-state-warning); }
+.sch-stat--danger .sch-stat-value { color: var(--c-state-danger); }
+
+.sch-subnav {
+  display: flex; gap: var(--sp-4); margin-bottom: var(--sp-24);
+  padding: var(--sp-4); border-radius: var(--r-lg);
+  background: var(--c-surface-canvas); border: 1px solid var(--c-border-default);
+  overflow-x: auto; scrollbar-width: none;
+}
+.sch-subnav::-webkit-scrollbar { display: none; }
+.sch-subnav-item {
+  display: inline-flex; align-items: center; gap: var(--sp-8); flex: 0 0 auto;
+  min-height: 40px; padding: 0 var(--sp-16); border: 0; border-radius: var(--r-md);
+  background: transparent; color: var(--c-ink-secondary);
+  font: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); cursor: pointer; white-space: nowrap;
+}
+.sch-subnav-item:hover { color: var(--c-ink-primary); }
+.sch-subnav-item[aria-current='page'] { background: var(--c-surface-card); color: var(--c-brand-violet-700); box-shadow: var(--sh-card); }
+
+.sch-copy { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.sch-copy-label { font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-copy-row { display: flex; gap: var(--sp-8); align-items: center; min-width: 0; }
+.sch-copy-value {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: var(--sp-12); border-radius: var(--r-md);
+  background: var(--c-surface-canvas); border: 1px solid var(--c-border-default);
+  font-size: var(--fs-sm); color: var(--c-ink-primary);
+}
+.sch-copy-row .sch-btn { flex: 0 0 auto; }
+
+.sch-dot { display: inline-block; width: 8px; height: 8px; border-radius: var(--r-pill); margin-right: var(--sp-4); vertical-align: middle; }
+.sch-dot--success { background: var(--c-state-success); }
+.sch-dot--warning { background: var(--c-state-warning); }
+.sch-dot--danger { background: var(--c-state-danger); }
+.sch-dot--muted { background: var(--c-ink-muted); }
+.sch-dot--brand { background: var(--c-brand-violet-600); }
+
+.sch-linkrow {
+  display: flex; align-items: center; gap: var(--sp-12); width: 100%;
+  min-height: 56px; padding: var(--sp-12) var(--sp-16);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-lg);
+  background: var(--c-surface-card); color: var(--c-ink-primary);
+  font: inherit; cursor: pointer; text-align: left;
+}
+.sch-linkrow:hover { border-color: var(--c-brand-violet-500); }
+.sch-linkrow-icon { display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; border-radius: var(--r-md); background: var(--c-brand-violet-050); color: var(--c-brand-violet-700); flex: 0 0 auto; }
+.sch-linkrow-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.sch-linkrow-label { font-weight: var(--fw-medium); }
+.sch-linkrow-hint { font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-linkrow-chevron { color: var(--c-ink-muted); }
+.sch-list--rows { display: flex; flex-direction: column; gap: var(--sp-8); }
 
 .sch-avatar {
   width: 40px; height: 40px; border-radius: var(--r-pill);
@@ -476,13 +621,25 @@
 .sch-auth-card--wide { width: 480px; }
 .sch-qr { display: flex; flex-direction: column; align-items: center; gap: var(--sp-12); }
 .sch-qr-frame { padding: var(--sp-12); border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card); }
-.sch-code-cells { display: flex; gap: var(--sp-8); justify-content: center; }
+/* Шесть ячеек кода (`S-05.code`, `M-21.code`) РЕЗИНОВЫЕ (AR-192, правка
+   владельца 2026-09-02, скриншот 390px): прежние 6 × 56 + 5 × 8 = 376px не
+   помещались в карточку шириной 302px и вылезали за её край. Ячейка делит
+   ширину ряда поровну, квадратная через `aspect-ratio`, и не бывает шире 56
+   и уже 40 — на 390px выходит ~44, что и есть минимальная мишень (§4). */
+.sch-code-cells {
+  display: flex; gap: var(--sp-8); justify-content: center;
+  width: 100%; max-width: calc(6 * 56px + 5 * var(--sp-8)); margin: 0 auto;
+}
 .sch-code-cell {
-  width: 56px; height: 56px; text-align: center;
-  font-size: var(--fs-h2); font-family: inherit;
+  flex: 1 1 0; min-width: 40px; max-width: 56px; width: auto; height: auto;
+  aspect-ratio: 1 / 1; text-align: center; padding: 0;
+  font-size: var(--fs-h2); font-family: inherit; font-variant-numeric: tabular-nums;
   border: 1px solid var(--c-border-default); border-radius: var(--r-md);
   background: var(--c-surface-card); color: var(--c-ink-primary);
+  transition: border-color 120ms, box-shadow 120ms;
 }
+.sch-code-cell:hover:not(:disabled) { border-color: var(--c-brand-violet-500); }
+.sch-code-cell:disabled { background: var(--c-state-disabled-bg); color: var(--c-state-disabled-ink); }
 .sch-code-cell:focus { border-color: var(--c-border-focus); outline: none; box-shadow: 0 0 0 3px var(--c-brand-violet-100); }
 .sch-shake { animation: sch-shake 320ms ease-in-out; }
 @keyframes sch-shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
@@ -535,7 +692,7 @@
 .sch-canvas { background: var(--c-surface-canvas); border-radius: var(--r-lg); padding: var(--sp-20); }
 .sch-inline-avatars { display: flex; gap: calc(var(--sp-4) * -1); }
 .sch-card--link { cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: var(--sp-8); font: inherit; color: inherit; border: 1px solid var(--c-border-default); }
-.sch-card--link:hover { border-color: var(--c-brand-violet-500); }
+.sch-card--link:hover { border-color: var(--c-brand-violet-500); box-shadow: var(--sh-modal); }
 
 /* Видоискатель (`S-05`, `S-70`, `S-80`): камера во весь экран.
    Это СОСТОЯНИЕ компонента, а не раскладка — `S-05` открывает камеру и на
@@ -643,6 +800,7 @@
      и строки «заголовок + действие» складываются в колонку, а не распирают
      страницу вбок. Найдено мобильным смоком на `S-20` и `S-30`. */
   .sch-page-head { flex-direction: column; align-items: stretch; gap: var(--sp-12); }
+  .sch h1 { font-size: var(--fs-xl); }
   .sch-row--between { flex-wrap: wrap; }
   .sch-row { min-width: 0; }
 
@@ -682,12 +840,13 @@
     padding: 0;
   }
   .sch-tab[aria-current='page'] { color: var(--c-brand-violet-700); }
-  .sch-tab-icon { font-size: var(--fs-lg); line-height: 1; }
+  .sch-tab-icon { line-height: 1; }
   .sch-tab-label { font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 
   /* ─── кнопки §4: высота 48, во всю ширину, кроме иконок, FAB и чипов ─── */
 
   .sch-btn { height: 48px; width: 100%; }
+  .sch-input { height: 48px; }
   /* `flex: 0 0 auto` и `min-*` — не украшение: иконка в шапке модалки и чип в
      ряду это флекс-элементы, и без запрета сжатия соседний длинный заголовок
      ужимал их до 37px при заявленных 44. Мишень меряется по МЕНЬШЕЙ стороне,
@@ -877,7 +1036,8 @@
 .sch-daychip small { color: var(--c-ink-muted); font-size: var(--fs-xs); text-transform: capitalize; }
 .sch-daychip--active { background: var(--c-brand-violet-600); border-color: var(--c-brand-violet-600); color: var(--c-ink-on-violet); box-shadow: 0 6px 16px rgba(123,58,237,0.30); }
 .sch-daychip--active small { color: rgba(255,255,255,0.75); }
-.sch-weeknav { min-width: var(--tap-min); min-height: 60px; border-radius: var(--r-lg); border: none; background: transparent; color: var(--c-ink-muted); font-size: var(--fs-xl); cursor: pointer; }
+.sch-weeknav { min-width: var(--tap-min); min-height: 60px; border-radius: var(--r-lg); border: none; background: transparent; color: var(--c-ink-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.sch-weeknav:hover:not(:disabled) { background: var(--c-brand-violet-050); color: var(--c-ink-primary); }
 .sch-weeknav:disabled { opacity: 0.3; cursor: default; }
 
 .sch-lesson { display: flex; align-items: center; gap: var(--sp-16); padding: var(--sp-16); border-radius: var(--r-card); background: var(--c-surface-card); box-shadow: var(--sh-card); }
@@ -927,7 +1087,7 @@
 /* Кнопка-ссылка «‹ Мои журналы» и подобные текстовые возвраты. */
 .sch-linklike {
   background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
-  color: var(--c-brand-violet-700); min-height: var(--tap-min); display: inline-flex; align-items: center;
+  color: var(--c-brand-violet-700); min-height: var(--tap-min); display: inline-flex; align-items: center; gap: var(--sp-4);
 }
 
 /* Строка-галочка позиции в «Управлении компетенцией» (M-25). */
@@ -998,8 +1158,18 @@
 /* Раскрытие дня сверху вниз (правка владельца 2026-08-30). */
 @keyframes sch-unfold { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 .sch-unfold { animation: sch-unfold 0.25s ease-out; }
+
+/* ─── prefers-reduced-motion: ОДИН блок на все `@keyframes` файла (1.3.0) ───
+   Правило: у каждой анимации здесь есть строка. Появление слоёв, пульс
+   скелетона, встряска кода, раскрытие дня — отключаются вовсе; сжатие
+   кнопки и переходы карточек — тоже (это движение, пусть и на 1.5%).
+   Спиннер остаётся: это не украшение, а единственный признак «идёт
+   загрузка» на кнопке, чей текст на это время скрыт (§5). */
 @media (prefers-reduced-motion: reduce) {
-  .sch-unfold { animation: none; }
+  .sch-overlay, .sch-modal, .sch-modal[data-shape='fullscreen'], .sch-modal[data-shape='sheet'],
+  .sch-skeleton, .sch-shake, .sch-unfold { animation: none; }
+  .sch-btn, .sch-card, .sch-code-cell { transition: none; }
+  .sch-btn:active:not(:disabled) { transform: none; }
 }
 
 /* ─── УТЦ v1.4 фаза IV (AR-175): результат вкладками, скелет-редактор, ручная правка ─── */

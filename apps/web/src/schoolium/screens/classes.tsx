@@ -51,6 +51,7 @@ export function ClassesScreen() {
 
       {classes.length === 0 ? (
         <EmptyState
+          icon="classes"
           testId="S-10.empty"
           title="Классов пока нет"
           hint={mayWrite ? "Создайте классы — с этого начинается школа" : "Классы появятся, когда модератор их создаст"}

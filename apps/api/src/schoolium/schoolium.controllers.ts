@@ -1,8 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import type {
-  AdminCabinetDto,
-  AuditEntryDto,
   BindTeacherDto,
   BindTeacherManualDto,
   SaveCompetenceDto,
@@ -38,9 +36,8 @@ import { CalendarContractService, CalendarService } from './calendar/calendar.se
 import { ScheduleService } from './schedule/schedule.service';
 import { JournalService } from './journal/journal.service';
 import { SchoolStateService } from './school-state.service';
-import { AUDIT_LABELS, type SchoolEventType } from './schoolium.contract';
-import { AuditService } from '../common/audit/audit.service';
-import { PrismaService } from '../common/prisma/prisma.service';
+import { clientOf } from './access/access.controller';
+import { webOrigin } from './cabinets/web-origin';
 
 type Req0 = Request & { user?: SessionUser; contour?: 'schoolium' | 'legacy' };
 
@@ -425,8 +422,8 @@ export class StaffController {
     // (AR-183) мёртвая sch_sid иначе блокировала бы переактивацию с того же
     // телефона на 90 дней вперёд, сжигая каждый перевыпущенный QR.
     const openedByOtherSession = req.contour === 'schoolium' && Boolean(req.user);
-    const ua = String(req.headers['user-agent'] ?? '');
-    const r = await this.svc.activate(token, { openedByOtherSession, deviceHint: ua.slice(0, 80) });
+    // происхождение сессии (AR-187) — той же функцией, что у маршрутов `v1/auth/*`
+    const r = await this.svc.activate(token, { openedByOtherSession, ...clientOf(req) });
     if (r.sessionToken) {
       // Постоянная кука (maxAge из schoolCookieOptions): это главный маршрут
       // входа с телефона, сессионная кука тут умирала при закрытии приложения.
@@ -563,6 +560,20 @@ export class StaffController {
   @Post(':id/sessions/revoke')
   revokeSessions(@Req() req: Req0, @Param('id') id: string) {
     return this.svc.revokeSessions(id, actorOf(req));
+  }
+
+  /** §11 строка 39 · `S-31.btn.loginLink` / `S-62` (AR-189): одноразовая ссылка входа на 48 часов — только администратор. */
+  @RequirePermission('school.admin')
+  @Post(':id/login-link')
+  loginLink(@Req() req: Req0, @Param('id') id: string) {
+    return this.svc.issueLoginLink(id, actorOf(req), webOrigin(req));
+  }
+
+  /** `M-06` (AR-187): активность учётки — активация, устройства, журнал подключений. */
+  @RequirePermission('staff.manage')
+  @Get(':id/activity')
+  activity(@Req() req: Req0, @Param('id') id: string) {
+    return this.svc.activity(id, webOrigin(req));
   }
 }
 
@@ -735,59 +746,5 @@ export class SchoolJournalController {
   removeMark(@Req() req: Req0, @Param('id') id: string, @Param('studentId') studentId: string) {
     const a = actorOf(req);
     return this.svc.removeMark(id, studentId, { userId: a.userId, roles: a.roles, name: a.name });
-  }
-}
-
-// ─────────────────────────── кабинет модератора ───────────────────────────
-
-@Controller('v1/admin')
-export class SchoolAdminController {
-  constructor(
-    private readonly state: SchoolStateService,
-    private readonly audit: AuditService,
-    private readonly prisma: PrismaService,
-  ) {}
-
-  /**
-   * `S-60`. Роли, кроме модератора, получают 403 — не пустую страницу и не
-   * молчаливый редирект (`70-screens.md`, `S-60`).
-   *
-   * Аудит здесь — не украшение, а противовес полным правам (AR-88): модератор
-   * видит собственный след теми же словами, какими его увидит проверяющий.
-   */
-  @RequirePermission('school.manage')
-  @Get()
-  async cabinet(@Req() req: Req0): Promise<AdminCabinetDto> {
-    const actor = actorOf(req);
-    const [state, rows] = await Promise.all([this.state.resolve(), this.audit.listByActor(actor.userId, 100)]);
-    const subjectIds = [...new Set(rows.map((r) => r.subjectUserId).filter((v): v is string => Boolean(v)))];
-    const names = await this.resolveNames(subjectIds);
-    const audit: AuditEntryDto[] = rows.map((r) => {
-      const label = AUDIT_LABELS[r.action as SchoolEventType];
-      return {
-        id: r.id,
-        at: r.occurredAt.toISOString(),
-        action: r.action,
-        // Событие вне каталога версии (легаси-контур) не прячется и не
-        // подписывается выдумкой — показывается своим техническим именем.
-        actionLabel: label?.action ?? r.action,
-        objectKind: label?.object ?? 'запись',
-        objectName: r.subjectUserId ? (names.get(r.subjectUserId) ?? null) : null,
-      };
-    });
-    return { state, audit };
-  }
-
-  /** Субъект ПДн — либо ученик, либо сотрудник: аудит хранит идентификатор, имя живёт в своём контуре. */
-  private async resolveNames(ids: string[]): Promise<Map<string, string>> {
-    const out = new Map<string, string>();
-    if (ids.length === 0) return out;
-    const [students, users] = await Promise.all([
-      this.prisma.schoolStudent.findMany({ where: { id: { in: ids } } }),
-      this.prisma.user.findMany({ where: { id: { in: ids } } }),
-    ]);
-    for (const s of students) out.set(s.id, [s.lastName, s.firstName, s.middleName].filter(Boolean).join(' '));
-    for (const u of users) out.set(u.id, [u.lastName, u.firstName, u.middleName].filter(Boolean).join(' ') || u.displayName);
-    return out;
   }
 }

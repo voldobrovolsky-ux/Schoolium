@@ -13,7 +13,7 @@
 #
 # .env.prod создаётся на VPS при первом деплое сам (пароль БД генерируется там
 # же и наружу не уходит). Одноразовая bootstrap-ссылка и креды оператора
-# печатаются в лог приватного репозитория — ссылка живёт 24 ч, пароль оператора
+# печатаются в лог приватного репозитория — ссылка живёт 48 ч, пароль оператора
 # после события стоит перевыпустить с карточки.
 name: deploy-school
 permissions:
@@ -40,7 +40,7 @@ on:
         required: false
         default: ''
       relink:
-        description: 'bootstrap: true — не заводить школу заново, а перевыпустить одноразовую ссылку входа (24ч) для СУЩЕСТВУЮЩЕГО модератора по phone'
+        description: 'bootstrap: true — не заводить школу заново, а перевыпустить одноразовую ссылку входа (48ч) для СУЩЕСТВУЮЩЕГО модератора по phone'
         required: false
         default: 'false'
       workspace:
@@ -53,6 +53,10 @@ on:
         default: ''
       moderator:
         description: 'provision: учётка модератора школы, "Фамилия Имя=username"'
+        required: false
+        default: ''
+      deputy:
+        description: 'provision: учётка завуча, "Фамилия Имя=username"'
         required: false
         default: ''
 
@@ -186,7 +190,7 @@ jobs:
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run school:bootstrap -- --phone='${{ inputs.phone }}' --school='${{ inputs.school }}' --name='${{ inputs.opname }}'"
 
-      # Не заводит школу заново — только перевыпускает 24ч-ссылку для уже
+      # Не заводит школу заново — только перевыпускает 48ч-ссылку для уже
       # существующего модератора (AR-93, дополнение 2026-08-21): «единственный
       # модератор потерял телефон/сессию» решается платформой, без пароля.
       - name: Перевыпустить ссылку входа существующему модератору (relink)
@@ -195,17 +199,19 @@ jobs:
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run school:bootstrap -- --phone='${{ inputs.phone }}' --relink"
 
-      # Доведение СУЩЕСТВУЮЩЕЙ школы до рабочих кабинетов: учётки админа и
-      # модератора с одноразовыми ссылками входа (24ч). Только добавляет —
-      # существующих пользователей и данные школы не трогает.
+      # Доведение СУЩЕСТВУЮЩЕЙ школы до рабочих кабинетов: учётки админа,
+      # модератора и завуча с одноразовыми ссылками входа (48ч, AR-189). Только
+      # добавляет — существующих пользователей и данные школы не трогает.
       - name: Завести учётки школы (provision)
         if: inputs.action == 'provision'
         run: |
           A="${{ inputs.admin }}"
           M="${{ inputs.moderator }}"
+          D="${{ inputs.deputy }}"
           ARGS=""
           if [ -n "$A" ]; then ARGS="$ARGS --admin-name='${A%%=*}' --admin-username='${A##*=}'"; fi
           if [ -n "$M" ]; then ARGS="$ARGS --moderator-name='${M%%=*}' --moderator-username='${M##*=}'"; fi
+          if [ -n "$D" ]; then ARGS="$ARGS --deputy-name='${D%%=*}' --deputy-username='${D##*=}'"; fi
           if [ -n "${{ inputs.workspace }}" ]; then ARGS="$ARGS --workspace='${{ inputs.workspace }}'"; fi
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run school:provision -- $ARGS"

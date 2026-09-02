@@ -25,6 +25,7 @@ import {
 } from "@edustore/shared";
 import { api, SchoolApiError, type LoadEntry } from "../api";
 import { useAsync, useIsMobile } from "../hooks";
+import { Icon } from "../icons";
 import { Button, EmptyState, ErrorState, Field, Modal, NumberField, Skeletons, Toast, useToast } from "../ui";
 import { useSession } from "../session";
 import {
@@ -118,6 +119,7 @@ export function ScheduleScreen() {
 
       {!tpl ? (
         <EmptyState
+          icon="calendar"
           testId="S-40.empty"
           title="Расписание ещё не настроено"
           hint={mayBuild ? "Заполните четверти, нагрузку и параметры дня" : "Расписание появится, когда модератор его настроит"}
@@ -781,8 +783,8 @@ function SettingsForm({
               <div className="sch-row sch-row--between">
                 <strong>{t.termNo} четверть</strong>
                 {t.dateFrom && t.dateTo ? (
-                  <span className="sch-success-text" data-testid="S-41.term.check">
-                    ✓
+                  <span className="sch-success-text" data-testid="S-41.term.check" aria-label="Даты заданы">
+                    <Icon name="check" size={18} />
                   </span>
                 ) : null}
               </div>
@@ -1019,7 +1021,7 @@ function SettingsForm({
                 onChange={(e) => setSkelRows(skelRows.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))}
               />
               <Button kind="ghost" aria-label="Убрать позицию" onClick={() => setSkelRows(skelRows.filter((_, j) => j !== i))}>
-                ✕
+                <Icon name="close" />
               </Button>
             </div>
           ))}
@@ -1034,7 +1036,8 @@ function SettingsForm({
               setSkelRows([...skelRows, { kind: "lesson", title: "", start, end: toHHMM(toMin(start) + Number(day.lessonMin || "40")) }]);
             }}
           >
-            + Урок
+            <Icon name="plus" size={18} />
+            Урок
           </Button>
           <Button
             kind="secondary"
@@ -1045,7 +1048,8 @@ function SettingsForm({
               setSkelRows([...skelRows, { kind: "event", title: "", start, end: toHHMM(toMin(start) + 15) }]);
             }}
           >
-            + Событие
+            <Icon name="plus" size={18} />
+            Событие
           </Button>
           {skelRows.length ? (
             <Button
@@ -1185,7 +1189,7 @@ function LoadSection({
                       disabled={e.hoursPerYear <= 0}
                       onClick={() => setYear(e.bindingId, Math.max(0, e.hoursPerYear - SCHOOL_YEAR_WEEKS))}
                     >
-                      −
+                      <Icon name="minus" />
                     </Button>
                     <input
                       id={`h-${e.bindingId}`}
@@ -1202,7 +1206,7 @@ function LoadSection({
                       aria-label={`${e.subjectName}: больше часов`}
                       onClick={() => setYear(e.bindingId, e.hoursPerYear + SCHOOL_YEAR_WEEKS)}
                     >
-                      +
+                      <Icon name="plus" />
                     </Button>
                   </div>
                 </div>
@@ -1414,7 +1418,7 @@ export function PreviewScreen({ preview, onClose }: { preview: SchedulePreviewDt
         </button>
         <span className="sch-topbar-spacer" />
         <Button kind="ghost" testId="S-42.btn.close" aria-label="Закрыть" onClick={onClose}>
-          ✕
+          <Icon name="close" />
         </Button>
       </header>
 

@@ -1,0 +1,27 @@
+/*
+ * `S-60` кабинет модератора и `S-80` устройства и сессии: строки сессий с
+ * каналом входа и видом клиента (AR-187), переходы в соседние кабинеты
+ * (AR-186).
+ *
+ * Только то, чего нет в `app.css`: карточки, бейджи, точки состояния и строки
+ * переходов берутся оттуда. Цвета — только токенами (G-37, AR-42).
+ */
+
+/* Заголовок с пояснением под ним живёт внутри `.sch-page-head`, чтобы кнопка
+   «Подключить устройство» осталась справа от заголовка, а не под абзацем. */
+.sch-s80-head { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sch-s80-lead { color: var(--c-ink-secondary); max-width: 60ch; }
+
+.sch-s80-session { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); }
+.sch-s80-session-main { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; flex: 1 1 auto; }
+.sch-s80-session-title { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.sch-s80-session-meta { display: flex; gap: var(--sp-12); flex-wrap: wrap; font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-s80-session .sch-btn { flex: 0 0 auto; }
+
+.sch-s60-cabinets { margin-top: var(--sp-24); }
+
+@media (max-width: 767px) {
+  /* Кнопка во всю ширину (§4) не встаёт рядом с подсказкой устройства:
+     строка складывается в колонку, «Завершить» — под описанием. */
+  .sch-s80-session { flex-direction: column; align-items: stretch; }
+}

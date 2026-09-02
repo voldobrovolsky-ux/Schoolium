@@ -7,7 +7,10 @@ import {
   type CreateStaffCardDto,
   type CredentialsDto,
   type FillStaffCardDto,
+  type LoginLinkDto,
   type SchoolRole,
+  type SessionClientKind,
+  type StaffActivityDto,
   type StaffCardDto,
   type TokenStatus,
 } from '@edustore/shared';
@@ -30,6 +33,7 @@ import { AccessService } from '../access/access.service';
 import { JournalContractService } from '../journal/journal.service';
 import { SubjectsContractService } from '../subjects/subjects.service';
 import type { SchoolActor } from '../actor';
+import { journalSince, sessionsOfUser } from '../cabinets/session-view';
 
 const MIN = 60_000;
 
@@ -254,7 +258,10 @@ export class StaffService {
    * устройство не становится его кабинетом — с устройства модератора активация
    * не проходит, вход выполняется кодом с карточки.
    */
-  async activate(token: string, opts: { openedByOtherSession: boolean; deviceHint: string }) {
+  async activate(
+    token: string,
+    opts: { openedByOtherSession: boolean; deviceHint: string; clientKind?: SessionClientKind; ip?: string | null },
+  ) {
     const t = await TenantContext.runAsSystem(() =>
       this.prisma.activationToken.findUnique({ where: { token } }),
     );
@@ -308,8 +315,16 @@ export class StaffService {
         // выдаётся, вход человека — код с карточки (AR-91, AR-92)
         return { ok: true, sessionToken: null as string | null, userId, roles };
       }
-      const session = await this.sessions.issue({ userId, workspaceId: ws, roles, deviceHint: opts.deviceHint });
-      await this.access.publishSessionStarted(userId, ws, 'registration', opts.deviceHint);
+      const session = await this.sessions.issue({
+        userId,
+        workspaceId: ws,
+        roles,
+        deviceHint: opts.deviceHint,
+        via: 'registration',
+        clientKind: opts.clientKind ?? 'browser',
+        ip: opts.ip ?? null,
+      });
+      await this.access.publishSessionStarted(userId, ws, 'registration', opts.deviceHint, opts.clientKind ?? 'browser');
       return { ok: true, sessionToken: session.token, userId, roles };
     });
   }
@@ -538,6 +553,50 @@ export class StaffService {
     const count = await this.sessions.revokeAllForUser(userId, 'manual');
     await this.access.publishSessionRevoked(userId, workspaceId, 'manual', actor.userId);
     return { ok: true, revoked: count };
+  }
+
+  // ─────────────── ссылка входа и активность учётки 1.3.0 (§11 строка 39, AR-187, AR-189) ───────────────
+
+  /**
+   * `S-31.btn.loginLink` / `S-62`: одноразовая ссылка входа на 48 часов с
+   * карточки сотрудника. Адрес строится от публичного origin школы
+   * (`WEB_ORIGIN`), а не от хоста запроса: за прокси хост запроса — внутренний.
+   */
+  async issueLoginLink(cardId: string, actor: SchoolActor, origin: string): Promise<LoginLinkDto> {
+    const { userId, workspaceId } = await this.registered(cardId);
+    const link = await this.access.issueLoginLink(userId, workspaceId, actor.userId);
+    return { url: `${origin}/bootstrap/${link.token}`, token: link.token, expiresAt: link.expiresAt.toISOString() };
+  }
+
+  /**
+   * Активность учётки для карточки `M-06` (AR-187): активирована ли, когда
+   * была в сети, сколько устройств живо, и журнал подключений за
+   * `sessionJournalDays` — теми же словами, что карта устройств администратора.
+   */
+  async activity(cardId: string, origin: string): Promise<StaffActivityDto> {
+    const { userId, workspaceId, membership } = await this.registered(cardId);
+    const now = new Date();
+    const rows = await TenantContext.runAsSystem(() =>
+      this.prisma.appSession.findMany({
+        where: {
+          userId,
+          workspaceId,
+          OR: [{ revokedAt: null, expiresAt: { gt: now } }, { revokedAt: { gte: journalSince(now) } }, { expiresAt: { gte: journalSince(now) } }],
+        },
+      }),
+    );
+    const sessions = sessionsOfUser(rows, now);
+    const lastSeen = rows.reduce<Date | null>((m, r) => (m === null || r.lastSeenAt > m ? r.lastSeenAt : m), null);
+    return {
+      userId,
+      activated: Boolean(membership.activatedAt),
+      activatedAt: membership.activatedAt ? membership.activatedAt.toISOString() : null,
+      lastSeenAt: lastSeen ? lastSeen.toISOString() : null,
+      activeSessions: sessions.filter((s) => s.status === 'active').length,
+      totalSessions: sessions.length,
+      sessions,
+      profileUrl: `${origin}/staff/${cardId}`,
+    };
   }
 
   // ─────────────── аватар (§11 строки 6, 33) ───────────────

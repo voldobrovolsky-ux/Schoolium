@@ -1,0 +1,38 @@
+/*
+ * `S-31` · карточка сотрудника (`M-06`): панель управления группами и строки
+ * активности учётки (AR-187, AR-189).
+ *
+ * Здесь только раскладка: заголовок группы, ряд действий с переносом, пары
+ * «подпись — значение», строки сессий. Кнопки, бейджи, поле копирования,
+ * канва — из `app.css`, второй реализации у них не появляется.
+ * Цвета — только токенами (G-37, AR-42).
+ */
+
+.sch-m06-groups { display: flex; flex-direction: column; gap: var(--sp-24); }
+.sch-m06-group { display: flex; flex-direction: column; gap: var(--sp-12); }
+/* `.sch h3` весит больше `.sch-section-title` и вернул бы размер xl: заголовок
+   группы внутри модалки 480px стоит уровнем ниже заголовка самой модалки. */
+.sch-m06-group > .sch-section-title { font-size: var(--fs-lg); margin-bottom: 0; }
+/* Три кнопки входа в тело 432px одной строкой не помещаются — ряд переносится,
+   а не выталкивает модалку вширь. */
+.sch-m06-group .sch-actions { flex-wrap: wrap; }
+
+.sch-m06-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.sch-m06-who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Шесть цифр кода входа — крупно и с разрядкой, чтобы диктовались по одной. */
+.sch-m06-code { font-family: var(--font-display); font-size: var(--fs-h2); letter-spacing: 0.2em; font-variant-numeric: tabular-nums; }
+/* Панель ссылки: поле копирования тянется на всю ширину канвы, а не сжимается
+   к длине токена внутри центрирующей колонки `.sch-qr`. */
+.sch-m06-link .sch-copy { align-self: stretch; }
+
+.sch-m06-kv { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-4) var(--sp-16); margin: 0; font-size: var(--fs-sm); }
+.sch-m06-kv dt { color: var(--c-ink-secondary); margin: 0; }
+.sch-m06-kv dd { margin: 0; min-width: 0; }
+
+.sch-m06-sessions { display: flex; flex-direction: column; }
+.sch-m06-session { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-12) 0; border-top: 1px solid var(--c-border-default); font-size: var(--fs-sm); }
+.sch-m06-session-title { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.sch-m06-session-meta { display: flex; gap: var(--sp-12); flex-wrap: wrap; color: var(--c-ink-secondary); }
+/* Завершённая сессия приглушена, но слово «завершена» стоит рядом (AR-80). */
+.sch-m06-session[data-status='ended'] { color: var(--c-ink-muted); }

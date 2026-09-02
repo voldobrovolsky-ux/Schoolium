@@ -32,6 +32,7 @@ import {
 } from "react";
 import { MARK_VALUES, type MarkValue } from "@edustore/shared";
 import { useIsMobile } from "./hooks";
+import { Icon, type IconName } from "./icons";
 
 // ─────────────────────────── кнопки (реестр §4) ───────────────────────────
 
@@ -152,7 +153,7 @@ export function NumberField({
           disabled={value !== "" && Number(value) <= min}
           onClick={() => step(-1)}
         >
-          −
+          <Icon name="minus" />
         </Button>
         <input
           id={id}
@@ -172,7 +173,7 @@ export function NumberField({
           disabled={value !== "" && Number(value) >= max}
           onClick={() => step(1)}
         >
-          +
+          <Icon name="plus" />
         </Button>
       </div>
       {error ? (
@@ -362,12 +363,12 @@ export function Modal({ title, width, onClose, children, footer, testId, level =
           {/* У мастера на мобайле в хедере «Назад», а не крестик (§3). */}
           {shape === "fullscreen" && onBack ? (
             <Button kind="icon" onClick={onBack} aria-label="Назад" testId={testId ? `${testId}.back.header` : undefined}>
-              ‹
+              <Icon name="chevronLeft" />
             </Button>
           ) : null}
           <h2 id={titleId}>{title}</h2>
           <Button kind="icon" onClick={onClose} aria-label="Закрыть" testId={testId ? `${testId}.close` : undefined}>
-            ✕
+            <Icon name="close" />
           </Button>
         </div>
         <div className="sch-modal-body">{children}</div>
@@ -566,24 +567,31 @@ export function Skeletons({ count, kind = "card" }: { count: number; kind?: "car
  * Пустое состояние: иллюстрация + заголовок + ОДНА primary-кнопка, ведущая к
  * следующему шагу онбординга. У роли без права кнопка НЕ рендерится, и текст
  * другой: «появятся, когда модератор их создаст» (AR-69, красная линия 7).
+ *
+ * Иллюстрация — иконка `lucide` (AR-190), а не глиф: экран называет её по
+ * имени (`icon`), по умолчанию — документ. Проп `glyph` оставлен ради
+ * совместимости с экранами, написанными до 1.3.0, и НЕ читается: глиф
+ * рендерился системным шрифтом и на каждой платформе выглядел иначе.
  */
 export function EmptyState({
   title,
   hint,
   action,
   testId,
-  glyph = "◇",
+  icon = "doc",
 }: {
   title: string;
   hint?: string;
   action?: ReactNode;
   testId?: string;
+  icon?: IconName;
+  /** @deprecated с 1.3.0 — игнорируется, используйте `icon` (AR-190). */
   glyph?: string;
 }) {
   return (
     <div className="sch-state" data-testid={testId}>
       <div className="sch-state-illustration" aria-hidden="true">
-        {glyph}
+        <Icon name={icon} size={24} />
       </div>
       <h2>{title}</h2>
       {hint ? <p className="sch-muted">{hint}</p> : null}
@@ -642,8 +650,135 @@ export function Avatar({ name, url, large }: { name: string | null; url?: string
   );
 }
 
-export function Badge({ children, muted }: { children: ReactNode; muted?: boolean }) {
-  return <span className={muted ? "sch-badge sch-badge--muted" : "sch-badge"}>{children}</span>;
+/**
+ * Бейдж — статус словом. Тон кодирует СМЫСЛ, а не украшает (AR-80): `success`
+ * — сделано/в сети, `warning` — ждёт человека, `danger` — закрыто/отозвано,
+ * `muted` — неактивно. Цвет один смысла не несёт: слово стоит всегда.
+ */
+export type BadgeTone = "brand" | "muted" | "success" | "warning" | "danger";
+
+export function Badge({ children, muted, tone, testId }: { children: ReactNode; muted?: boolean; tone?: BadgeTone; testId?: string }) {
+  const t: BadgeTone = tone ?? (muted ? "muted" : "brand");
+  return (
+    <span className={t === "brand" ? "sch-badge" : `sch-badge sch-badge--${t}`} data-testid={testId}>
+      {children}
+    </span>
+  );
+}
+
+// ─────────────────────────── общие блоки кабинетов 1.3.0 (AR-186, AR-190) ───────────────────────────
+
+/**
+ * Плитка показателя: число крупно, подпись мелко. Плитки живут только в
+ * сетке `StatGrid` и никогда не декорируются иконкой — число и есть акцент.
+ */
+export function Stat({ value, label, tone, testId }: { value: ReactNode; label: string; tone?: BadgeTone; testId?: string }) {
+  return (
+    <div className={tone && tone !== "brand" ? `sch-stat sch-stat--${tone}` : "sch-stat"} data-testid={testId}>
+      <span className="sch-stat-value">{value}</span>
+      <span className="sch-stat-label">{label}</span>
+    </div>
+  );
+}
+
+export function StatGrid({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <div className="sch-stats" data-testid={testId}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Навигация разделов внутри экрана (`S-62.subnav`): сегменты в ряд на
+ * десктопе, лента чипов с прокруткой внутри контейнера на мобайле (§6).
+ * Активный раздел — `aria-current`, а не класс: смок читает атрибут.
+ */
+export function SubNav<K extends string>({
+  items,
+  active,
+  onChange,
+  testId,
+}: {
+  items: { key: K; label: string; icon?: IconName }[];
+  active: K;
+  onChange: (k: K) => void;
+  testId?: string;
+}) {
+  return (
+    <nav className="sch-subnav" data-testid={testId} aria-label="Разделы">
+      {items.map((it) => (
+        <button
+          key={it.key}
+          type="button"
+          className="sch-subnav-item"
+          aria-current={it.key === active ? "page" : undefined}
+          data-key={it.key}
+          onClick={() => onChange(it.key)}
+        >
+          {it.icon ? <Icon name={it.icon} size={18} /> : null}
+          {it.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * Поле «скопировать»: значение моноширинно, кнопка одна. Успех показывается
+ * подписью кнопки «Скопировано» на две секунды — тост здесь был бы шумом (§5).
+ */
+export function CopyField({ value, label, testId }: { value: string; label?: string; testId?: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setDone(true);
+      setTimeout(() => setDone(false), 2000);
+    } catch {
+      window.prompt("Скопируйте вручную", value);
+    }
+  };
+  return (
+    <div className="sch-copy" data-testid={testId}>
+      {label ? <span className="sch-copy-label">{label}</span> : null}
+      <div className="sch-copy-row">
+        <code className="sch-copy-value" title={value}>
+          {value}
+        </code>
+        <Button kind="secondary" onClick={copy} aria-label="Скопировать" testId={testId ? `${testId}.copy` : undefined}>
+          <Icon name={done ? "check" : "copy"} size={18} />
+          {done ? "Скопировано" : "Скопировать"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Точка состояния рядом со словом: «в сети», «завершена». Слово обязательно. */
+export function StatusDot({ tone }: { tone: BadgeTone }) {
+  return <span className={`sch-dot sch-dot--${tone}`} aria-hidden="true" />;
+}
+
+/**
+ * Строка-ссылка списка (`S-82.nav`, `S-62.overview.links`): подпись, деталь,
+ * шеврон справа — один шаблон на все списки переходов.
+ */
+export function LinkRow({ icon, label, hint, onClick, testId }: { icon?: IconName; label: string; hint?: string; onClick: () => void; testId?: string }) {
+  return (
+    <button type="button" className="sch-linkrow" onClick={onClick} data-testid={testId}>
+      {icon ? (
+        <span className="sch-linkrow-icon">
+          <Icon name={icon} />
+        </span>
+      ) : null}
+      <span className="sch-linkrow-text">
+        <span className="sch-linkrow-label">{label}</span>
+        {hint ? <span className="sch-linkrow-hint">{hint}</span> : null}
+      </span>
+      <Icon name="chevronRight" size={18} className="sch-linkrow-chevron" />
+    </button>
+  );
 }
 
 /**

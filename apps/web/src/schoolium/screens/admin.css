@@ -1,0 +1,135 @@
+/*
+ * `S-62` · кабинет администратора (AR-186…AR-189): раскладки шести разделов.
+ *
+ * Здесь только то, чего в `app.css` нет: карта подключений деревом, матрица
+ * ролей с закреплённой колонкой, строки реестра, форма лимитов. Всё общее —
+ * карточки, плитки, бейджи, списки переходов — берётся из `app.css`, и второй
+ * реализации у него не появляется.
+ *
+ * Цвета — только токенами (G-37, AR-42): состояние узла кодируется словом
+ * рядом с цветом (AR-80), сам цвет — подсказка, а не смысл.
+ */
+
+.sch-adm-section { display: flex; flex-direction: column; gap: var(--sp-24); }
+.sch-adm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); flex-wrap: wrap; }
+.sch-adm-head .sch-section-title { margin-bottom: 0; }
+.sch-adm-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-16); align-items: start; }
+.sch-adm-kv { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-4) var(--sp-16); font-size: var(--fs-sm); }
+.sch-adm-kv dt { color: var(--c-ink-secondary); margin: 0; }
+.sch-adm-kv dd { margin: 0; min-width: 0; }
+.sch-adm-hint { color: var(--c-ink-secondary); font-size: var(--fs-sm); margin: 0; }
+
+/* ─── карта подключений (AR-187) ───
+   Человек — карточка, его сессии — дерево под ней. Прямой вход (пароль, код,
+   ссылка) висит на линии от человека; сессия, выданная сканом с телефона,
+   вложена под сессию телефона и висит на линии от неё. Узлы одной ширины:
+   ширина ничего не кодирует, кодирует вложенность. */
+.sch-adm-map { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-16); align-items: start; }
+.sch-adm-user { display: flex; flex-direction: column; gap: var(--sp-12); min-width: 0; }
+.sch-adm-user[data-deactivated] .sch-adm-user-head { color: var(--c-ink-muted); }
+.sch-adm-user-head { display: flex; align-items: center; gap: var(--sp-12); min-width: 0; }
+.sch-adm-user-text { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; flex: 1 1 auto; }
+.sch-adm-user-name { font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-adm-user-roles { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.sch-adm-user-foot { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+
+.sch-adm-tree {
+  list-style: none; margin: 0; padding: 0 0 0 var(--sp-16);
+  border-left: 2px solid var(--c-border-default);
+  display: flex; flex-direction: column; gap: var(--sp-8);
+}
+.sch-adm-tree > li { position: relative; min-width: 0; }
+/* Короткая горизонтальная засечка от вертикали к узлу — та самая «линия». */
+.sch-adm-tree > li::before {
+  content: ""; position: absolute; left: calc(-1 * var(--sp-16)); top: 24px;
+  width: var(--sp-12); height: 2px; background: var(--c-border-default);
+}
+/* Вложенное дерево начинается под родительским узлом: его вертикаль идёт от
+   сессии телефона, а не от человека — так и читается «выдана сканом». */
+.sch-adm-tree .sch-adm-tree { margin-top: var(--sp-8); margin-left: var(--sp-12); }
+
+.sch-adm-session {
+  width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-12); border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-canvas);
+}
+.sch-adm-session[data-status="ended"] { background: var(--c-state-disabled-bg); color: var(--c-ink-muted); }
+/* Первый вход из новой сети — единственный акцент карты: пунктир предупреждения. */
+.sch-adm-session[data-new-network] { border: 1px dashed var(--c-state-warning); }
+.sch-adm-session-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-8); }
+.sch-adm-session-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); min-width: 0; font-weight: var(--fw-medium); }
+.sch-adm-session-meta { display: flex; flex-wrap: wrap; gap: var(--sp-4) var(--sp-12); font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-adm-session[data-status="ended"] .sch-adm-session-meta { color: inherit; }
+.sch-adm-session .sch-btn { flex: 0 0 auto; }
+
+.sch-adm-link { display: flex; gap: var(--sp-16); align-items: flex-start; padding-top: var(--sp-12); border-top: 1px solid var(--c-border-default); }
+.sch-adm-link .sch-copy { flex: 1 1 auto; }
+.sch-adm-link .sch-qr-frame { flex: 0 0 auto; }
+
+/* ─── матрица ролей (AR-35: каталог прав — код, здесь только чтение) ─── */
+.sch-adm-matrix th:first-child, .sch-adm-matrix td:first-child {
+  position: sticky; left: 0; z-index: 2; background: var(--c-surface-card);
+  white-space: nowrap; font-weight: var(--fw-medium); color: var(--c-ink-primary);
+}
+.sch-adm-matrix thead th:first-child { z-index: 3; background: var(--c-surface-canvas); }
+.sch-adm-matrix thead .sch-adm-group { text-align: center; font-size: var(--fs-xs); text-transform: none; }
+/* Код права стоит вертикально: семнадцать колонок с горизонтальными подписями
+   растянули бы таблицу втрое, а вертикаль читается и на 390px. */
+.sch-adm-matrix thead .sch-adm-perm {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  text-align: left; vertical-align: bottom; white-space: nowrap;
+  font-size: var(--fs-xs); font-weight: var(--fw-regular); padding: var(--sp-12) var(--sp-8);
+}
+.sch-adm-matrix td.sch-adm-cell { text-align: center; padding: var(--sp-8); }
+.sch-adm-matrix td.sch-adm-cell--yes { color: var(--c-state-success); }
+.sch-adm-matrix .sch-adm-group-start { border-left: 2px solid var(--c-border-default); }
+.sch-adm-matrix tbody tr { cursor: default; }
+.sch-adm-legend { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-8) var(--sp-16); margin: 0; font-size: var(--fs-sm); }
+.sch-adm-legend dt { margin: 0; font-weight: var(--fw-medium); }
+.sch-adm-legend dd { margin: 0; color: var(--c-ink-secondary); }
+
+/* ─── реестр сетей и устройств ─── */
+.sch-adm-item {
+  display: flex; align-items: center; gap: var(--sp-12);
+  padding: var(--sp-12) var(--sp-16);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-lg); background: var(--c-surface-card);
+}
+.sch-adm-item-icon {
+  display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; flex: 0 0 auto;
+  border-radius: var(--r-md); background: var(--c-surface-canvas); color: var(--c-ink-secondary);
+}
+.sch-adm-item-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
+.sch-adm-item-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8); }
+.sch-adm-item-sub { font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+.sch-adm-item-actions { display: flex; gap: var(--sp-8); flex: 0 0 auto; }
+
+/* ─── аудит ─── */
+.sch-adm-audit tbody tr { cursor: default; }
+
+/* ─── политики доступа (AR-188) ─── */
+.sch-adm-limits { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: var(--sp-8) var(--sp-16); align-items: center; }
+.sch-adm-limits label { font-size: var(--fs-sm); }
+.sch-adm-limits .sch-input { height: var(--tap-min); }
+.sch-adm-saved { color: var(--c-state-success); font-size: var(--fs-sm); }
+/* Инцидент-режим — один акцент раздела: левая кромка опасности, не заливка. */
+.sch-adm-incident { border-left: 4px solid var(--c-state-danger); }
+
+@media (max-width: 767px) {
+  .sch-adm-cols, .sch-adm-map { grid-template-columns: minmax(0, 1fr); }
+  .sch-adm-kv, .sch-adm-legend { grid-template-columns: minmax(0, 1fr); }
+  .sch-adm-tree { padding-left: var(--sp-12); }
+  .sch-adm-tree > li::before { left: calc(-1 * var(--sp-12)); width: var(--sp-8); }
+  .sch-adm-tree .sch-adm-tree { margin-left: var(--sp-4); }
+  .sch-adm-session-head { flex-direction: column; }
+  .sch-adm-session .sch-btn { width: auto; }
+  .sch-adm-link { flex-direction: column; align-items: stretch; }
+  .sch-adm-link .sch-qr-frame { align-self: center; }
+  .sch-adm-matrix { font-size: var(--fs-xs); }
+  .sch-adm-matrix th:first-child, .sch-adm-matrix td:first-child { max-width: 140px; white-space: normal; }
+  .sch-adm-item { flex-wrap: wrap; }
+  .sch-adm-item-actions { width: 100%; }
+  .sch-adm-item-actions .sch-btn { flex: 1 1 auto; }
+  .sch-adm-limits { grid-template-columns: minmax(0, 1fr); }
+  .sch-adm-limits label { margin-top: var(--sp-8); }
+}
