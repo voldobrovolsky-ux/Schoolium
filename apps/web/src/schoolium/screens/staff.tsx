@@ -19,6 +19,8 @@
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
+  SESSION_CLIENT_LABELS,
+  SESSION_VIA_LABELS,
   ACCESS_PARAMS,
   ROLE_LABELS,
   STAFF_SECTIONS,
@@ -29,7 +31,7 @@ import {
   type StaffCardDto,
 } from "@edustore/shared";
 import { AccountForm, CredentialsBox } from "./account-form";
-import { CLIENT_KIND_LABELS, dateTime, VIA_LABELS } from "./misc";
+import { dateTime } from "./misc";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile, usePolling } from "../hooks";
 import { Avatar, Badge, Button, CopyField, EmptyState, ErrorState, Modal, PopoverOrSheet, Skeletons, StatusDot, Toast, useToast } from "../ui";
@@ -291,7 +293,7 @@ function useLoginLink(cardId: string, onError: (t: string) => void) {
     try {
       setLink(await api.staffLoginLink(cardId));
     } catch (e) {
-      onError(e instanceof SchoolApiError ? e.message : "Не удалось выпустить ссылку");
+      onError(e instanceof SchoolApiError ? e.message : "Не удалось выдать ссылку для входа");
     } finally {
       setBusy(false);
     }
@@ -364,10 +366,10 @@ function ActivitySession({ session }: { session: AdminSessionDto }) {
     <div className="sch-m06-session" data-testid="S-31.activity.session" data-status={session.status}>
       <div className="sch-m06-session-title">
         <strong>{session.deviceHint}</strong>
-        <Badge muted>{CLIENT_KIND_LABELS[session.clientKind]}</Badge>
+        <Badge muted>{SESSION_CLIENT_LABELS[session.clientKind]}</Badge>
       </div>
       <div className="sch-m06-session-meta">
-        <span>{VIA_LABELS[session.via]}</span>
+        <span>{SESSION_VIA_LABELS[session.via]}</span>
         <span>
           {!live ? (
             <>
@@ -395,7 +397,9 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
   const [cur, setCur] = useState(card);
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<"waiting" | "scanned" | "used" | "expired">("waiting");
-  const [registeredName, setRegisteredName] = useState<string | null>(card.name);
+  // Имя регистрации приходит ТОЛЬКО из поллинга: у заполненной, но не
+  // активированной карточки `card.name` уже есть, а «Зарегистрирован» — ещё нет.
+  const [registeredName, setRegisteredName] = useState<string | null>(null);
   const [loginCode, setLoginCode] = useState<{ code: string; expiresAt: string } | null>(null);
   const [addRole, setAddRole] = useState<DOMRect | null>(null);
   const [confirm, setConfirm] = useState<null | "delete" | "deactivate">(null);
@@ -427,8 +431,8 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
       const r = await api.activationStatus(cur.id).catch(() => null);
       if (!r) return;
       setStatus(r.status as typeof status);
+      setRegisteredName(r.registeredName ?? null);
       if (r.registeredName) {
-        setRegisteredName(r.registeredName);
         const fresh = await api.staffCard(cur.id).catch(() => null);
         if (fresh) setCur(fresh);
         onChanged();

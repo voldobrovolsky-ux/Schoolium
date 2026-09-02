@@ -119,7 +119,7 @@ export class AdminCabinetService {
    * по имени. `newNetwork` считается по ВСЕЙ истории человека, поэтому
    * читаются и завершённые сессии, хотя показываются только живые.
    */
-  async devices(): Promise<AdminDeviceMapDto> {
+  async devices(currentSessionId: string | null = null): Promise<AdminDeviceMapDto> {
     const ws = TenantContext.require();
     const now = new Date();
     const [memberships, rows] = await Promise.all([
@@ -137,7 +137,7 @@ export class AdminCabinetService {
       .filter((m) => m.userId !== null)
       .map((m) => {
         const u = users.get(m.userId!);
-        const sessions = sessionsOfUser(byUser.get(m.userId!) ?? [], now)
+        const sessions = sessionsOfUser(byUser.get(m.userId!) ?? [], now, currentSessionId)
           .filter((s) => s.status === 'active')
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
         return {
@@ -171,7 +171,7 @@ export class AdminCabinetService {
    * новые первыми; без `userId` — вся школа, не больше 200 строк (страница
    * читается, а не выгружается).
    */
-  async connections(userId: string | null): Promise<AdminSessionDto[]> {
+  async connections(userId: string | null, currentSessionId: string | null = null): Promise<AdminSessionDto[]> {
     const ws = TenantContext.require();
     const now = new Date();
     const since = journalSince(now);
@@ -184,11 +184,11 @@ export class AdminCabinetService {
         },
       }),
     );
-    if (userId) return sessionsOfUser(rows, now);
+    if (userId) return sessionsOfUser(rows, now, currentSessionId);
     // «новая сеть» — свойство истории человека, поэтому считается по людям
     const byUser = new Map<string, SessionRow[]>();
     for (const r of rows) byUser.set(r.userId, [...(byUser.get(r.userId) ?? []), r]);
-    const all = [...byUser.values()].flatMap((list) => sessionsOfUser(list, now));
+    const all = [...byUser.values()].flatMap((list) => sessionsOfUser(list, now, currentSessionId));
     return all.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 200);
   }
 
@@ -250,11 +250,18 @@ export class AdminCabinetService {
 
   // ─────────────── политика доступа (§11 строка 42; AR-188) ───────────────
 
+  /**
+   * Чтение БЕЗ побочных эффектов: строки политики нет — школа живёт с
+   * дефолтами (лимитов нет, инцидента не было), и ответ собирается из них.
+   * Ленивое `create` здесь уже стреляло: `overview()` и `GET policy` читают
+   * политику параллельно, и второй `create` падал на уникальности
+   * `workspaceId` — 500 при первом открытии кабинета. Строку заводят только
+   * писатели (`setPolicy`, `revokeAll`) — через `upsert`.
+   */
   async policy(): Promise<AccessPolicyDto> {
     const ws = TenantContext.require();
-    const row =
-      (await this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId: ws } })) ??
-      (await this.prisma.schoolAccessPolicy.create({ data: { workspaceId: ws } }));
+    const row = await this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId: ws } });
+    if (!row) return { sessionLimits: {}, incidentAt: null, incidentByName: null, updatedAt: null };
     const by = row.incidentBy ? await this.usersOf([row.incidentBy]) : new Map<string, { name: string }>();
     return {
       sessionLimits: (row.sessionLimits ?? {}) as SessionLimits,

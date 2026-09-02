@@ -10,7 +10,7 @@
  * карточке сотрудника (`S-31`): у сессии одни и те же слова на всех экранах.
  */
 import { useEffect, useRef, useState } from "react";
-import type { AuditEntryDto, SchoolState, SessionClientKind, SessionDto, SessionVia } from "@edustore/shared";
+import { SCHOOL_STATE_LABELS, SESSION_CLIENT_LABELS, SESSION_VIA_LABELS, type AuditEntryDto, type SessionDto } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile } from "../hooks";
 import { Badge, Button, EmptyState, ErrorState, LinkRow, Modal, Skeletons, StatusDot, Toast, useToast } from "../ui";
@@ -23,42 +23,10 @@ import "./misc.css";
 export const dateTime = (iso: string): string =>
   new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-/** Канал входа — словом (AR-187): человек читает «как вошли», а не код контракта. */
-export const VIA_LABELS: Record<SessionVia, string> = {
-  password: "пароль",
-  login_code: "код входа",
-  login_link: "ссылка",
-  device_link: "QR с телефона",
-  registration: "активация",
-  bootstrap_link: "bootstrap",
-  unknown: "неизвестно",
-};
-
-/** Где живёт сессия: установленное приложение или вкладка браузера. */
-export const CLIENT_KIND_LABELS: Record<SessionClientKind, string> = {
-  pwa: "в приложении",
-  browser: "в браузере",
-};
-
-/**
- * Состояние школы — словами (AR-72): бейдж в шапке читает модератор, и
- * `students_filled` ему ни о чём не говорит. Тот же словарь у завуча (`S-61`).
- */
-const STATE_LABELS: Record<SchoolState, string> = {
-  empty: "школа пустая",
-  classes_created: "классы созданы",
-  students_filled: "профили заполнены",
-  subjects_created: "предметы созданы",
-  staff_activated: "персонал активирован",
-  teachers_bound: "педагоги привязаны",
-  terms_set: "четверти заданы",
-  load_set: "нормы заданы",
-  priorities_set: "приоритеты заданы",
-  day_params_set: "параметры дня заданы",
-  generated: "сетка собрана",
-  stale: "сетка устарела",
-  ready: "школа ведёт журнал",
-};
+/** Словари каналов входа, видов клиента и состояний — из общего контракта (П-5). */
+export const VIA_LABELS = SESSION_VIA_LABELS;
+export const CLIENT_KIND_LABELS = SESSION_CLIENT_LABELS;
+const STATE_LABELS = SCHOOL_STATE_LABELS;
 
 // ─────────────────────────── 403 · раздел не для этой роли ───────────────────────────
 
@@ -411,10 +379,10 @@ export function DevicesScreen({ linkToken }: { linkToken?: string } = {}) {
   if (state.status === "loading") return <Skeletons count={3} kind="row" />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
 
-  /* Основной случай — телефон подключает ноутбук (`S-80` mobile): кнопка
-     открывает КАМЕРУ во весь экран (§6), а не поле для ручного ввода кода.
-     На десктопе камера смотрит на человека, а не на чужой экран, поэтому там
-     остаётся ввод кода — тот же разбор, что у `S-70`. */
+  /* Телефон подключает ноутбук (`S-80` mobile): кнопка открывает КАМЕРУ во
+     весь экран (§6), а не поле для ручного ввода кода. На десктопе кнопки нет:
+     экран входа десктопа показывает только QR, кода там нет — вводить нечего,
+     а камера ноутбука смотрит на человека, а не на чужой экран. */
   if (scanning) {
     if (denied) return <CameraDenied testId="S-80.error.denied" />;
     return (
@@ -446,23 +414,16 @@ export function DevicesScreen({ linkToken }: { linkToken?: string } = {}) {
             Сессия — это вход с одного устройства. Завершение сессии выводит это устройство из кабинета.
           </p>
         </div>
-        {/* Кнопка скрыта, если камеры нет: подключать нечем, а неработающая
-            кнопка врёт о возможности (§6). */}
-        {hasCamera() ? (
-          <Button
-            kind="primary"
-            testId="S-80.btn.linkDevice"
-            onClick={() => {
-              if (mobile) return setScanning(true);
-              const raw = window.prompt("Код с экрана входа подключаемого устройства");
-              if (!raw) return;
-              const qr = parseQr(raw) ?? { kind: "link" as const, value: raw.trim() };
-              setPending({ token: qr.value, hint: "новое устройство" });
-            }}
-          >
+        {/* Кнопка только на телефоне с камерой: без камеры подключать нечем, а
+            неработающая кнопка врёт о возможности (§6); на десктопе — одна
+            строка, откуда подключение делается. */}
+        {mobile && hasCamera() ? (
+          <Button kind="primary" testId="S-80.btn.linkDevice" onClick={() => setScanning(true)}>
             Подключить устройство
           </Button>
-        ) : null}
+        ) : mobile ? null : (
+          <p className="sch-muted">Подключить устройство можно с телефона: наведите его камеру на QR с экрана входа</p>
+        )}
       </div>
 
       <div className="sch-list" data-testid="S-80.list.sessions">
@@ -560,7 +521,7 @@ function SessionRow({
               </>
             )}
           </span>
-          <span>вход: {VIA_LABELS[session.via]}</span>
+          <span>{VIA_LABELS[session.via]}</span>
         </div>
       </div>
       {/* Текущую сессию завершить нельзя: это «выйти», и кнопка для этого своя. */}

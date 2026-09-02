@@ -206,7 +206,7 @@ export const AUDIT_LABELS: Record<SchoolEventType, { action: string; object: str
   // 1.3.0: строки аудита кабинета администратора (`S-62.audit`)
   [SCHOOL_EVENTS.loginLinkIssued]: { action: 'выпущена ссылка входа', object: 'сотрудник' },
   [SCHOOL_EVENTS.policySet]: { action: 'изменены лимиты сессий', object: 'политика доступа' },
-  [SCHOOL_EVENTS.registryChanged]: { action: 'изменён реестр сети', object: 'реестр' },
+  [SCHOOL_EVENTS.registryChanged]: { action: 'изменён реестр сети и устройств', object: 'реестр' },
 };
 
 /**

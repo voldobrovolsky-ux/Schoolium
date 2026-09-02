@@ -11,7 +11,7 @@
     "dev:web": "npm --workspace apps/web run dev",
     "dev:api": "npm --workspace apps/api run start:dev",
     "build": "npm --workspace apps/web run build && npm --workspace apps/api run build",
-    "method:lint": "node tools/method/lint-ar.mjs && node tools/method/lint-lenses.mjs && node tools/method/spec-lint.mjs --self-test && node tools/method/spec-lint.mjs && node tools/design/check-contrast.mjs && node tools/method/lint-screens.mjs && node tools/method/lint-agents.mjs && node tools/design/tokens-to-css.mjs --check && node tools/method/check-testids.mjs && node tools/method/check-sw.mjs",
+    "method:lint": "node tools/method/lint-ar.mjs && node tools/method/lint-lenses.mjs && node tools/method/spec-lint.mjs --self-test && node tools/method/spec-lint.mjs && node tools/design/check-contrast.mjs && node tools/method/lint-screens.mjs && node tools/method/lint-agents.mjs && node tools/design/tokens-to-css.mjs --check && node tools/method/check-testids.mjs && node tools/method/check-sw.mjs && node tools/design/check-icons.mjs",
     "ar:lint": "node tools/method/lint-ar.mjs",
     "lenses:lint": "node tools/method/lint-lenses.mjs",
     "spec:lint": "node tools/method/spec-lint.mjs"

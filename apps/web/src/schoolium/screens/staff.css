@@ -10,9 +10,10 @@
 
 .sch-m06-groups { display: flex; flex-direction: column; gap: var(--sp-24); }
 .sch-m06-group { display: flex; flex-direction: column; gap: var(--sp-12); }
-/* `.sch h3` весит больше `.sch-section-title` и вернул бы размер xl: заголовок
-   группы внутри модалки 480px стоит уровнем ниже заголовка самой модалки. */
-.sch-m06-group > .sch-section-title { font-size: var(--fs-lg); margin-bottom: 0; }
+/* С тегом: базовое `.sch h3.sch-section-title` (0,2,1) иначе перебивает
+   `.sch-m06-group > .sch-section-title` (0,2,0) и возвращает нижний отступ —
+   внутри группы зазор задаёт её `gap`. */
+.sch-m06-group > h3.sch-section-title { margin-bottom: 0; }
 /* Три кнопки входа в тело 432px одной строкой не помещаются — ряд переносится,
    а не выталкивает модалку вширь. */
 .sch-m06-group .sch-actions { flex-wrap: wrap; }
@@ -35,4 +36,4 @@
 .sch-m06-session-title { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
 .sch-m06-session-meta { display: flex; gap: var(--sp-12); flex-wrap: wrap; color: var(--c-ink-secondary); }
 /* Завершённая сессия приглушена, но слово «завершена» стоит рядом (AR-80). */
-.sch-m06-session[data-status='ended'] { color: var(--c-ink-muted); }
+.sch-m06-session[data-status='ended'] { color: var(--c-ink-secondary); }

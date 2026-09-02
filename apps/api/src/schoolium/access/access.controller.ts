@@ -8,6 +8,7 @@ import { AuthzService } from '../../common/authz/authz.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { AccessService, type SessionClient } from './access.service';
+import { clientIp } from './client-ip';
 import { SchoolStateService } from '../school-state.service';
 import { SchoolError } from '../schoolium.errors';
 
@@ -25,15 +26,14 @@ const deviceHint = (req: Request): string => {
  * выдающие сессию (входы `v1/auth/*`, активация `staff/join/:token`):
  *   · `clientKind` — заголовок `x-schoolium-client: pwa` ставит установленное
  *     приложение; всё остальное — вкладка браузера;
- *   · `ip` — первый адрес `x-forwarded-for` (за Caddy это адрес клиента), иначе
- *     адрес сокета; обрезан до 45 знаков — длина IPv6 с зоной, а не «сколько
- *     пришлёт прокси».
+ *   · `ip` — из `x-forwarded-for` с конца, отступив `TRUSTED_PROXY_HOPS`
+ *     доверенных прокси (`clientIp`): первый элемент дописывает сам клиент,
+ *     и верить ему нельзя; заголовка нет — адрес сокета. Обрезан до 45
+ *     знаков — длина IPv6 с зоной, а не «сколько пришлёт прокси».
  */
 export function clientOf(req: Request): SessionClient {
   const kind = String(req.headers['x-schoolium-client'] ?? '').trim().toLowerCase();
-  const xff = req.headers['x-forwarded-for'];
-  const forwarded = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() ?? '';
-  const ip = forwarded || req.socket?.remoteAddress || null;
+  const ip = clientIp(req.headers['x-forwarded-for'], req.socket?.remoteAddress);
   return {
     deviceHint: deviceHint(req),
     clientKind: kind === 'pwa' ? 'pwa' : 'browser',

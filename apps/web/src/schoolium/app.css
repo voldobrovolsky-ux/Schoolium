@@ -254,7 +254,9 @@
 
 .sch-sidebar-school {
   display: block; padding: 0 var(--sp-8); margin-top: calc(var(--sp-4) * -1);
-  font-size: var(--fs-xs); color: var(--c-ink-muted);
+  /* Текст, а не UI-элемент: `ink.muted` на белом даёт 3.6:1 — для текста
+     не допускается (G-37), поэтому `ink.secondary`. */
+  font-size: var(--fs-xs); color: var(--c-ink-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sch-user-text { display: flex; flex-direction: column; }
@@ -688,7 +690,9 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-row--between { justify-content: space-between; }
 .sch-stack { display: flex; flex-direction: column; gap: var(--sp-12); }
 .sch-sections { display: flex; flex-direction: column; gap: var(--sp-32); }
-.sch-section-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin-bottom: var(--sp-12); }
+/* Селектор с тегом: `.sch h2` (0,1,1) иначе перебивает класс (0,1,0), и
+   заголовок секции рендерился размером h2 без нижнего отступа. */
+.sch-section-title, .sch h2.sch-section-title, .sch h3.sch-section-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-12); }
 .sch-canvas { background: var(--c-surface-canvas); border-radius: var(--r-lg); padding: var(--sp-20); }
 .sch-inline-avatars { display: flex; gap: calc(var(--sp-4) * -1); }
 .sch-card--link { cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: var(--sp-8); font: inherit; color: inherit; border: 1px solid var(--c-border-default); }
@@ -867,6 +871,9 @@ select.sch-input { padding-right: var(--sp-8); }
   .sch-actions--start { flex-direction: column; }
   /* Чипы и сегменты остаются рядами: это выбор из набора, а не действие. */
   .sch-chips .sch-btn, .sch-markrow .sch-btn { width: auto; }
+  /* Поле «скопировать»: кнопка во всю ширину (§4) вытесняла значение из ряда —
+     на телефоне значение сверху, кнопка под ним. */
+  .sch-copy-row { flex-direction: column; align-items: stretch; }
 
   /* ─── чипы отметки 44px (§3, M-12) ─── */
   .sch-mark--btn { width: var(--tap-min); height: var(--tap-min); }
@@ -883,6 +890,12 @@ select.sch-input { padding-right: var(--sp-8); }
   .sch-field--inline { min-width: 0; }
   .sch-auth-card, .sch-auth-card--wide { width: 100%; }
   .sch-auth { padding: var(--sp-24); justify-content: flex-start; padding-top: var(--sp-40); }
+  /* Ячейки кода — мишень не меньше 44 (§4): при 302px ширины карточки шесть
+     ячеек по 44 помещаются только с зазором 4, а не 8 (6×44 + 5×4 = 284). */
+  .sch-code-cells { gap: var(--sp-4); }
+  .sch-code-cell { min-width: var(--tap-min); }
+  /* Сегменты разделов кабинета — тоже мишени §4. */
+  .sch-subnav-item { min-height: var(--tap-min); }
   .sch-avatar--lg { width: 96px; height: 96px; }               /* S-04 (§6) */
   .sch-qr-frame svg { width: 100%; height: auto; max-width: 240px; }
 
@@ -1024,7 +1037,7 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-landing .sch-hero h1 { font-family: var(--font-display); font-size: clamp(44px, 8vw, 72px); line-height: 1.04; margin: 0; letter-spacing: -0.02em; }
 .sch-hero-accent { background: linear-gradient(90deg, var(--c-brand-violet-600), var(--c-brand-pink-500)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .sch-landing .sch-hero p { margin: 0; font-size: var(--fs-lg); color: var(--c-ink-secondary); letter-spacing: 0.04em; }
-.sch-landing .sch-hero .sch-btn { min-width: 220px; min-height: 52px; font-size: var(--fs-lg); border-radius: var(--r-pill); box-shadow: 0 8px 24px rgba(123,58,237,0.35); }
+.sch-landing .sch-hero .sch-btn { min-width: 220px; min-height: 52px; font-size: var(--fs-lg); border-radius: var(--r-pill); box-shadow: var(--sh-modal); }
 
 .sch-daystrip { display: flex; gap: var(--sp-8); align-items: center; overflow-x: auto; padding-bottom: var(--sp-4); }
 .sch-daychip {
@@ -1034,8 +1047,10 @@ select.sch-input { padding-right: var(--sp-8); }
   font: inherit; cursor: pointer; color: var(--c-ink-primary);
 }
 .sch-daychip small { color: var(--c-ink-muted); font-size: var(--fs-xs); text-transform: capitalize; }
-.sch-daychip--active { background: var(--c-brand-violet-600); border-color: var(--c-brand-violet-600); color: var(--c-ink-on-violet); box-shadow: 0 6px 16px rgba(123,58,237,0.30); }
-.sch-daychip--active small { color: rgba(255,255,255,0.75); }
+.sch-daychip--active { background: var(--c-brand-violet-600); border-color: var(--c-brand-violet-600); color: var(--c-ink-on-violet); box-shadow: var(--sh-card); }
+/* Без `opacity`: полупрозрачный белый на violet-600 опускает контраст ниже 4.5
+   мимо проверки токенов (G-37). */
+.sch-daychip--active small { color: var(--c-ink-on-violet); }
 .sch-weeknav { min-width: var(--tap-min); min-height: 60px; border-radius: var(--r-lg); border: none; background: transparent; color: var(--c-ink-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .sch-weeknav:hover:not(:disabled) { background: var(--c-brand-violet-050); color: var(--c-ink-primary); }
 .sch-weeknav:disabled { opacity: 0.3; cursor: default; }

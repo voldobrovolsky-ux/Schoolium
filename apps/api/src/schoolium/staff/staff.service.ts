@@ -33,7 +33,7 @@ import { AccessService } from '../access/access.service';
 import { JournalContractService } from '../journal/journal.service';
 import { SubjectsContractService } from '../subjects/subjects.service';
 import type { SchoolActor } from '../actor';
-import { journalSince, sessionsOfUser } from '../cabinets/session-view';
+import { journalSince, sessionsOfUser, withoutAddress } from '../cabinets/session-view';
 
 const MIN = 60_000;
 
@@ -573,7 +573,7 @@ export class StaffService {
    * была в сети, сколько устройств живо, и журнал подключений за
    * `sessionJournalDays` — теми же словами, что карта устройств администратора.
    */
-  async activity(cardId: string, origin: string): Promise<StaffActivityDto> {
+  async activity(cardId: string, origin: string, showAddress = false): Promise<StaffActivityDto> {
     const { userId, workspaceId, membership } = await this.registered(cardId);
     const now = new Date();
     const rows = await TenantContext.runAsSystem(() =>
@@ -585,7 +585,7 @@ export class StaffService {
         },
       }),
     );
-    const sessions = sessionsOfUser(rows, now);
+    const sessions = showAddress ? sessionsOfUser(rows, now) : withoutAddress(sessionsOfUser(rows, now));
     const lastSeen = rows.reduce<Date | null>((m, r) => (m === null || r.lastSeenAt > m ? r.lastSeenAt : m), null);
     return {
       userId,

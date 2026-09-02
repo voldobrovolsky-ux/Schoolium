@@ -189,7 +189,7 @@ function AppScreen({
     case "/admin":
     case "/admin/:section":
       return (
-        <Shell active="admin" title="Администрирование">
+        <Shell active="admin" title="Кабинет администратора">
           <AdminScreen section={params.section ?? "overview"} />
         </Shell>
       );

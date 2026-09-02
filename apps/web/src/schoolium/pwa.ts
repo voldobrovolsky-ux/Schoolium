@@ -57,15 +57,27 @@ export function platform(): Platform {
 /** Есть ли отложенное системное предложение установки (Android/Chrome). */
 export const canPromptInstall = (): boolean => deferred !== null;
 
-/** Показать системный диалог установки; `null` — диалога нет, нужна инструкция. */
+/**
+ * Показать системный диалог установки; `null` — диалога нет, нужна инструкция.
+ *
+ * Событие одноразовое: `prompt()` на нём второй раз не сработает, каким бы ни
+ * был ответ. Поэтому оно сбрасывается при ЛЮБОМ исходе (и при ошибке диалога),
+ * иначе «Установить» появлялось бы снова и молчало. Chrome позже пришлёт
+ * новое `beforeinstallprompt`, и модуль перехватит его заново.
+ */
 export async function promptInstall(): Promise<"accepted" | "dismissed" | null> {
   const ev = deferred;
   if (!ev) return null;
-  await ev.prompt();
-  const { outcome } = await ev.userChoice;
-  if (outcome === "accepted") deferred = null;
-  listeners.forEach((l) => l());
-  return outcome;
+  deferred = null;
+  try {
+    await ev.prompt();
+    const { outcome } = await ev.userChoice;
+    return outcome;
+  } catch {
+    return null;
+  } finally {
+    listeners.forEach((l) => l());
+  }
 }
 
 /** Подписка экрана на смену доступности установки. */

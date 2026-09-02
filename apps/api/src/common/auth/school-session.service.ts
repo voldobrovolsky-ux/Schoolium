@@ -8,6 +8,7 @@ import {
   type SessionRevokeReason,
   type SessionVia,
 } from '@edustore/shared';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TenantContext } from '../tenant/tenant-context';
 import { OutboxService } from '../outbox/outbox.service';
@@ -94,23 +95,28 @@ export class SchoolSessionService {
     roles: string[];
     deviceHint?: string;
   } & SessionOrigin): Promise<{ id: string; token: string; expiresAt: Date }> {
-    await this.enforceLimit(args.userId, args.workspaceId, args.roles);
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + ACCESS_PARAMS.sessionDays * DAY_MS);
+    // Вытеснение по лимиту и вставка новой сессии — ОДНА транзакция: два
+    // одновременных входа одного человека иначе оба насчитали бы «место есть»
+    // и оставили бы на одну живую сессию больше лимита.
     const s = await TenantContext.runAsSystem(() =>
-      this.prisma.appSession.create({
-        data: {
-          token,
-          userId: args.userId,
-          workspaceId: args.workspaceId,
-          roles: args.roles,
-          deviceHint: args.deviceHint ?? '',
-          via: args.via,
-          clientKind: args.clientKind ?? 'browser',
-          ip: args.ip ? args.ip.slice(0, 45) : null,
-          parentSessionId: args.parentSessionId ?? null,
-          expiresAt,
-        },
+      this.prisma.$transaction(async (tx) => {
+        await this.enforceLimit(tx, args.userId, args.workspaceId, args.roles);
+        return tx.appSession.create({
+          data: {
+            token,
+            userId: args.userId,
+            workspaceId: args.workspaceId,
+            roles: args.roles,
+            deviceHint: args.deviceHint ?? '',
+            via: args.via,
+            clientKind: args.clientKind ?? 'browser',
+            ip: args.ip ? args.ip.slice(0, 45) : null,
+            parentSessionId: args.parentSessionId ?? null,
+            expiresAt,
+          },
+        });
       }),
     );
     return { id: s.id, token, expiresAt };
@@ -120,41 +126,44 @@ export class SchoolSessionService {
    * Лимит роли из политики школы: наименьший из ненулевых по ролям человека —
    * совмещение ролей не расширяет лимит, а сужает (строже из двух). Политики
    * нет либо лимиты не заданы — поведение прежнее, без потолка.
+   *
+   * Работает ВНУТРИ транзакции выдачи: выдачи одного человека в одной школе
+   * сериализуются advisory-lock'ом (второй вход ждёт, пока первый не вставит
+   * свою строку, и считает уже с ней), а живые строки берутся `FOR UPDATE` —
+   * параллельный отзыв той же сессии не перепишет причину.
    */
-  private async enforceLimit(userId: string, workspaceId: string, roles: string[]): Promise<void> {
-    await TenantContext.runAsSystem(async () => {
-      const policy = await this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId } });
-      const limits = (policy?.sessionLimits ?? {}) as SessionLimits;
-      const applicable = roles
-        .map((r) => limits[r as keyof SessionLimits])
-        .filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0);
-      if (applicable.length === 0) return;
-      const limit = Math.min(...applicable);
-      const live = await this.prisma.appSession.findMany({
-        where: { userId, workspaceId, revokedAt: null, expiresAt: { gt: new Date() } },
-        orderBy: { lastSeenAt: 'asc' },
-      });
-      if (live.length < limit) return;
-      const victims = live.slice(0, live.length - limit + 1);
-      await this.prisma.appSession.updateMany({
-        where: { id: { in: victims.map((v) => v.id) } },
-        data: { revokedAt: new Date(), revokedReason: 'limit' },
-      });
-      // Событие — тем же transactional outbox, что и остальные отзывы (AR-5):
-      // аудит узнаёт о потере сессии из леджера, а не из лога сервера.
-      await this.prisma.$transaction((tx) =>
-        this.outbox.enqueue(
-          tx,
-          newEvent<SessionRevokedV1>({
-            type: SCHOOL_EVENTS.sessionRevoked,
-            workspaceId,
-            actor: userId,
-            payload: { userId, reason: 'limit' },
-          }),
-        ),
-      );
-      this.log.log(`лимит ${limit} сессий: отозвано ${victims.length} (${userId})`);
+  private async enforceLimit(tx: Prisma.TransactionClient, userId: string, workspaceId: string, roles: string[]): Promise<void> {
+    const policy = await tx.schoolAccessPolicy.findUnique({ where: { workspaceId } });
+    const limits = (policy?.sessionLimits ?? {}) as SessionLimits;
+    const applicable = roles
+      .map((r) => limits[r as keyof SessionLimits])
+      .filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0);
+    if (applicable.length === 0) return;
+    const limit = Math.min(...applicable);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${userId}:${workspaceId}`}))`;
+    const live = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "AppSession"
+      WHERE "userId" = ${userId} AND "workspaceId" = ${workspaceId} AND "revokedAt" IS NULL AND "expiresAt" > now()
+      ORDER BY "lastSeenAt" ASC
+      FOR UPDATE`;
+    if (live.length < limit) return;
+    const victims = live.slice(0, live.length - limit + 1);
+    await tx.appSession.updateMany({
+      where: { id: { in: victims.map((v) => v.id) } },
+      data: { revokedAt: new Date(), revokedReason: 'limit' },
     });
+    // Событие — тем же transactional outbox, что и остальные отзывы (AR-5):
+    // аудит узнаёт о потере сессии из леджера, а не из лога сервера.
+    await this.outbox.enqueue(
+      tx,
+      newEvent<SessionRevokedV1>({
+        type: SCHOOL_EVENTS.sessionRevoked,
+        workspaceId,
+        actor: userId,
+        payload: { userId, reason: 'limit' },
+      }),
+    );
+    this.log.log(`лимит ${limit} сессий: отозвано ${victims.length} (${userId})`);
   }
 
   /**

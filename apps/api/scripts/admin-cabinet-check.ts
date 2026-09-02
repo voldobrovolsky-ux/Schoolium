@@ -14,7 +14,9 @@
  *   · реестры сети и устройств изолированы по школе (G-82) и аудируются;
  *   · чек-лист завуча выведен из данных: пустая школа — всё не готово,
  *     работающая — УТЦ закрыт (AR-193);
- *   · «новая сеть» — первая сессия из этой /24 в истории человека;
+ *   · «новая сеть» — первая сессия из этой /24 (IPv6: /64, сжатый адрес
+ *     раскрыт) в истории человека; адрес клиента — из `X-Forwarded-For` с
+ *     конца, отступив доверенные хопы (подмена первого элемента не проходит);
  *   · журнал подключений чистится по сроку `sessionJournalDays` (AR-194).
  *
  * Запуск: npm --workspace apps/api run admin:check
@@ -33,6 +35,8 @@ import { StaffService } from '../src/schoolium/staff/staff.service';
 import { AdminCabinetService } from '../src/schoolium/cabinets/admin-cabinet.service';
 import { DeputyCabinetService } from '../src/schoolium/cabinets/deputy-cabinet.service';
 import { SCHOOL_EVENTS } from '../src/schoolium/schoolium.contract';
+import { clientIp } from '../src/schoolium/access/client-ip';
+import { networkOf, sessionsOfUser, type SessionRow } from '../src/schoolium/cabinets/session-view';
 import { bench, bootstrapSchool, check, inSchool, makeStaff, readySchool, refuses, report } from './schoolium/harness';
 
 const MUTATIONS = new Set([RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE]);
@@ -70,7 +74,7 @@ async function main(): Promise<void> {
     for (const [, w] of m.controllers) {
       const ctor = w.metatype as (new () => unknown) | undefined;
       if (!ctor) continue;
-      if (!['AdminCabinetController', 'DeputyCabinetController', 'ModeratorCabinetController'].includes(ctor.name)) continue;
+      if (!['AdminCabinetController', 'DeputyCabinetController', 'ModeratorCabinetController', 'StaffController'].includes(ctor.name)) continue;
       const base = String(Reflect.getMetadata(PATH_METADATA, ctor) ?? '');
       const proto = ctor.prototype as Record<string, unknown>;
       for (const name of Object.getOwnPropertyNames(proto)) {
@@ -97,8 +101,9 @@ async function main(): Promise<void> {
   const modRoutes = routes.filter((r) => r.ctrl === 'ModeratorCabinetController');
   check(modRoutes.length === 1 && modRoutes[0].route === '/v1/moderator/' && modRoutes[0].perm === 'school.manage',
     'кабинет модератора переехал на /v1/moderator за school.manage — прежний /v1/admin отдан администратору (AR-186)');
-  const loginLinkRoute = routes.find((r) => r.route === '/v1/staff/:id/login-link');
-  check(loginLinkRoute === undefined || loginLinkRoute.perm === 'school.admin', 'маршрут ссылки входа не в перечне кабинетов — проверяется ниже по факту');
+  const loginLinkRoute = routes.find((r) => r.ctrl === 'StaffController' && r.route === '/v1/staff/:id/login-link' && r.method === RequestMethod.POST);
+  check(loginLinkRoute !== undefined && loginLinkRoute.perm === 'school.admin',
+    `ссылка входа с карточки — POST /v1/staff/:id/login-link в StaffController за school.admin (найдено: ${loginLinkRoute?.perm ?? 'маршрута нет'}), модератору закрыта (AR-189)`);
 
   // ─── 3. ссылка входа с карточки (AR-189) ───
   const a = await bootstrapSchool(b, 'Школа администратора');
@@ -217,7 +222,7 @@ async function main(): Promise<void> {
   check(registryAuditB === 0, 'в аудите школы Б реестровых записей нет');
   const audit = await inSchool(a.workspaceId, () => admin.audit());
   const registryRows = audit.filter((e) => e.action === SCHOOL_EVENTS.registryChanged);
-  check(registryRows.length === 5 && registryRows.every((e) => e.actorName === 'Петрова А. В.' && e.actionLabel === 'изменён реестр сети'),
+  check(registryRows.length === 5 && registryRows.every((e) => e.actorName === 'Петрова А. В.' && e.actionLabel === 'изменён реестр сети и устройств'),
     'аудит школы в кабинете называет действующего и действие словами (AR-116)');
 
   // ─── 8. обзор ───
@@ -258,6 +263,24 @@ async function main(): Promise<void> {
   check(node !== undefined && node.sessions.length === 2 && node.sessions.map((s) => `${s.ip}:${s.newNetwork}`).join(' ') === '192.168.1.11:false 10.0.0.5:true',
     `карта устройств: живых сессий ${node?.sessions.length} (лимит роли), признак «новая сеть» выведен из истории, включая погашенную`);
   check(map.users[0]?.roles.some((r) => r !== 'student' && r !== 'parent') === true, 'персонал в карте впереди');
+  // IPv6: «сеть» — первые четыре группы РАСКРЫТОГО адреса (/64); сжатый `::`
+  // не должен ронять разбиение — 2001:db8::1 и 2001:db8::2 одна сеть.
+  const v6row = (id: string, ip: string, offsetMin: number): SessionRow => ({
+    id, userId: 'u6', deviceHint: ip, via: 'password', clientKind: 'browser', ip, parentSessionId: null,
+    createdAt: new Date(Date.now() - (10 - offsetMin) * 60_000), lastSeenAt: new Date(), expiresAt: new Date(Date.now() + DAY), revokedAt: null, revokedReason: null,
+  });
+  const v6 = sessionsOfUser([v6row('s1', '2001:db8::1', 0), v6row('s2', '2001:db8::2', 1), v6row('s3', '2001:db9::1', 2)], new Date());
+  check(v6.map((s) => `${s.ip}:${s.newNetwork}`).join(' ') === '2001:db9::1:true 2001:db8::2:false 2001:db8::1:true',
+    `IPv6 /64: ${v6.map((s) => `${s.ip}${s.newNetwork ? ' — новая сеть' : ''}`).reverse().join('; ')}`);
+  check(networkOf('2001:0DB8:0:0:0:0:0:7%eth0') === networkOf('2001:db8::7') && networkOf('2001:db8::7') === '2001:db8:0:0',
+    `полный, сжатый и с зоной IPv6-адрес дают одну сеть: ${networkOf('2001:db8::7')}`);
+
+  // Адрес клиента за прокси (AR-187): первый элемент X-Forwarded-For дописывает
+  // сам клиент — верить можно только хвосту за доверенными хопами.
+  check(clientIp('8.8.8.8, 203.0.113.9, 172.18.0.5', '172.18.0.2', 2) === '203.0.113.9',
+    'подмена первого элемента X-Forwarded-For не проходит: за 2 доверенными хопами (Caddy + nginx) виден реальный клиент 203.0.113.9');
+  check(clientIp(undefined, '10.9.8.7', 2) === '10.9.8.7', 'заголовка нет — адрес сокета');
+  check(clientIp('203.0.113.9', '172.18.0.2', 5) === '203.0.113.9', 'хопов больше, чем элементов, — первый элемент (все прокси доверены)');
 
   // ─── 11. чистка журнала подключений (AR-194) ───
   const old = await sys(() =>

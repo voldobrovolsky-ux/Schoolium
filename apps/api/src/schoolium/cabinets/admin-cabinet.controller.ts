@@ -27,15 +27,15 @@ export class AdminCabinetController {
   /** `S-62.map.devices`: люди школы и их живые сессии (AR-187). */
   @RequirePermission('school.admin')
   @Get('devices')
-  devices() {
-    return this.svc.devices();
+  devices(@Req() req: Req0) {
+    return this.svc.devices(req.sessionId ?? null);
   }
 
   /** `S-62.list.connections`: журнал подключений — человека либо всей школы. */
   @RequirePermission('school.admin')
   @Get('connections')
-  connections(@Query('userId') userId?: string) {
-    return this.svc.connections(userId?.trim() || null);
+  connections(@Req() req: Req0, @Query('userId') userId?: string) {
+    return this.svc.connections(userId?.trim() || null, req.sessionId ?? null);
   }
 
   /** §11 строка 40 · адресный отзыв сессии из карты устройств. */

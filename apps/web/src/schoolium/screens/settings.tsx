@@ -27,7 +27,7 @@ import "./settings.css";
  * Версия ПРОДУКТА, а не пакета: `apps/web/package.json` остаётся 0.1.0 внутри
  * монорепо, а человеку в «о приложении» нужен релиз, о котором говорит школа.
  */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
 
 // ─────────────────────────── S-82 · настройки ───────────────────────────
 
@@ -94,7 +94,9 @@ export function SettingsScreen() {
         </div>
 
         <p className="sch-muted sch-set-about" data-testid="S-82.about">
-          Schoolium {APP_VERSION} · {isStandalone() ? "открыто в приложении" : "открыто в браузере"}
+          <span>Schoolium {APP_VERSION}</span>
+          <br />
+          <span>{isStandalone() ? "открыто в приложении" : "открыто в браузере"}</span>
         </p>
       </div>
 
@@ -150,7 +152,7 @@ export function AppInstallScreen() {
           Как установить
         </Button>
       )}
-      {outcome === "accepted" ? <p className="sch-muted">Приложение устанавливается. Откройте его с экрана «Домой».</p> : null}
+      {outcome === "accepted" ? <p className="sch-muted">Приложение устанавливается. Откройте его с главного экрана.</p> : null}
       {outcome === "dismissed" ? <p className="sch-muted">Установка отменена. Ниже — как установить вручную.</p> : null}
       {!installed && androidOpen ? (
         <ol className="sch-set-steps" data-testid="S-81.steps.android">

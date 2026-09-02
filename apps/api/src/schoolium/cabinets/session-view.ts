@@ -35,8 +35,25 @@ export function networkOf(ip: string | null): string | null {
   if (!ip) return null;
   const v4 = ip.match(/(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/);
   if (v4) return `${v4[1]}.${v4[2]}.${v4[3]}`;
-  if (ip.includes(':')) return ip.split('%')[0].split(':').slice(0, 4).join(':');
+  if (ip.includes(':')) return expandV6(ip).slice(0, 4).join(':');
   return ip;
+}
+
+/**
+ * IPv6 в восемь групп: `::` раскрывается нулями, ведущие нули групп и зона
+ * (`%eth0`) снимаются, регистр — нижний. Без этого `2001:db8::1` и
+ * `2001:db8::2` разбивались бы на разные «сети»: у сжатого адреса первые
+ * четыре куска — не первые четыре группы.
+ */
+function expandV6(ip: string): string[] {
+  const bare = ip.split('%')[0].toLowerCase();
+  const norm = (g: string): string => (/^[0-9a-f]{1,4}$/.test(g) ? Number.parseInt(g, 16).toString(16) : g);
+  const [head, tail] = bare.split('::');
+  const left = head ? head.split(':').map(norm) : [];
+  const right = tail ? tail.split(':').map(norm) : [];
+  if (tail === undefined) return left;
+  const zeros = Math.max(0, 8 - left.length - right.length);
+  return [...left, ...Array<string>(zeros).fill('0'), ...right];
 }
 
 /**
@@ -46,7 +63,7 @@ export function networkOf(ip: string | null): string | null {
  * истории объявили бы «новой сетью» любой первый вход после чистки журнала.
  * Возвращаются самые новые первыми.
  */
-export function sessionsOfUser(rows: SessionRow[], now: Date): AdminSessionDto[] {
+export function sessionsOfUser(rows: SessionRow[], now: Date, currentSessionId: string | null = null): AdminSessionDto[] {
   const asc = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const seen = new Set<string>();
   const out: AdminSessionDto[] = [];
@@ -54,12 +71,21 @@ export function sessionsOfUser(rows: SessionRow[], now: Date): AdminSessionDto[]
     const net = networkOf(s.ip);
     const newNetwork = net !== null && !seen.has(net);
     if (net) seen.add(net);
-    out.push(toAdminSession(s, now, newNetwork));
+    out.push(toAdminSession(s, now, newNetwork, s.id === currentSessionId));
   }
   return out.reverse();
 }
 
-export function toAdminSession(s: SessionRow, now: Date, newNetwork: boolean): AdminSessionDto {
+/**
+ * Адрес входа виден только администратору (AR-194): карточка `M-06` открыта и
+ * модератору (`staff.manage`), поэтому её проекция стирает `ip` и признак
+ * «новая сеть», который из адреса выведен.
+ */
+export function withoutAddress(list: AdminSessionDto[]): AdminSessionDto[] {
+  return list.map((s) => ({ ...s, ip: null, newNetwork: false }));
+}
+
+export function toAdminSession(s: SessionRow, now: Date, newNetwork: boolean, current = false): AdminSessionDto {
   return {
     id: s.id,
     userId: s.userId,
@@ -68,6 +94,7 @@ export function toAdminSession(s: SessionRow, now: Date, newNetwork: boolean): A
     clientKind: s.clientKind as AdminSessionDto['clientKind'],
     ip: s.ip,
     newNetwork,
+    current,
     parentSessionId: s.parentSessionId,
     createdAt: s.createdAt.toISOString(),
     lastSeenAt: s.lastSeenAt.toISOString(),

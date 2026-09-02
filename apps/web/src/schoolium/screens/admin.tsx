@@ -14,6 +14,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
+  SCHOOL_STATE_LABELS,
+  SESSION_CLIENT_LABELS,
+  SESSION_REVOKE_REASON_LABELS,
+  SESSION_VIA_LABELS,
   ASSET_KINDS,
   ASSET_KIND_LABELS,
   MUTATION_PERMISSIONS,
@@ -69,27 +73,19 @@ import "./admin.css";
 const dateTime = (iso: string): string =>
   new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-/** Канал входа — словом (AR-187): администратор читает «как вошли», а не код. */
-const VIA_LABELS: Record<SessionVia, string> = {
-  password: "пароль",
-  login_code: "код",
-  login_link: "ссылка",
-  device_link: "QR с телефона",
-  registration: "активация",
-  bootstrap_link: "bootstrap",
-  unknown: "канал не записан",
+/** Согласование с числом: «1 сессия», «2 сессии», «5 сессий» (§ UI-copy). */
+const plural = (n: number, one: string, few: string, many: string): string => {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
 };
 
-/** Чем закончилась сессия — тоже словом; `null` у завершённой значит «истекла». */
-const REVOKE_LABELS: Record<SessionRevokeReason, string> = {
-  manual: "завершена владельцем",
-  admin: "завершена администратором",
-  deactivated: "учётка деактивирована",
-  deleted: "учётка удалена",
-  activation_revoked: "активация отозвана",
-  incident: "инцидент-режим",
-  limit: "лимит сессий",
-};
+/** Словари каналов входа и причин завершения — из общего контракта (П-5). */
+const VIA_LABELS = SESSION_VIA_LABELS;
+const REVOKE_LABELS = SESSION_REVOKE_REASON_LABELS;
 
 const SECTION_ITEMS: { key: AdminSection; label: string; icon: IconName }[] = [
   { key: "overview", label: "Обзор", icon: "dashboard" },
@@ -167,7 +163,7 @@ function OverviewSection() {
         <div className="sch-card sch-stack" data-testid="S-62.overview.school">
           <div className="sch-row sch-row--between">
             <span className="sch-card-title">{o.schoolName}</span>
-            <Badge muted>{o.state}</Badge>
+            <Badge muted>{SCHOOL_STATE_LABELS[o.state]}</Badge>
           </div>
           <dl className="sch-adm-kv">
             <dt>Часовой пояс</dt>
@@ -375,7 +371,7 @@ function UserNode({
               try {
                 onLink(await api.staffLoginLink(cardId));
               } catch (e) {
-                onError(failText(e, "Не удалось выдать ссылку входа"));
+                onError(failText(e, "Не удалось выдать ссылку для входа"));
               } finally {
                 setGranting(false);
               }
@@ -389,7 +385,7 @@ function UserNode({
       {link ? (
         <div className="sch-adm-link" data-testid="S-62.devices.link">
           <div className="sch-stack">
-            <CopyField label="Ссылка входа" value={`${window.location.origin}/bootstrap/${link.token}`} />
+            <CopyField label="Ссылка для входа" value={`${window.location.origin}/bootstrap/${link.token}`} />
             <span className="sch-muted">действует до {dateTime(link.expiresAt)}</span>
           </div>
           <div className="sch-qr-frame">
@@ -425,12 +421,12 @@ function SessionNode({
       <div className="sch-adm-session-head">
         <div className="sch-adm-session-title">
           <span>{session.deviceHint}</span>
-          <Badge muted>{session.clientKind === "pwa" ? "в приложении" : "в браузере"}</Badge>
+          <Badge muted>{SESSION_CLIENT_LABELS[session.clientKind]}</Badge>
           {session.newNetwork ? <Badge tone="warning">новая сеть</Badge> : null}
         </div>
         {/* Завершить можно только живую сессию: у завершённой кнопки нет,
             а не «серая» — нечего завершать (§4). */}
-        {live ? (
+        {live && !session.current ? (
           <Button
             kind="danger"
             testId="S-62.devices.btn.revoke"
@@ -482,17 +478,19 @@ function ConnectionsModal({ user, onClose }: { user: AdminDeviceUserDto; onClose
   const [state, reload] = useAsync(() => api.adminConnections(user.userId), [user.userId]);
   return (
     <Modal title={`Подключения: ${user.name}`} width={640} onClose={onClose} testId="M-29" mobile="fullscreen">
-      {state.status === "loading" ? <Skeletons count={3} kind="row" /> : null}
-      {state.status === "error" ? <ErrorState message={state.message} onRetry={reload} /> : null}
-      {state.status === "ready" ? (
-        <div className="sch-list--rows" data-testid="M-29.list">
-          {state.data.length === 0 ? <p className="sch-muted">Подключений не было</p> : null}
-          {state.data.map((s) => (
+      {/* Контейнер списка стоит во всех трёх состояниях: реестр называет список,
+          а не строки, и читатель (смок, человек) находит его сразу, не дожидаясь ответа. */}
+      <div className="sch-list--rows" data-testid="M-29.list" data-state={state.status}>
+        {state.status === "loading" ? <Skeletons count={3} kind="row" /> : null}
+        {state.status === "error" ? <ErrorState message={state.message} onRetry={reload} /> : null}
+        {state.status === "ready" && state.data.length === 0 ? <p className="sch-muted">Подключений не было</p> : null}
+        {state.status === "ready"
+          ? state.data.map((s) => (
             <div key={s.id} className="sch-adm-session" data-status={s.status}>
               <div className="sch-adm-session-title">
                 <span>{dateTime(s.createdAt)}</span>
                 <span>{s.deviceHint}</span>
-                <Badge muted>{s.clientKind === "pwa" ? "в приложении" : "в браузере"}</Badge>
+                <Badge muted>{SESSION_CLIENT_LABELS[s.clientKind]}</Badge>
               </div>
               <div className="sch-adm-session-meta">
                 <span>{VIA_LABELS[s.via]}</span>
@@ -513,9 +511,9 @@ function ConnectionsModal({ user, onClose }: { user: AdminDeviceUserDto; onClose
                 </span>
               </div>
             </div>
-          ))}
-        </div>
-      ) : null}
+          ))
+          : null}
+      </div>
     </Modal>
   );
 }
@@ -530,11 +528,37 @@ const PERMISSION_GROUPS: { label: string; codes: readonly SchoolPermission[] }[]
 ];
 
 function RolesSection() {
+  const mobile = useIsMobile();
   return (
     <div className="sch-adm-section">
       <p className="sch-adm-hint">
         Матрица собрана из пакета прав в коде и здесь только читается: право роли меняется решением, а не кнопкой.
       </p>
+      {/* На мобайле — карточка на роль, а не таблица (§6): семнадцать колонок
+          на 390px читаются только скроллом, а карточка перечисляет права роли
+          по тем же группам. Контейнер тот же — реестр называет матрицу. */}
+      {mobile ? (
+        <div className="sch-list" data-testid="S-62.roles.matrix">
+          {SCHOOL_ROLES.map((role) => {
+            const groups = PERMISSION_GROUPS.map((g) => ({
+              label: g.label,
+              codes: g.codes.filter((code) => ROLE_PERMISSIONS[role].includes(code)),
+            })).filter((g) => g.codes.length > 0);
+            return (
+              <div key={role} className="sch-card sch-adm-role">
+                <div className="sch-card-title">{ROLE_LABELS[role]}</div>
+                {groups.length === 0 ? <span className="sch-muted">прав нет</span> : null}
+                {groups.map((g) => (
+                  <div key={g.label} className="sch-adm-role-group">
+                    <span className="sch-adm-role-group-label">{g.label}</span>
+                    <span className="sch-adm-role-codes">{g.codes.join(", ")}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
       <div className="sch-tablewrap">
         <table className="sch-table sch-adm-matrix" data-testid="S-62.roles.matrix">
           <thead>
@@ -550,7 +574,8 @@ function RolesSection() {
               {PERMISSION_GROUPS.flatMap((g) =>
                 g.codes.map((code, i) => (
                   <th key={code} className={i === 0 ? "sch-adm-perm sch-adm-group-start" : "sch-adm-perm"}>
-                    {code}
+                    {/* Поворачивается внутренний span, а не th: рамка группы остаётся на неповёрнутой ячейке. */}
+                    <span>{code}</span>
                   </th>
                 )),
               )}
@@ -579,6 +604,7 @@ function RolesSection() {
           </tbody>
         </table>
       </div>
+      )}
       <dl className="sch-adm-legend" data-testid="S-62.roles.legend">
         <dt>school.admin</dt>
         <dd>кабинет администратора: сеть, устройства, права, аудит, политики</dd>
@@ -766,7 +792,7 @@ function NetworkSection() {
         >
           <p>
             {del.kind === "network"
-              ? `Удалить сеть «${del.record.ssid}» из реестра?`
+              ? `Удалить сеть «${del.record.ssid}» из реестра? Устройства, привязанные к ней, останутся в реестре без сети.`
               : `Удалить устройство «${del.record.name}» из реестра?`}
           </p>
         </Modal>
@@ -996,6 +1022,13 @@ function PolicySection() {
     const [policy, overview] = await Promise.all([api.adminPolicy(), api.adminOverview()]);
     return { policy, overview };
   });
+  /* После инцидента данные перечитываются ТИХО (patch, без `status: "loading"`):
+     `reload` размонтировал бы PolicyBody скелетонами вместе со строкой
+     «Закрыто N сессий…», ради которой инцидент и подтверждали. */
+  const refresh = async () => {
+    const [policy, overview] = await Promise.all([api.adminPolicy(), api.adminOverview()]);
+    patch({ policy, overview });
+  };
   if (state.status === "loading") return <Skeletons count={3} kind="row" />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
   return (
@@ -1003,7 +1036,7 @@ function PolicySection() {
       policy={state.data.policy}
       overview={state.data.overview}
       onPolicy={(policy) => patch({ policy, overview: state.data.overview })}
-      onIncident={reload}
+      onIncident={refresh}
     />
   );
 }
@@ -1017,7 +1050,7 @@ function PolicyBody({
   policy: AccessPolicyDto;
   overview: AdminOverviewDto;
   onPolicy: (p: AccessPolicyDto) => void;
-  onIncident: () => void;
+  onIncident: () => Promise<void>;
 }) {
   const [form, setForm] = useState<Record<SchoolRole, string>>(() => limitsToForm(policy.sessionLimits));
   const [saving, setSaving] = useState(false);
@@ -1026,6 +1059,9 @@ function PolicyBody({
   const [confirm, setConfirm] = useState(false);
   const [incidentBusy, setIncidentBusy] = useState(false);
   const [incidentResult, setIncidentResult] = useState<IncidentResultDto | null>(null);
+  const [incidentError, setIncidentError] = useState<string | null>(null);
+  /* Живых сессий, кроме этой: ноль — закрывать нечего, кнопка выключена словами (§4). */
+  const others = Math.max(0, overview.activeSessions - 1);
 
   useEffect(() => {
     if (!saved) return;
@@ -1095,11 +1131,18 @@ function PolicyBody({
         </span>
         {incidentResult ? (
           <span className="sch-success-text">
-            Закрыто {incidentResult.revoked} сессий у {incidentResult.users} человек
+            Закрыто {incidentResult.revoked} {plural(incidentResult.revoked, "сессия", "сессии", "сессий")} у{" "}
+            {incidentResult.users} {plural(incidentResult.users, "человека", "человека", "человек")}
+          </span>
+        ) : null}
+        {others === 0 ? <span className="sch-muted">Кроме этой, живых сессий нет</span> : null}
+        {incidentError ? (
+          <span className="sch-field-error" role="alert">
+            {incidentError}
           </span>
         ) : null}
         <div className="sch-actions sch-actions--start">
-          <Button kind="danger" testId="S-62.policy.btn.incident" onClick={() => setConfirm(true)}>
+          <Button kind="danger" testId="S-62.policy.btn.incident" disabled={others === 0} onClick={() => setConfirm(true)}>
             Закрыть все сессии школы
           </Button>
         </div>
@@ -1127,11 +1170,15 @@ function PolicyBody({
                   try {
                     const r = await api.adminIncident();
                     setIncidentResult(r);
+                    setIncidentError(null);
                     setConfirm(false);
-                    onIncident();
+                    /* Сессии уже закрыты: отказ тихого перечитывания строку
+                       результата не прячет — счётчики догонят при следующем
+                       обновлении, а сам отказ здесь никому не нужен словами. */
+                    await onIncident().catch(() => undefined);
                   } catch (e) {
                     setConfirm(false);
-                    setError(failText(e, "Не удалось закрыть сессии"));
+                    setIncidentError(failText(e, "Не удалось закрыть сессии"));
                   } finally {
                     setIncidentBusy(false);
                   }
@@ -1143,7 +1190,7 @@ function PolicyBody({
           }
         >
           <p data-testid="M-28.text">
-            Закрыть все {overview.activeSessions} живых сессий школы? Ваша текущая останется. Люди войдут заново по QR, коду или паролю.
+            Закрыть {others} {plural(others, "живую сессию", "живые сессии", "живых сессий")} школы, кроме этой? Люди войдут заново по QR, коду или паролю.
           </p>
         </Modal>
       ) : null}

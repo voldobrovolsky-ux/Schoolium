@@ -12,7 +12,8 @@
 
 .sch-adm-section { display: flex; flex-direction: column; gap: var(--sp-24); }
 .sch-adm-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12); flex-wrap: wrap; }
-.sch-adm-head .sch-section-title { margin-bottom: 0; }
+/* С тегом: базовое `.sch h2.sch-section-title` (0,2,1) иначе перебивает отступ. */
+.sch-adm-head h2.sch-section-title, .sch-adm-head h3.sch-section-title { margin: 0; }
 .sch-adm-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-16); align-items: start; }
 .sch-adm-kv { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-4) var(--sp-16); font-size: var(--fs-sm); }
 .sch-adm-kv dt { color: var(--c-ink-secondary); margin: 0; }
@@ -26,27 +27,37 @@
    ширина ничего не кодирует, кодирует вложенность. */
 .sch-adm-map { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-16); align-items: start; }
 .sch-adm-user { display: flex; flex-direction: column; gap: var(--sp-12); min-width: 0; }
-.sch-adm-user[data-deactivated] .sch-adm-user-head { color: var(--c-ink-muted); }
+.sch-adm-user[data-deactivated] .sch-adm-user-head { color: var(--c-ink-secondary); }
 .sch-adm-user-head { display: flex; align-items: center; gap: var(--sp-12); min-width: 0; }
 .sch-adm-user-text { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; flex: 1 1 auto; }
 .sch-adm-user-name { font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sch-adm-user-roles { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
 .sch-adm-user-foot { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
 
+/* Каждый пункт — сетка «желоб + узел»: желоб одной ширины на любом уровне,
+   поэтому колонка узла на любом уровне тоже одна (реестр S-62: ширина узла
+   ничего не кодирует). Линии рисуются псевдоэлементами внутри желоба:
+   вертикаль дерева — у `ul`, засечка к узлу — у `li`. */
 .sch-adm-tree {
-  list-style: none; margin: 0; padding: 0 0 0 var(--sp-16);
-  border-left: 2px solid var(--c-border-default);
+  --adm-gutter: var(--sp-20); --adm-line: 0px;
+  list-style: none; margin: 0; padding: 0; position: relative;
   display: flex; flex-direction: column; gap: var(--sp-8);
 }
-.sch-adm-tree > li { position: relative; min-width: 0; }
+.sch-adm-tree::before {
+  content: ""; position: absolute; left: var(--adm-line); top: 0; bottom: 0;
+  width: 2px; background: var(--c-border-default);
+}
+.sch-adm-tree > li { position: relative; min-width: 0; display: grid; grid-template-columns: var(--adm-gutter) minmax(0, 1fr); }
+.sch-adm-tree > li > .sch-adm-session { grid-column: 2; }
 /* Короткая горизонтальная засечка от вертикали к узлу — та самая «линия». */
 .sch-adm-tree > li::before {
-  content: ""; position: absolute; left: calc(-1 * var(--sp-16)); top: 24px;
-  width: var(--sp-12); height: 2px; background: var(--c-border-default);
+  content: ""; position: absolute; left: var(--adm-line); top: 24px;
+  width: calc(var(--adm-gutter) - var(--adm-line)); height: 2px; background: var(--c-border-default);
 }
-/* Вложенное дерево начинается под родительским узлом: его вертикаль идёт от
-   сессии телефона, а не от человека — так и читается «выдана сканом». */
-.sch-adm-tree .sch-adm-tree { margin-top: var(--sp-8); margin-left: var(--sp-12); }
+/* Вложенное дерево занимает обе колонки родительского пункта — его узлы встают
+   в ту же колонку, что и родитель, — а своя вертикаль идёт внутри желоба
+   правее родительской, от сессии телефона: так и читается «выдана сканом». */
+.sch-adm-tree .sch-adm-tree { grid-column: 1 / -1; margin-top: var(--sp-8); --adm-line: calc(var(--adm-gutter) / 2); }
 
 .sch-adm-session {
   width: 100%; box-sizing: border-box;
@@ -54,7 +65,8 @@
   padding: var(--sp-12); border: 1px solid var(--c-border-default); border-radius: var(--r-md);
   background: var(--c-surface-canvas);
 }
-.sch-adm-session[data-status="ended"] { background: var(--c-state-disabled-bg); color: var(--c-ink-muted); }
+/* Завершённая: заливка остаётся, текст — вторичный, а не приглушённый (4.5:1 на заливке, G-37). */
+.sch-adm-session[data-status="ended"] { background: var(--c-state-disabled-bg); color: var(--c-ink-secondary); }
 /* Первый вход из новой сети — единственный акцент карты: пунктир предупреждения. */
 .sch-adm-session[data-new-network] { border: 1px dashed var(--c-state-warning); }
 .sch-adm-session-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-8); }
@@ -77,9 +89,13 @@
 /* Код права стоит вертикально: семнадцать колонок с горизонтальными подписями
    растянули бы таблицу втрое, а вертикаль читается и на 390px. */
 .sch-adm-matrix thead .sch-adm-perm {
-  writing-mode: vertical-rl; transform: rotate(180deg);
-  text-align: left; vertical-align: bottom; white-space: nowrap;
+  text-align: center; vertical-align: bottom;
   font-size: var(--fs-xs); font-weight: var(--fw-regular); padding: var(--sp-12) var(--sp-8);
+}
+/* Поворачивается внутренний span, а не сама ячейка: рамка группы
+   (`.sch-adm-group-start`) остаётся на неповёрнутой левой кромке th. */
+.sch-adm-matrix thead .sch-adm-perm > span {
+  display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap;
 }
 .sch-adm-matrix td.sch-adm-cell { text-align: center; padding: var(--sp-8); }
 .sch-adm-matrix td.sch-adm-cell--yes { color: var(--c-state-success); }
@@ -88,6 +104,11 @@
 .sch-adm-legend { display: grid; grid-template-columns: max-content 1fr; gap: var(--sp-8) var(--sp-16); margin: 0; font-size: var(--fs-sm); }
 .sch-adm-legend dt { margin: 0; font-weight: var(--fw-medium); }
 .sch-adm-legend dd { margin: 0; color: var(--c-ink-secondary); }
+/* Мобайл: карточка на роль — права по тем же группам, что колонки матрицы. */
+.sch-adm-role { display: flex; flex-direction: column; gap: var(--sp-8); }
+.sch-adm-role-group { display: flex; flex-direction: column; gap: var(--sp-4); font-size: var(--fs-sm); }
+.sch-adm-role-group-label { color: var(--c-ink-secondary); font-size: var(--fs-xs); }
+.sch-adm-role-codes { overflow-wrap: anywhere; }
 
 /* ─── реестр сетей и устройств ─── */
 .sch-adm-item {
@@ -110,7 +131,6 @@
 /* ─── политики доступа (AR-188) ─── */
 .sch-adm-limits { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: var(--sp-8) var(--sp-16); align-items: center; }
 .sch-adm-limits label { font-size: var(--fs-sm); }
-.sch-adm-limits .sch-input { height: var(--tap-min); }
 .sch-adm-saved { color: var(--c-state-success); font-size: var(--fs-sm); }
 /* Инцидент-режим — один акцент раздела: левая кромка опасности, не заливка. */
 .sch-adm-incident { border-left: 4px solid var(--c-state-danger); }
@@ -118,9 +138,7 @@
 @media (max-width: 767px) {
   .sch-adm-cols, .sch-adm-map { grid-template-columns: minmax(0, 1fr); }
   .sch-adm-kv, .sch-adm-legend { grid-template-columns: minmax(0, 1fr); }
-  .sch-adm-tree { padding-left: var(--sp-12); }
-  .sch-adm-tree > li::before { left: calc(-1 * var(--sp-12)); width: var(--sp-8); }
-  .sch-adm-tree .sch-adm-tree { margin-left: var(--sp-4); }
+  .sch-adm-tree { --adm-gutter: var(--sp-16); }
   .sch-adm-session-head { flex-direction: column; }
   .sch-adm-session .sch-btn { width: auto; }
   .sch-adm-link { flex-direction: column; align-items: stretch; }

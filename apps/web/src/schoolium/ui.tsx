@@ -257,11 +257,18 @@ export function Modal({ title, width, onClose, children, footer, testId, level =
     const body = document.body;
     const prev = body.style.overflow;
     body.style.overflow = "hidden"; // контент под блюром не скроллится
-    // фокус на первый интерактивный элемент
-    const first = ref.current?.querySelector<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    first?.focus();
+    // Фокус: если поле с autoFocus уже взяло его (или фокус и так внутри
+    // карточки) — не перебивать кнопкой «Закрыть» из шапки. Иначе сначала
+    // элемент с [autofocus], и только потом первый интерактивный.
+    const card = ref.current;
+    if (card && !card.contains(document.activeElement)) {
+      const first =
+        card.querySelector<HTMLElement>("[autofocus]") ??
+        card.querySelector<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        );
+      first?.focus();
+    }
     return () => {
       body.style.overflow = prev;
       (opener.current as HTMLElement | null)?.focus?.(); // возврат фокуса открывателю
@@ -746,9 +753,12 @@ export function CopyField({ value, label, testId }: { value: string; label?: str
         <code className="sch-copy-value" title={value}>
           {value}
         </code>
-        <Button kind="secondary" onClick={copy} aria-label="Скопировать" testId={testId ? `${testId}.copy` : undefined}>
+        {/* Без aria-label: он перекрывал бы видимую подпись, и читалка не
+            услышала бы смену «Скопировать» → «Скопировано». Смену объявляет
+            aria-live. */}
+        <Button kind="secondary" onClick={copy} testId={testId ? `${testId}.copy` : undefined}>
           <Icon name={done ? "check" : "copy"} size={18} />
-          {done ? "Скопировано" : "Скопировать"}
+          <span aria-live="polite">{done ? "Скопировано" : "Скопировать"}</span>
         </Button>
       </div>
     </div>

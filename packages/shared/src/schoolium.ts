@@ -1020,10 +1020,45 @@ export interface SchoolDirectoryEntryDto {
 
 // ─────────────────────────── сессии и устройства ───────────────────────────
 
+/**
+ * Состояние школы словами — ОДИН словарь на все кабинеты (S-60, S-61, S-62):
+ * код FSM человеку не показывается.
+ */
+export const SCHOOL_STATE_LABELS: Record<SchoolState, string> = {
+  empty: 'школа пустая',
+  classes_created: 'классы созданы',
+  students_filled: 'профили заполнены',
+  subjects_created: 'предметы созданы',
+  staff_activated: 'персонал активирован',
+  teachers_bound: 'педагоги привязаны',
+  terms_set: 'четверти заданы',
+  load_set: 'нормы заданы',
+  priorities_set: 'приоритеты заданы',
+  day_params_set: 'параметры дня заданы',
+  generated: 'сетка собрана',
+  stale: 'сетка устарела',
+  ready: 'школа ведёт журнал',
+};
+
 /** Канал, которым выдана сессия (AR-187): читается из `AppSession.via`. */
 export type SessionVia = 'registration' | 'device_link' | 'login_code' | 'bootstrap_link' | 'login_link' | 'password' | 'unknown';
 /** Где живёт сессия: вкладка браузера либо установленное приложение (PWA). */
 export type SessionClientKind = 'browser' | 'pwa';
+
+/** Слова для канала входа и вида клиента — одни на S-31, S-62, S-80 (AR-187). */
+export const SESSION_VIA_LABELS: Record<SessionVia, string> = {
+  registration: 'активация по QR',
+  device_link: 'QR с телефона',
+  login_code: 'код входа',
+  bootstrap_link: 'ссылка платформы',
+  login_link: 'ссылка входа',
+  password: 'пароль',
+  unknown: 'не записан',
+};
+export const SESSION_CLIENT_LABELS: Record<SessionClientKind, string> = {
+  browser: 'в браузере',
+  pwa: 'в приложении',
+};
 
 export interface SessionDto {
   id: string;
@@ -1108,12 +1143,23 @@ export interface AdminSessionDto {
   /** `active` — живая; `ended` — отозвана либо истекла. */
   status: 'active' | 'ended';
   online: boolean;
+  /** Сессия того, кто смотрит карту: завершать её здесь нельзя — для этого «Выйти». */
+  current: boolean;
   revokedAt: string | null;
   revokedReason: SessionRevokeReason | null;
   expiresAt: string;
 }
 
 export type SessionRevokeReason = 'manual' | 'deactivated' | 'deleted' | 'activation_revoked' | 'incident' | 'limit' | 'admin';
+export const SESSION_REVOKE_REASON_LABELS: Record<SessionRevokeReason, string> = {
+  manual: 'завершена человеком',
+  deactivated: 'доступ закрыт',
+  deleted: 'учётка удалена',
+  activation_revoked: 'активация отозвана',
+  incident: 'инцидент-режим',
+  limit: 'лимит сессий',
+  admin: 'завершена администратором',
+};
 
 /** Узел карты устройств: человек и его сессии (живые — всегда, завершённые — по запросу). */
 export interface AdminDeviceUserDto {

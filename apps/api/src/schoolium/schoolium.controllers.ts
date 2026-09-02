@@ -573,7 +573,8 @@ export class StaffController {
   @RequirePermission('staff.manage')
   @Get(':id/activity')
   activity(@Req() req: Req0, @Param('id') id: string) {
-    return this.svc.activity(id, webOrigin(req));
+    // Адрес входа — только администратору (AR-194); модератор видит устройства без него.
+    return this.svc.activity(id, webOrigin(req), actorOf(req).roles.includes('admin'));
   }
 }
 

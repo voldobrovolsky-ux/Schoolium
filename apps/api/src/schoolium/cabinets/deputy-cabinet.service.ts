@@ -49,13 +49,19 @@ export class DeputyCabinetService {
         )
       : [];
     const activated = new Set(memberships.filter((m) => m.activatedAt !== null).map((m) => m.userId));
+    // Уволенный (членство деактивировано) из счёта выбывает: иначе сотрудник,
+    // так и не активировавший учётку до увольнения, навсегда держал бы пункт
+    // «Персонал активирован» в незакрытом состоянии.
+    const fired = new Set(memberships.filter((m) => m.deactivatedAt !== null).map((m) => m.userId));
+    const liveStaffCards = staffCards.filter((c) => !fired.has(c.userId!));
+    const liveGuardianCards = guardianCards.filter((c) => !fired.has(c.userId!));
 
     const covered = subjects.filter((s) => coverageComplete(s.id, classes, subjects, bindings)).length;
     const loadSet = bindings.filter((b) => b.hoursPerYear > 0).length;
     const latest = templates[0] ?? null;
     const filledStudents = students.filter((s) => s.lastName !== '' && s.firstName !== '' && s.sex !== null).length;
-    const staffActivated = staffCards.filter((c) => activated.has(c.userId!)).length;
-    const guardiansActivated = guardianCards.filter((c) => activated.has(c.userId!)).length;
+    const staffActivated = liveStaffCards.filter((c) => activated.has(c.userId!)).length;
+    const guardiansActivated = liveGuardianCards.filter((c) => activated.has(c.userId!)).length;
 
     const item = (
       key: string,
@@ -89,12 +95,12 @@ export class DeputyCabinetService {
       item('students', 'Профили учеников', students.length > 0 && filledStudents === students.length, `заполнено ${filledStudents} из ${students.length}`, 'moderator', '/classes'),
       item('subjects', 'Предметы', subjects.length > 0, subjects.length > 0 ? `предметов: ${subjects.length}` : 'предметы не созданы', 'moderator', '/subjects'),
       item('bindings', 'Педагоги привязаны', subjects.length > 0 && covered === subjects.length, `покрыто ${covered} из ${subjects.length}`, 'moderator', '/subjects'),
-      item('staff', 'Персонал активирован', staffCards.length > 0 && staffActivated === staffCards.length, `активировано ${staffActivated} из ${staffCards.length}`, 'moderator', '/staff'),
+      item('staff', 'Персонал активирован', liveStaffCards.length > 0 && staffActivated === liveStaffCards.length, `активировано ${staffActivated} из ${liveStaffCards.length}`, 'moderator', '/staff'),
       item(
         'guardians',
         'Родители активированы',
-        guardianCards.length > 0 && guardiansActivated === guardianCards.length,
-        guardianCards.length === 0 ? 'родители не заведены' : `активировано ${guardiansActivated} из ${guardianCards.length}`,
+        liveGuardianCards.length > 0 && guardiansActivated === liveGuardianCards.length,
+        liveGuardianCards.length === 0 ? 'родители не заведены' : `активировано ${guardiansActivated} из ${liveGuardianCards.length}`,
         'moderator',
         '/guardians',
       ),

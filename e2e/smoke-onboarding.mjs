@@ -207,12 +207,15 @@ const tapTargets = async (page, where) => {
 };
 
 /**
- * Реестр модалок §3: пятнадцать штук онбординга плюс три кабинета
+ * Реестр модалок §3: пятнадцать штук онбординга, две расписания (`M-22`
+ * нормы часов в год, `M-25` управление компетенцией) плюс три кабинета
  * администратора 1.3.0 (`M-27` реестр сети, `M-28` инцидент-режим, `M-29`
  * журнал подключений). Ворота этапа 3 требуют, чтобы каждая была ОТКРЫТА и
  * ЗАКРЫТА в мобильном варианте — не «описана», а показана.
+ * `M-21`, `M-23`, `M-24`, `M-26` — задокументированные исключения реестра,
+ * смок их не требует.
  */
-const MODALS = ['M-01', 'M-02', 'M-03', 'M-04', 'M-05', 'M-06', 'M-07', 'M-08', 'M-09', 'M-10', 'M-11', 'M-12', 'M-13', 'M-14', 'M-15', 'M-27', 'M-28', 'M-29'];
+const MODALS = ['M-01', 'M-02', 'M-03', 'M-04', 'M-05', 'M-06', 'M-07', 'M-08', 'M-09', 'M-10', 'M-11', 'M-12', 'M-13', 'M-14', 'M-15', 'M-22', 'M-25', 'M-27', 'M-28', 'M-29'];
 /** `M-10`, `M-11`, `M-12` живут в DOM под именами своих экранов (реестр §3). */
 const MODAL_NODE = { 'M-10': 'S-42.refusal', 'M-11': 'S-51', 'M-12': 'S-52' };
 const modalsOpened = new Set();
@@ -799,7 +802,8 @@ async function main() {
     // ── Нормы часов — В ГОД, через M-22 (AR-180): из настройки они убраны ──
     console.log('▶ M-22 · нормы часов (в год)');
     await click(page, 'S-40.btn.load');
-    await page.waitForSelector('[data-testid="M-22"]');
+    await page.waitForSelector('[data-testid="M-22"]', { timeout: 20_000 });
+    await modalOpen(page, 'M-22');
     await page.waitForSelector('[data-testid="S-40.input.loadHours"]', { timeout: 20_000 });
     await hasAll(page, ['S-40.accordion.teacher', 'S-40.input.loadHours', 'S-40.summary.teacher']);
     const loadHours = page.locator('[data-testid="S-40.input.loadHours"]');
@@ -1247,6 +1251,9 @@ async function main() {
     console.log('▶ S-62 · кабинет администратора');
     await page.goto(`${WEB}/admin`);
     await page.waitForSelector('[data-testid="S-62.subnav"]', { timeout: 20_000 });
+    // Обзор приезжает своим запросом: ждём первый элемент с данными, иначе
+    // проверка обгоняет ответ сервера (найдено мобильным прогоном).
+    await page.waitForSelector('[data-testid="S-62.overview.stats"]', { timeout: 20_000 });
     await hasAll(page, ['S-62.subnav', 'S-62.overview.stats', 'S-62.overview.school', 'S-62.overview.pending', 'S-62.overview.links']);
     await mobileInvariants(page, 'S-62 · обзор');
     await shot(page, 'S-62-overview');
@@ -1275,6 +1282,8 @@ async function main() {
     await click(page, 'S-62.devices.btn.journal');
     await page.waitForSelector('[data-testid="M-29"]', { timeout: 20_000 });
     await modalOpen(page, 'M-29');
+    // Список приезжает своим запросом: ждём контейнер, а не проверяем мгновенно.
+    await page.waitForSelector('[data-testid="M-29.list"]', { timeout: 20_000 });
     await has(page, 'M-29.list');
     await mobileInvariants(page, 'M-29 · журнал подключений');
     await click(page, 'M-29.close');
@@ -1285,6 +1294,14 @@ async function main() {
       await click(page, 'S-62.devices.btn.grant');
       await page.waitForSelector('[data-testid="S-62.devices.link"]', { timeout: 20_000 });
       await has(page, 'S-62.devices.link', 'ссылка входа 48 ч выдана администратором');
+      if (MOBILE) {
+        // CopyField на телефоне не имеет права схлопнуться: значение ссылки
+        // обязано остаться читаемой полосой, а не нулевой колонкой у кнопки.
+        const copyW = await page.locator('[data-testid="S-62.devices.link"] .sch-copy-value').first()
+          .evaluate((el) => el.getBoundingClientRect().width).catch(() => 0);
+        if (copyW >= 160) console.log(`    ✅ значение ссылки на телефоне не схлопнулось: ${Math.round(copyW)}px`);
+        else { console.error(`    ❌ значение ссылки на телефоне схлопнулось: ${Math.round(copyW)}px < 160px`); failures++; }
+      }
     } else {
       console.log('    · S-62.devices.btn.grant нет — у людей на карте нет штатной карточки без входа');
     }

@@ -25,7 +25,7 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { ACCESS_PARAMS, type SchoolRole } from '@edustore/shared';
+import { ACCESS_PARAMS, usernameProblem, type SchoolRole } from '@edustore/shared';
 import { generatePassword, hashPassword } from '../src/schoolium/staff/credentials';
 
 const prisma = new PrismaClient();
@@ -58,9 +58,21 @@ async function ensure(
   workspaceId: string,
   roles: SchoolRole[],
   displayName: string,
-  username: string,
+  rawUsername: string,
   card: { section: number; plannedRoles: SchoolRole[] } = { section: 1, plannedRoles: roles.filter((r) => r === 'moderator') },
 ): Promise<string[]> {
+  // Юзернейм — как его примет форма входа (S-05′): без пробелов и в нижнем
+  // регистре; иначе `Vol ` заведёт учётку, в которую нельзя войти.
+  const username = rawUsername.trim().toLowerCase();
+  const problem = usernameProblem(username);
+  if (problem) {
+    console.error(
+      problem === 'reserved'
+        ? `юзернейм «${username}» зарезервирован — выберите другой`
+        : `юзернейм «${username}» недопустим: 3–30 знаков, только латиница в нижнем регистре, цифры и _`,
+    );
+    process.exit(3);
+  }
   const [lastName, firstName] = displayName.split(/\s+/);
   let user = await prisma.user.findUnique({ where: { username } });
   let creds = 'креды прежние — учётка уже существовала, пароль не тронут';

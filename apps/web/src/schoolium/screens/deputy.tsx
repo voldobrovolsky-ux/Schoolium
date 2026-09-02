@@ -12,7 +12,7 @@
  * Большинство пунктов закрывает модератор; кабинет показывает владельца
  * каждого пункта, чтобы завуч знал, кого просить, а не искал сам.
  */
-import type { ChecklistItemDto, SchoolState } from "@edustore/shared";
+import { SCHOOL_STATE_LABELS, type ChecklistItemDto } from "@edustore/shared";
 import { api } from "../api";
 import { useAsync } from "../hooks";
 import { Badge, Button, EmptyState, ErrorState, Stat, StatGrid } from "../ui";
@@ -23,25 +23,8 @@ import "./deputy.css";
 
 // ─────────────────────────── словари ───────────────────────────
 
-/**
- * Состояние FSM словами (AR-72): код состояния — контракт, а не подпись.
- * Бейдж в шапке читает завуч, и «students_filled» ему ни о чём не говорит.
- */
-const STATE_LABELS: Record<SchoolState, string> = {
-  empty: "школа пустая",
-  classes_created: "классы созданы",
-  students_filled: "профили заполнены",
-  subjects_created: "предметы созданы",
-  staff_activated: "персонал активирован",
-  teachers_bound: "педагоги привязаны",
-  terms_set: "четверти заданы",
-  load_set: "нормы заданы",
-  priorities_set: "приоритеты заданы",
-  day_params_set: "параметры дня заданы",
-  generated: "сетка собрана",
-  stale: "сетка устарела",
-  ready: "школа ведёт журнал",
-};
+/** Состояние школы словами — общий словарь всех кабинетов (П-5). */
+const STATE_LABELS = SCHOOL_STATE_LABELS;
 
 /** Владелец пункта по матрице ролей (AR-152, AR-174) — кто его закрывает. */
 const OWNER_LABELS: Record<ChecklistItemDto["owner"], string> = {
@@ -78,10 +61,10 @@ export function DeputyScreen() {
       <EmptyState
         testId="S-61.forbidden"
         title="Раздел доступен завучу и администратору"
-        hint="Сводка готовности школы и нормы часов — за заместителем по учебной работе. Ваш раздел открыт по кнопке."
+        hint="Сводка готовности школы и нормы часов — за заместителем по учебной работе. Ваш раздел открывается со стартового экрана."
         action={
           <Button kind="primary" onClick={() => navigate(me.startScreen)}>
-            К своему разделу
+            На стартовый экран
           </Button>
         }
       />
@@ -158,12 +141,16 @@ function Checklist({ testId, title, items }: { testId: string; title: string; it
       <ul className="sch-dep-items">
         {items.map((it) => (
           <li key={it.key} className="sch-dep-item" data-testid="S-61.item" data-done={it.done ? "true" : "false"} data-key={it.key}>
-            {/* Статус — кружок с галочкой либо пустой контур: цвет подсказывает, форма несёт смысл (AR-80). */}
-            <span className={it.done ? "sch-dep-mark sch-dep-mark--done" : "sch-dep-mark"} aria-label={it.done ? "сделано" : "не сделано"}>
+            {/* Статус — кружок с галочкой либо пустой контур: цвет подсказывает, форма несёт смысл (AR-80).
+                Читалке `aria-label` на `span` не объявляется — слова статуса живут скрытым текстом в заголовке. */}
+            <span className={it.done ? "sch-dep-mark sch-dep-mark--done" : "sch-dep-mark"} aria-hidden="true">
               {it.done ? <Icon name="check" size={18} /> : null}
             </span>
             <span className="sch-dep-item-text">
-              <span className="sch-dep-item-title">{it.title}</span>
+              <span className="sch-dep-item-title">
+                <span className="sch-visually-hidden">{it.done ? "Сделано: " : "Не сделано: "}</span>
+                {it.title}
+              </span>
               <span className="sch-muted">{it.detail}</span>
               <span className="sch-dep-item-owner">
                 <Badge tone="muted">{OWNER_LABELS[it.owner]}</Badge>

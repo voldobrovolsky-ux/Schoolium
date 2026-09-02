@@ -335,8 +335,8 @@ export function LoginScreen({ next }: { next: string | null }) {
             Наведите камеру на QR из вашей карточки
           </p>
           <p data-testid="S-01.status">{status === "used" ? "Устройство подключено" : "Ожидание сканирования…"}</p>
-          <Button kind="primary" testId="S-01.link.byCode" onClick={() => navigate("/login/code")}>
-            Войти по коду от модератора
+          <Button kind="secondary" testId="S-01.link.byCode" onClick={() => navigate("/login/code")}>
+            Войти по коду
           </Button>
           <PasswordLoginBlock next={next} />
           {/* Тупик назван честно (AR-92, G-44): без якоря и модератора входа нет — и написано, к кому идти. */}
@@ -629,7 +629,7 @@ export function JoinScreen({ token }: { token: string }) {
         ) : noSession ? (
           <p data-testid="S-03.hint.otherDevice">
             Это устройство уже занято другой учёткой. Откройте ссылку со своего телефона
-            или войдите кодом с карточки: «Вход по коду» на странице входа.
+            или войдите кодом с карточки: кнопка «Войти по коду» на странице входа.
           </p>
         ) : (
           <p data-testid="S-03.hint.progress">Подключаем устройство…</p>
