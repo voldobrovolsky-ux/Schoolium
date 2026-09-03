@@ -497,45 +497,12 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
             />
             {creds ? <CredentialsBox credentials={creds} /> : null}
           </div>
-        ) : !cur.registered ? (
-          <div className="sch-qr">
-            {/* Именной QR (AR-161): над кодом — ФИО, сканирует названный человек. */}
-            <h3 data-testid="S-31.qr.fullName" style={{ margin: 0 }}>
-              {fullName ?? cur.name}
-            </h3>
-            <div className="sch-qr-frame" data-testid="S-31.qr">
-              {token ? (
-                /* На мобайле QR 200px (§6): 240 не оставляют места подписи и
-                   сроку жизни кода, а без них человек не знает, что код гаснет. */
-                <QRCodeSVG value={`${window.location.origin}/join/${token}`} size={qrSize} />
-              ) : (
-                <div className="sch-skeleton sch-skeleton--qr" />
-              )}
-            </div>
-            <p data-testid="S-31.status">
-              {registeredName ? `Зарегистрирован: ${registeredName}` : "Ожидание сканирования"}
-            </p>
-            <p className="sch-muted">
-              @{cur.username} · код живёт {ACCESS_PARAMS.activationTtlMinutes} минут либо до закрытия карточки
-            </p>
-            {mayManage ? (
-              <div className="sch-actions">
-                {/* Ссылка входа и до регистрации (AR-189): у человека без
-                    телефона QR сканировать нечем, а ссылка открывается где угодно. */}
-                {isAdmin ? <LoginLinkButton busy={loginLink.busy} onClick={loginLink.issue} /> : null}
-                <Button kind="ghost" testId="S-31.btn.reissuePassword" onClick={reissuePassword}>
-                  Перевыпустить пароль
-                </Button>
-              </div>
-            ) : null}
-            {loginLink.link ? <LoginLinkBox link={loginLink.link} /> : null}
-            {creds ? <CredentialsBox credentials={creds} /> : null}
-          </div>
         ) : (
-          /* Панель управления зарегистрированной карточкой — группами: что за
-             учётка, как ей входить, что она делала, где её карточка, и в самом
-             низу — что с её доступом. Разрушающие действия последними: рука
-             доходит до них не раньше, чем глаз прочитал остальное. */
+          /* Панель управления карточкой — ОДНА раскладка группами для любой
+             учётки, активированной и нет (решение владельца 2026-09-03): что за
+             учётка, как ей входить (у неактивированной — именной QR здесь же),
+             что она делала, где её карточка, и в самом низу — что с её
+             доступом. Разрушающие действия последними. */
           <div className="sch-m06-groups">
             <section className="sch-m06-group">
               <h3 className="sch-section-title">Учётная запись</h3>
@@ -551,9 +518,13 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
                   </span>
                 ) : null}
               </div>
-              <p className="sch-muted" data-testid="S-31.status">
-                Зарегистрирован: {cur.name}
-              </p>
+              {cur.registered ? (
+                <p className="sch-muted" data-testid="S-31.status">
+                  Зарегистрирован: {cur.name}
+                </p>
+              ) : (
+                <p className="sch-muted">Ещё не входил: QR активации, ссылка и пароль — в группе «Вход»</p>
+              )}
               <div className="sch-chips">
                 {cur.roles.map((r) => (
                   <span key={r} className="sch-row" style={{ gap: "var(--sp-4)" }}>
@@ -583,20 +554,43 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
               <>
                 <section className="sch-m06-group">
                   <h3 className="sch-section-title">Вход</h3>
+                  {!cur.registered ? (
+                    <div className="sch-qr">
+                      {/* Именной QR (AR-161): над кодом — ФИО, сканирует названный человек. */}
+                      <h3 data-testid="S-31.qr.fullName" style={{ margin: 0 }}>
+                        {fullName ?? cur.name}
+                      </h3>
+                      <div className="sch-qr-frame" data-testid="S-31.qr">
+                        {token ? (
+                          <QRCodeSVG value={`${window.location.origin}/join/${token}`} size={qrSize} />
+                        ) : (
+                          <div className="sch-skeleton sch-skeleton--qr" />
+                        )}
+                      </div>
+                      <p data-testid="S-31.status">
+                        {registeredName ? `Зарегистрирован: ${registeredName}` : "Ожидание сканирования"}
+                      </p>
+                      <p className="sch-muted">
+                        @{cur.username} · код живёт {ACCESS_PARAMS.activationTtlMinutes} минут либо до закрытия карточки
+                      </p>
+                    </div>
+                  ) : null}
                   <div className="sch-actions sch-actions--start">
-                    <Button
-                      kind="primary"
-                      testId="S-31.btn.loginCode"
-                      onClick={async () => {
-                        try {
-                          setLoginCode(await api.loginCode(cur.id));
-                        } catch (e) {
-                          showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
-                        }
-                      }}
-                    >
-                      QR и код для входа
-                    </Button>
+                    {cur.registered ? (
+                      <Button
+                        kind="primary"
+                        testId="S-31.btn.loginCode"
+                        onClick={async () => {
+                          try {
+                            setLoginCode(await api.loginCode(cur.id));
+                          } catch (e) {
+                            showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
+                          }
+                        }}
+                      >
+                        QR и код для входа
+                      </Button>
+                    ) : null}
                     {/* Ссылка на 48 часов — только администратору (AR-189):
                         модератор выдаёт код на 5 минут, длинный срок — решение
                         уровня доступа, а не ведения. */}
@@ -643,22 +637,26 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
                       Вернуть доступ
                     </Button>
                   ) : null}
-                  <Button
-                    kind="danger"
-                    testId="S-31.btn.revokeSessions"
-                    onClick={() => act(() => api.revokeSessions(cur.id))}
-                  >
-                    Закрыть активные сессии
-                  </Button>
-                  {/* «Просканировал не тот» (AR-153): сессии чужого устройства
-                      закрываются, карточка возвращается в «Не авторизованные». */}
-                  <Button
-                    kind="danger"
-                    testId="S-31.btn.revokeActivation"
-                    onClick={() => act(() => api.revokeStaffActivation(cur.id))}
-                  >
-                    Отозвать активацию
-                  </Button>
+                  {cur.registered ? (
+                    <>
+                      <Button
+                        kind="danger"
+                        testId="S-31.btn.revokeSessions"
+                        onClick={() => act(() => api.revokeSessions(cur.id))}
+                      >
+                        Закрыть активные сессии
+                      </Button>
+                      {/* «Просканировал не тот» (AR-153): сессии чужого устройства
+                          закрываются, карточка возвращается в «Не авторизованные». */}
+                      <Button
+                        kind="danger"
+                        testId="S-31.btn.revokeActivation"
+                        onClick={() => act(() => api.revokeStaffActivation(cur.id))}
+                      >
+                        Отозвать активацию
+                      </Button>
+                    </>
+                  ) : null}
                   {/* Подмену решает СЕРВЕР: ровно одна кнопка из двух (AR-89);
                       у деактивированной карточки вместо них «Вернуть доступ». */}
                   {cur.deactivated ? null : cur.hasHistory ? (
