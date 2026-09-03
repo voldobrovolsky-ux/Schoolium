@@ -28,6 +28,20 @@ const pairs = [
   ['warning-текст на белом', T.state.warning, T.surface.page, 4.5],
   ['success-текст на белом', T.state.success, T.surface.page, 4.5],
   ['фокус-рамка на белом (UI)', T.border.focus, T.surface.page, 3.0],
+  // ── пары калибровки 1.3.0 (кабинет админа, AR-190) ──
+  ['вторичный текст на disabled-заливке', T.ink.secondary, T.state['disabled-bg'], 4.5],
+  ['вторичный текст на карточке', T.ink.secondary, T.surface.card, 4.5],
+  ['disabled-текст на disabled-заливке (только UI: выключенные контролы)', T.state['disabled-ink'], T.state['disabled-bg'], 3.0],
+  ['violet-700 на violet-100 (активный пункт подменю, бейдж)', T.brand['violet-700'], T.brand['violet-100'], 4.5],
+  ['violet-700 на violet-050', T.brand['violet-700'], T.brand['violet-050'], 4.5],
+  ['success-текст на карточке', T.state.success, T.surface.card, 4.5],
+  ['warning-текст на карточке', T.state.warning, T.surface.card, 4.5],
+  ['danger-текст на карточке', T.state.danger, T.surface.card, 4.5],
+  ['белый на violet-600 (активный чип дня)', T.ink['on-violet'], T.brand['violet-600'], 4.5],
+  // `ink.muted` на белом — ТОЛЬКО для нетекстового UI (иконки, разделители,
+  // плейсхолдеры-подсказки). Для основного текста на белом приглушённый цвет
+  // не допускается: порог 3.0 здесь — порог UI-компонента, а не текста.
+  ['muted на карточке (только нетекстовый UI)', T.ink.muted, T.surface.card, 3.0],
 ];
 // Различимость пар, которые нельзя путать (ΔE-прокси: контраст между собой ≥ 1.15)
 const distinct = [
@@ -50,7 +64,9 @@ for (const [name,a,b] of distinct){
 // участвует ни в одной паре выше и меняется мимо `tokens.json`. Поэтому вторая
 // половина ворот — перечисление по исходникам контура: цвет объявляется в
 // `tokens.css` (он ГЕНЕРИРУЕТСЯ из токенов) и нигде больше.
-const HEX = /#[0-9a-fA-F]{3,8}\b/g;
+// Ловятся и функциональные литералы: rgba()/hsl() обходили проверку, пока она
+// знала только hex (замечание калибровки 1.3.0, AR-190).
+const HEX = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(/g;
 const scan = (dir) => {
   const out = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

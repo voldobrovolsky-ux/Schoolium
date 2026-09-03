@@ -115,8 +115,8 @@ async function main(): Promise<void> {
   check(revoked === 'ACCESS_REVOKED', `деактивированному новый маршрут не выдаётся → ${revoked}`);
 
   // ─── клетка 6: адресное завершение убивает ровно одну сессию ───
-  const s1 = await sessions.issue({ userId: own.userId, workspaceId: school.workspaceId, roles: ['teacher'], deviceHint: 'телефон' });
-  const s2 = await sessions.issue({ userId: own.userId, workspaceId: school.workspaceId, roles: ['teacher'], deviceHint: 'планшет' });
+  const s1 = await sessions.issue({ userId: own.userId, workspaceId: school.workspaceId, roles: ['teacher'], deviceHint: 'телефон', via: 'unknown' });
+  const s2 = await sessions.issue({ userId: own.userId, workspaceId: school.workspaceId, roles: ['teacher'], deviceHint: 'планшет', via: 'unknown' });
   await sessions.revoke(s1.id, 'manual');
   check((await sessions.read(s1.token)) === null && (await sessions.read(s2.token)) !== null,
     'завершение из настроек убивает РОВНО одну сессию — остальные устройства живут (S-80)');
@@ -134,14 +134,13 @@ async function main(): Promise<void> {
   );
   const bootSession = await access.useBootstrapLink(bootstrapLink.token, 'ноутбук директора');
   await drain();
-  check(bootSession.token.length > 0, 'первый модератор входит по одноразовой ссылке платформы (AR-93)');
-  let reuseBoot = 'нет отказа';
-  try {
-    await access.useBootstrapLink(bootstrapLink.token, 'ещё раз');
-  } catch (e) {
-    reuseBoot = (e as { response?: { code?: string } }).response?.code ?? 'ошибка';
-  }
-  check(reuseBoot === 'TOKEN_USED', `повторное использование ссылки → ${reuseBoot}: она одноразова`);
+  check(bootSession.session.token.length > 0, 'первый модератор входит по ссылке платформы (AR-93)');
+  // AR-195: ссылка многоразовая до истечения 48 часов — второе открытие даёт
+  // вторую сессию (телефон и ноутбук), а не TOKEN_USED.
+  const bootAgain = await access.useBootstrapLink(bootstrapLink.token, 'ещё раз');
+  await drain();
+  check(bootAgain.session.token.length > 0 && bootAgain.session.token !== bootSession.session.token,
+    'повторное открытие ссылки в срок — вторая сессия, ссылка многоразовая (AR-195)');
   const relink = await sys(() =>
     b.prisma.bootstrapLink.create({
       data: {
@@ -153,7 +152,7 @@ async function main(): Promise<void> {
     }),
   );
   const again = await access.useBootstrapLink(relink.token, 'новый телефон директора');
-  check(again.token.length > 0,
+  check(again.session.token.length > 0,
     'та же операция перевыпускает ссылку — единственный модератор без единой сессии не запирает школу навсегда (AR-93)');
 
   // ─── клетка 8: якоря нет и модератора нет — вход невозможен, и это НАЗВАНО ───

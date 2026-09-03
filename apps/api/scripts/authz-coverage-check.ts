@@ -57,7 +57,7 @@ const WHITELIST: Record<string, string> = {
   'SchoolAuthController.deviceLinkApprove': 'identity-gated (§11 строка 2): подтверждает якорное устройство своей сессией, новая сессия наследует его школу и роли',
   'SchoolAuthController.verifyLoginCode': 'key-gated (§11 строка 36): одноразовый код с карточки, 5 минут (AR-92)',
   'SchoolAuthController.login': 'key-gated (AR-156): юзернейм+пароль, выданные модератором; LOGIN_FAILED не различает причин отказа',
-  'SchoolAuthController.bootstrap': 'key-gated (AR-93): одноразовая ссылка платформенной операции, 24 часа',
+  'SchoolAuthController.bootstrap': 'key-gated (AR-93, AR-189): одноразовая ссылка платформы либо администратора с карточки, 48 часов',
   'SchoolAuthController.logout': 'identity-gated (§11 строка 3): человек завершает собственную сессию',
   'SchoolAuthController.endSession': 'identity-gated (§11 строка 38): владелец завершает свою сессию адресно, чужие в выборку не попадают',
   'SubjectsController.scan': 'identity-gated: педагог отмечает СВОЙ скан QR привязки своей сессией (S-70); строки в §11 нет намеренно — это не мутация школы',

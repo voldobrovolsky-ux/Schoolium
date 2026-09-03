@@ -7,9 +7,24 @@
  * операция превращается в `SchoolApiError` с кодом и дословным текстом из §9,
  * который экран показывает человеку.
  */
+import { clientKind } from "./pwa";
 import type {
+  AccessPolicyDto,
   ActivationTokenDto,
   AdminCabinetDto,
+  AdminDeviceMapDto,
+  AdminOverviewDto,
+  AdminSessionDto,
+  DeputyCabinetDto,
+  IncidentResultDto,
+  LoginLinkDto,
+  SchoolAssetDto,
+  SchoolAuditEntryDto,
+  SchoolNetworkDto,
+  SetAccessPolicyDto,
+  StaffActivityDto,
+  UpsertAssetDto,
+  UpsertNetworkDto,
   CreateGuardianDto,
   CreateStaffCardDto,
   CredentialsDto,
@@ -68,7 +83,13 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     res = await fetch(path, {
       method,
       credentials: "include",
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      // Вид клиента (AR-187): установленное приложение против вкладки браузера.
+      // Заголовок идёт с каждым запросом — сессию выдают разные маршруты входа,
+      // и каждый обязан знать, откуда пришли, без второго механизма.
+      headers: {
+        "x-schoolium-client": clientKind(),
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -252,8 +273,33 @@ export const api = {
   removeMark: (lessonId: string, studentId: string) =>
     call<{ ok: boolean }>("DELETE", `${V1}/lessons/${lessonId}/marks/${studentId}`),
 
-  // ─── кабинет модератора ───
-  admin: () => call<AdminCabinetDto>("GET", `${V1}/admin`),
+  // ─── кабинет модератора (S-60, AR-186) ───
+  moderatorCabinet: () => call<AdminCabinetDto>("GET", `${V1}/moderator`),
+
+  // ─── кабинет администратора (S-62, AR-186…AR-189) ───
+  adminOverview: () => call<AdminOverviewDto>("GET", `${V1}/admin/overview`),
+  adminDevices: () => call<AdminDeviceMapDto>("GET", `${V1}/admin/devices`),
+  adminConnections: (userId?: string | null) =>
+    call<AdminSessionDto[]>("GET", `${V1}/admin/connections${userId ? `?userId=${encodeURIComponent(userId)}` : ""}`),
+  adminRevokeSession: (sid: string) => call<{ ok: boolean }>("POST", `${V1}/admin/sessions/${sid}/revoke`),
+  adminIncident: () => call<IncidentResultDto>("POST", `${V1}/admin/sessions/revoke-all`),
+  adminPolicy: () => call<AccessPolicyDto>("GET", `${V1}/admin/policy`),
+  setAdminPolicy: (dto: SetAccessPolicyDto) => call<AccessPolicyDto>("PUT", `${V1}/admin/policy`, dto),
+  adminAudit: () => call<SchoolAuditEntryDto[]>("GET", `${V1}/admin/audit`),
+  networks: () => call<SchoolNetworkDto[]>("GET", `${V1}/admin/networks`),
+  createNetwork: (dto: UpsertNetworkDto) => call<SchoolNetworkDto>("POST", `${V1}/admin/networks`, dto),
+  updateNetwork: (id: string, dto: UpsertNetworkDto) => call<SchoolNetworkDto>("PUT", `${V1}/admin/networks/${id}`, dto),
+  deleteNetwork: (id: string) => call<{ ok: boolean }>("DELETE", `${V1}/admin/networks/${id}`),
+  assets: () => call<SchoolAssetDto[]>("GET", `${V1}/admin/assets`),
+  createAsset: (dto: UpsertAssetDto) => call<SchoolAssetDto>("POST", `${V1}/admin/assets`, dto),
+  updateAsset: (id: string, dto: UpsertAssetDto) => call<SchoolAssetDto>("PUT", `${V1}/admin/assets/${id}`, dto),
+  deleteAsset: (id: string) => call<{ ok: boolean }>("DELETE", `${V1}/admin/assets/${id}`),
+  // карточка сотрудника: ссылка входа 48 ч (админ) и активность (AR-187, AR-189)
+  staffLoginLink: (id: string) => call<LoginLinkDto>("POST", `${V1}/staff/${id}/login-link`),
+  staffActivity: (id: string) => call<StaffActivityDto>("GET", `${V1}/staff/${id}/activity`),
+
+  // ─── кабинет завуча (S-61, AR-193) ───
+  deputyCabinet: () => call<DeputyCabinetDto>("GET", `${V1}/deputy`),
 };
 
 /** Строка норм часов: пара «педагог × предмет × класс/группа» (AR-180). */

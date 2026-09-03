@@ -24,11 +24,16 @@ import {
   PendingController,
   SchoolJournalController,
   ScheduleController,
-  SchoolAdminController,
   StaffController,
   StudentsController,
   SubjectsController,
 } from './schoolium.controllers';
+// 1.3.0 (AR-186): три кабинета — модератора (S-60), администратора (S-62), завуча (S-61)
+import { ModeratorCabinetController } from './cabinets/moderator-cabinet.controller';
+import { AdminCabinetService } from './cabinets/admin-cabinet.service';
+import { AdminCabinetController } from './cabinets/admin-cabinet.controller';
+import { DeputyCabinetService } from './cabinets/deputy-cabinet.service';
+import { DeputyCabinetController } from './cabinets/deputy-cabinet.controller';
 
 /**
  * Schoolium 1.1.1 — онбординг школы и производный журнал.
@@ -58,7 +63,9 @@ import {
     CalendarController,
     ScheduleController,
     SchoolJournalController,
-    SchoolAdminController,
+    ModeratorCabinetController,
+    AdminCabinetController,
+    DeputyCabinetController,
   ],
   providers: [
     SchoolStateService,
@@ -76,6 +83,8 @@ import {
     JournalService,
     JournalContractService,
     JournalProjection,
+    AdminCabinetService,
+    DeputyCabinetService,
   ],
   exports: [
     SchoolStateService,

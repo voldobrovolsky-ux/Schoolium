@@ -90,6 +90,11 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'journal.mark.post', section: 'school', screen: 'journal', action: 'mark', label: 'Постановка и снятие отметок' },
   { code: 'journal.topic.set', section: 'school', screen: 'journal', action: 'topic', label: 'Тема урока' },
   { code: 'staff.self.write', section: 'school', screen: 'profile', action: 'write', label: 'Собственная аватарка' },
+  // 1.3.0 (AR-186): три кабинета — три права. `school.manage` остаётся у
+  // модератора (S-60), `school.admin` — только у администратора (S-62),
+  // `school.oversee` — надзорный кабинет завуча (S-61), читающий.
+  { code: 'school.admin', section: 'school', screen: 'administration', action: 'manage', label: 'Кабинет администратора: сеть, устройства, политики, реестры, аудит школы' },
+  { code: 'school.oversee', section: 'school', screen: 'deputy', action: 'read', label: 'Кабинет завуча: сводки готовности УТЦ и КПЦ' },
   // Пять читающих: выдаются всем шести ролям. Записи «*.read» в каталоге не
   // существует — это сокращение текста спеки, а не код (G-10 сверяет коды).
   // Проекция ученика и родителя (AR-158): дневник и средние по предметам.

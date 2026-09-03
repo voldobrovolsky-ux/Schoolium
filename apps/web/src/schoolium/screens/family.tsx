@@ -8,6 +8,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { ACCESS_PARAMS, type ClassDto, type CredentialsDto, type GuardianCardDto, type StudentDto } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile, usePolling } from "../hooks";
+import { Icon } from "../icons";
 import { Avatar, Badge, Button, EmptyState, ErrorState, Modal, Skeletons, Toast, useToast } from "../ui";
 import { useSession } from "../session";
 import { navigate } from "../router";
@@ -39,6 +40,7 @@ export function GuardiansScreen({ openId }: { openId?: string }) {
 
       {cards.length === 0 ? (
         <EmptyState
+          icon="users"
           testId="S-14.empty"
           title="Родителей пока нет"
           hint={mayManage ? "Заведите учётку и свяжите её с детьми" : ""}
@@ -277,7 +279,8 @@ function StudentPicker({ exclude, onPick, onClose }: { exclude: Set<string>; onP
       ) : (
         <div className="sch-stack">
           <Button kind="ghost" onClick={() => setClassId(null)}>
-            ← Классы
+            <Icon name="chevronLeft" size={18} />
+            Классы
           </Button>
           {students
             .filter((s) => !exclude.has(s.id) && (s.lastName || s.firstName))

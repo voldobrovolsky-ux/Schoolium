@@ -590,8 +590,11 @@ NO_SOLUTION); NO_SOLUTION — единственный отказ самого �
 | staff.member.deactivated.v1 | персонал | userId, unboundSubjects[] | расписание, доступ | сетка → `stale`; все сессии отозваны (AR-92) |
 | staff.member.reactivated.v1 | персонал | userId | нет подписчика (только аудит) | сессии не воскресают — вход заново |
 | staff.member.deleted.v1 | персонал | userId, unboundSubjects[] | расписание, доступ | сетка → `stale`; все сессии отозваны |
-| staff.session.started.v1 | доступ | userId, via: "registration" \| "device_link" \| "login_code" \| "bootstrap_link", deviceHint | нет подписчика (только аудит) | запись в аудите с каналом входа — по ней читается, каким маршрутом человек попал в кабинет |
-| staff.session.revoked.v1 | доступ | userId, reason: "deactivated" \| "deleted" \| "manual" | нет подписчика (только аудит) | запись в аудите с причиной — отзыв уволенного отличим от завершения сессии самим человеком |
+| staff.session.started.v1 | доступ | userId, via: "registration" \| "device_link" \| "login_code" \| "bootstrap_link" \| "login_link" \| "password", deviceHint, clientKind: "browser" \| "pwa" (AR-187) | нет подписчика (только аудит) | запись в аудите с каналом входа — по ней читается, каким маршрутом человек попал в кабинет |
+| staff.session.revoked.v1 | доступ | userId, reason: "deactivated" \| "deleted" \| "manual" \| "activation_revoked" \| "incident" \| "limit" \| "admin" (AR-188) | нет подписчика (только аудит) | запись в аудите с причиной — отзыв уволенного отличим от завершения сессии самим человеком, инцидент-режим — от лимита сессий |
+| staff.login_link.issued.v1 | доступ | userId, issuedBy, expiresAt (AR-189) | нет подписчика (только аудит) | запись в аудите: кто и кому выпустил одноразовую ссылку входа на 48 часов |
+| school.policy.set.v1 | администрирование | sessionLimits (AR-188) | нет подписчика (только аудит) | запись в аудите: кто изменил лимиты сессий; лимит применяется при следующей выдаче сессии, живые не трогает |
+| school.registry.changed.v1 | администрирование | kind: "network" \| "asset", op: "created" \| "updated" \| "deleted", id, name (AR-186) | нет подписчика (только аудит) | запись в аудите: изменение реестра Wi-Fi сетей и корпоративных устройств школы |
 | subject.teacher.bound.v1 | предметы | subjectId, classId, teacherId, scope: "class"\|"group", groupNos[] | расписание | сетка → `stale` |
 | calendar.term.set.v1 | календарь | termNo (1–4), dateFrom, dateTo | расписание | сетка → `stale`; горизонт материализации пересчитан |
 | schedule.template.confirmed.v1 | расписание | templateId, seed, weekSlots[] | нет подписчика (только аудит) | материализация запускается тем же триггером, не событием |

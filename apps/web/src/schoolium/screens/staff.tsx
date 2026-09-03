@@ -11,23 +11,34 @@
  * Карточка `S-30.card.person` — по эскизу владельца (2026-08-31): фото на
  * срезанной градиентной плашке слева, справа «Фамилия И.», роль строчными и —
  * у педагога с привязками — «классы:» кружками и «предмет:» именами.
+ *
+ * Панель `M-06` зарегистрированной карточки — группами (1.3.0, AR-187,
+ * AR-189): учётная запись, вход, активность, профиль, доступ. Ссылка входа на
+ * 48 часов — только администратору; активность — своим запросом.
  */
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
+  SESSION_CLIENT_LABELS,
+  SESSION_VIA_LABELS,
   ACCESS_PARAMS,
   ROLE_LABELS,
   STAFF_SECTIONS,
+  type AdminSessionDto,
   type CredentialsDto,
+  type LoginLinkDto,
   type SchoolRole,
   type StaffCardDto,
 } from "@edustore/shared";
 import { AccountForm, CredentialsBox } from "./account-form";
+import { dateTime } from "./misc";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile, usePolling } from "../hooks";
-import { Avatar, Badge, Button, EmptyState, ErrorState, Modal, PopoverOrSheet, Skeletons, Toast, useToast } from "../ui";
+import { Avatar, Badge, Button, CopyField, EmptyState, ErrorState, Modal, PopoverOrSheet, Skeletons, StatusDot, Toast, useToast } from "../ui";
+import { Icon } from "../icons";
 import { useSession } from "../session";
 import { navigate } from "../router";
+import "./staff.css";
 
 /** Роли, которые можно ДОБАВИТЬ карточке зарегистрированного сотрудника (AR-102). */
 const ADDABLE_ROLES: SchoolRole[] = ["founder", "director", "deputy_academic", "deputy_upbringing", "teacher", "moderator", "admin"];
@@ -135,7 +146,10 @@ export function StaffScreen({ openId }: { openId?: string }) {
                       })
                     }
                   >
-                    <span aria-hidden="true">{collapsed.has(sec.level) ? "▸" : "▾"}</span> {sec.title}
+                    <span aria-hidden="true">
+                      <Icon name={collapsed.has(sec.level) ? "chevronRight" : "chevronDown"} size={18} />
+                    </span>{" "}
+                    {sec.title}
                   </button>
                 ) : (
                   <h2 className="sch-section-title">{sec.title}</h2>
@@ -222,7 +236,7 @@ function PersonCard({ card, meta }: { card: StaffCardDto; meta?: TeacherMeta }) 
       onClick={() => navigate(`/staff/${card.id}`)}
     >
       <span className={card.filled ? "sch-staff-plaque" : "sch-staff-plaque sch-staff-plaque--locked"} aria-hidden="true">
-        {card.filled ? <Avatar large name={card.name} url={card.avatarUrl} /> : <span>🔒</span>}
+        {card.filled ? <Avatar large name={card.name} url={card.avatarUrl} /> : <Icon name="lock" size={20} />}
       </span>
       <span className="sch-staff-body">
         <span className="sch-card-title">{title}</span>
@@ -257,17 +271,143 @@ function PersonCard({ card, meta }: { card: StaffCardDto; meta?: TeacherMeta }) 
 
 // ─────────────────────────── S-31 · карточка сотрудника (M-06) ───────────────────────────
 
+/** «48 часов», «24 часа»: срок — из `ACCESS_PARAMS`, склоняется только слово. */
+const hoursWord = (n: number): string => {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  const word = m100 >= 11 && m100 <= 14 ? "часов" : m10 === 1 ? "час" : m10 >= 2 && m10 <= 4 ? "часа" : "часов";
+  return `${n} ${word}`;
+};
+
+/**
+ * Ссылка входа на 48 часов (AR-189) — одна и та же на карточке до регистрации
+ * и после: путь входа не зависит от того, сканировал ли человек QR. Состояние
+ * живёт в хуке, кнопка и панель — отдельными элементами, чтобы кнопка стояла
+ * в ряду действий своей группы, а панель — под ним.
+ */
+function useLoginLink(cardId: string, onError: (t: string) => void) {
+  const [link, setLink] = useState<LoginLinkDto | null>(null);
+  const [busy, setBusy] = useState(false);
+  const issue = async () => {
+    setBusy(true);
+    try {
+      setLink(await api.staffLoginLink(cardId));
+    } catch (e) {
+      onError(e instanceof SchoolApiError ? e.message : "Не удалось выдать ссылку для входа");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { link, busy, issue };
+}
+
+function LoginLinkButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  return (
+    <Button kind="secondary" testId="S-31.btn.loginLink" loading={busy} onClick={onClick}>
+      Ссылка для входа на {hoursWord(ACCESS_PARAMS.loginLinkTtlHours)}
+    </Button>
+  );
+}
+
+function LoginLinkBox({ link }: { link: LoginLinkDto }) {
+  // Тот же маршрут, что у ссылки первого модератора (AR-93): `/bootstrap/:token`
+  // уже умеет обменять одноразовый токен на сессию, второго экрана не нужно.
+  const url = `${window.location.origin}/bootstrap/${link.token}`;
+  return (
+    <div className="sch-canvas sch-qr sch-m06-link" data-testid="S-31.loginLink">
+      <QRCodeSVG value={url} size={160} />
+      <CopyField value={url} label="Ссылка для входа" />
+      <p className="sch-muted">действует до {dateTime(link.expiresAt)}, открывать можно повторно</p>
+    </div>
+  );
+}
+
+/**
+ * Активность учётки (AR-187): когда активирована, когда была в сети, сколько
+ * сессий живо — и пять последних сессий строками. Грузится своим запросом при
+ * открытии карточки: его отказ не валит карточку, у блока свой «Повторить».
+ */
+function ActivityBlock({ cardId }: { cardId: string }) {
+  const [state, reload] = useAsync(() => api.staffActivity(cardId), [cardId]);
+  let body: React.ReactNode;
+  if (state.status === "loading") body = <Skeletons count={3} kind="row" />;
+  else if (state.status === "error") body = <ErrorState message={state.message} onRetry={reload} />;
+  else {
+    const a = state.data;
+    const latest = [...a.sessions].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).slice(0, 5);
+    body = (
+      <>
+        <dl className="sch-m06-kv">
+          <dt>Активирован</dt>
+          <dd>{a.activatedAt ? dateTime(a.activatedAt) : "ещё нет"}</dd>
+          <dt>Последняя активность</dt>
+          <dd>{a.lastSeenAt ? dateTime(a.lastSeenAt) : "входов не было"}</dd>
+          <dt>Сессии</dt>
+          <dd>
+            живых {a.activeSessions} из {a.totalSessions} всего
+          </dd>
+        </dl>
+        {latest.length > 0 ? (
+          <div className="sch-m06-sessions">
+            {latest.map((s) => (
+              <ActivitySession key={s.id} session={s} />
+            ))}
+          </div>
+        ) : null}
+      </>
+    );
+  }
+  return <div data-testid="S-31.activity">{body}</div>;
+}
+
+function ActivitySession({ session }: { session: AdminSessionDto }) {
+  const live = session.status === "active";
+  return (
+    <div className="sch-m06-session" data-testid="S-31.activity.session" data-status={session.status}>
+      <div className="sch-m06-session-title">
+        <strong>{session.deviceHint}</strong>
+        <Badge muted>{SESSION_CLIENT_LABELS[session.clientKind]}</Badge>
+      </div>
+      <div className="sch-m06-session-meta">
+        <span>{SESSION_VIA_LABELS[session.via]}</span>
+        <span>
+          {!live ? (
+            <>
+              <StatusDot tone="muted" />
+              завершена
+            </>
+          ) : session.online ? (
+            <>
+              <StatusDot tone="success" />в сети
+            </>
+          ) : (
+            <>
+              <StatusDot tone="muted" />
+              активность: {dateTime(session.lastSeenAt)}
+            </>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onClose: () => void; onChanged: () => void }) {
   const { can } = useSession();
   const [cur, setCur] = useState(card);
   const [token, setToken] = useState<string | null>(null);
   const [status, setStatus] = useState<"waiting" | "scanned" | "used" | "expired">("waiting");
-  const [registeredName, setRegisteredName] = useState<string | null>(card.name);
+  // Имя регистрации приходит ТОЛЬКО из поллинга: у заполненной, но не
+  // активированной карточки `card.name` уже есть, а «Зарегистрирован» — ещё нет.
+  const [registeredName, setRegisteredName] = useState<string | null>(null);
   const [loginCode, setLoginCode] = useState<{ code: string; expiresAt: string } | null>(null);
   const [addRole, setAddRole] = useState<DOMRect | null>(null);
   const [confirm, setConfirm] = useState<null | "delete" | "deactivate">(null);
   const { toast, showToast } = useToast();
   const mayManage = can("staff.manage");
+  // Ссылка входа на 48 часов — право `school.admin`, не `staff.manage` (AR-189).
+  const isAdmin = can("school.admin");
+  const loginLink = useLoginLink(card.id, showToast);
   const qrSize = useIsMobile() ? 200 : 240;
 
   const [fullName, setFullName] = useState<string | null>(null);
@@ -291,8 +431,8 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
       const r = await api.activationStatus(cur.id).catch(() => null);
       if (!r) return;
       setStatus(r.status as typeof status);
+      setRegisteredName(r.registeredName ?? null);
       if (r.registeredName) {
-        setRegisteredName(r.registeredName);
         const fresh = await api.staffCard(cur.id).catch(() => null);
         if (fresh) setCur(fresh);
         onChanged();
@@ -380,46 +520,53 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
             </p>
             {mayManage ? (
               <div className="sch-actions">
+                {/* Ссылка входа и до регистрации (AR-189): у человека без
+                    телефона QR сканировать нечем, а ссылка открывается где угодно. */}
+                {isAdmin ? <LoginLinkButton busy={loginLink.busy} onClick={loginLink.issue} /> : null}
                 <Button kind="ghost" testId="S-31.btn.reissuePassword" onClick={reissuePassword}>
                   Перевыпустить пароль
                 </Button>
               </div>
             ) : null}
+            {loginLink.link ? <LoginLinkBox link={loginLink.link} /> : null}
             {creds ? <CredentialsBox credentials={creds} /> : null}
           </div>
         ) : (
-          <div className="sch-stack">
-            <div className="sch-row">
-              <Avatar name={cur.name} url={cur.avatarUrl} />
-              <span>
-                {cur.name}
+          /* Панель управления зарегистрированной карточкой — группами: что за
+             учётка, как ей входить, что она делала, где её карточка, и в самом
+             низу — что с её доступом. Разрушающие действия последними: рука
+             доходит до них не раньше, чем глаз прочитал остальное. */
+          <div className="sch-m06-groups">
+            <section className="sch-m06-group">
+              <h3 className="sch-section-title">Учётная запись</h3>
+              <div className="sch-row">
+                <Avatar name={cur.name} url={cur.avatarUrl} />
+                <div className="sch-m06-who">
+                  <strong>{cur.name}</strong>
+                  {cur.username ? <span className="sch-muted">@{cur.username}</span> : null}
+                </div>
                 {cur.deactivated ? (
-                  <span data-testid="S-31.badge.inactive" style={{ marginLeft: "var(--sp-8)" }}>
+                  <span data-testid="S-31.badge.inactive">
                     <Badge muted>доступ закрыт</Badge>
                   </span>
                 ) : null}
-              </span>
-            </div>
-            <p data-testid="S-31.status">
-              Зарегистрирован: {cur.name}
-              {cur.username ? <span className="sch-muted"> · @{cur.username}</span> : null}
-            </p>
-
-            <div className="sch-chips">
-              {cur.roles.map((r) => (
-                <span key={r} className="sch-row" style={{ gap: "var(--sp-4)" }}>
-                  <Badge>{ROLE_LABELS[r]}</Badge>
-                  {mayManage ? (
-                    <Button kind="ghost" testId="S-31.btn.removeRole" onClick={() => act(() => api.removeRole(cur.id, r))}>
-                      Снять
-                    </Button>
-                  ) : null}
-                </span>
-              ))}
-            </div>
-
-            {mayManage ? (
-              <>
+              </div>
+              <p className="sch-muted" data-testid="S-31.status">
+                Зарегистрирован: {cur.name}
+              </p>
+              <div className="sch-chips">
+                {cur.roles.map((r) => (
+                  <span key={r} className="sch-row" style={{ gap: "var(--sp-4)" }}>
+                    <Badge>{ROLE_LABELS[r]}</Badge>
+                    {mayManage ? (
+                      <Button kind="ghost" testId="S-31.btn.removeRole" onClick={() => act(() => api.removeRole(cur.id, r))}>
+                        Снять
+                      </Button>
+                    ) : null}
+                  </span>
+                ))}
+              </div>
+              {mayManage ? (
                 <div className="sch-actions sch-actions--start">
                   <Button
                     kind="secondary"
@@ -428,46 +575,74 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
                   >
                     Добавить роль
                   </Button>
-                  <Button
-                    kind="primary"
-                    testId="S-31.btn.loginCode"
-                    onClick={async () => {
-                      try {
-                        setLoginCode(await api.loginCode(cur.id));
-                      } catch (e) {
-                        showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
-                      }
-                    }}
-                  >
-                    Код для входа
-                  </Button>
                 </div>
+              ) : null}
+            </section>
 
-                {loginCode ? (
-                  <div className="sch-canvas sch-qr" data-testid="S-31.loginCode">
-                    <QRCodeSVG value={`${window.location.origin}/login/code/${loginCode.code}`} size={160} />
-                    <strong style={{ fontSize: "var(--fs-h2)", letterSpacing: "0.2em" }}>{loginCode.code}</strong>
-                    <p className="sch-muted">
-                      Код живёт {ACCESS_PARAMS.loginCodeTtlMinutes} минут, одноразовый
-                    </p>
+            {mayManage ? (
+              <>
+                <section className="sch-m06-group">
+                  <h3 className="sch-section-title">Вход</h3>
+                  <div className="sch-actions sch-actions--start">
+                    <Button
+                      kind="primary"
+                      testId="S-31.btn.loginCode"
+                      onClick={async () => {
+                        try {
+                          setLoginCode(await api.loginCode(cur.id));
+                        } catch (e) {
+                          showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
+                        }
+                      }}
+                    >
+                      QR и код для входа
+                    </Button>
+                    {/* Ссылка на 48 часов — только администратору (AR-189):
+                        модератор выдаёт код на 5 минут, длинный срок — решение
+                        уровня доступа, а не ведения. */}
+                    {isAdmin ? <LoginLinkButton busy={loginLink.busy} onClick={loginLink.issue} /> : null}
+                    <Button kind="ghost" testId="S-31.btn.reissuePassword" onClick={reissuePassword}>
+                      Перевыпустить пароль
+                    </Button>
                   </div>
-                ) : null}
 
+                  {loginCode ? (
+                    <div className="sch-canvas sch-qr" data-testid="S-31.loginCode">
+                      <QRCodeSVG value={`${window.location.origin}/login/code/${loginCode.code}`} size={160} />
+                      <strong className="sch-m06-code">{loginCode.code}</strong>
+                      <p className="sch-muted">
+                        Код живёт {ACCESS_PARAMS.loginCodeTtlMinutes} минут, одноразовый
+                      </p>
+                    </div>
+                  ) : null}
+                  {loginLink.link ? <LoginLinkBox link={loginLink.link} /> : null}
+                  {creds ? <CredentialsBox credentials={creds} /> : null}
+                </section>
+
+                <section className="sch-m06-group">
+                  <h3 className="sch-section-title">Активность</h3>
+                  <ActivityBlock cardId={cur.id} />
+                </section>
+              </>
+            ) : null}
+
+            <section className="sch-m06-group">
+              <h3 className="sch-section-title">Профиль</h3>
+              {/* Ссылка на КАРТОЧКУ, не на вход (AR-187): открывает этот же
+                  экран тому, у кого доступ уже есть; никакого токена не несёт. */}
+              <CopyField testId="S-31.btn.copyProfile" label="Ссылка на карточку" value={`${window.location.origin}/staff/${cur.id}`} />
+              <p className="sch-muted">Открывает карточку сотрудника; входа не даёт</p>
+            </section>
+
+            {mayManage ? (
+              <section className="sch-m06-group">
+                <h3 className="sch-section-title">Доступ</h3>
                 <div className="sch-actions sch-actions--start">
-                  {/* Подмену решает СЕРВЕР: ровно одна кнопка из двух (AR-89). */}
                   {cur.deactivated ? (
                     <Button kind="secondary" testId="S-31.btn.reactivateStaff" onClick={() => act(() => api.reactivateStaff(cur.id))}>
                       Вернуть доступ
                     </Button>
-                  ) : cur.hasHistory ? (
-                    <Button kind="danger" testId="S-31.btn.deactivateStaff" onClick={() => setConfirm("deactivate")}>
-                      Деактивировать
-                    </Button>
-                  ) : (
-                    <Button kind="danger" testId="S-31.btn.deleteStaff" onClick={() => setConfirm("delete")}>
-                      Удалить сотрудника
-                    </Button>
-                  )}
+                  ) : null}
                   <Button
                     kind="danger"
                     testId="S-31.btn.revokeSessions"
@@ -484,12 +659,19 @@ function StaffCardModal({ card, onClose, onChanged }: { card: StaffCardDto; onCl
                   >
                     Отозвать активацию
                   </Button>
-                  <Button kind="ghost" testId="S-31.btn.reissuePassword" onClick={reissuePassword}>
-                    Перевыпустить пароль
-                  </Button>
+                  {/* Подмену решает СЕРВЕР: ровно одна кнопка из двух (AR-89);
+                      у деактивированной карточки вместо них «Вернуть доступ». */}
+                  {cur.deactivated ? null : cur.hasHistory ? (
+                    <Button kind="danger" testId="S-31.btn.deactivateStaff" onClick={() => setConfirm("deactivate")}>
+                      Деактивировать
+                    </Button>
+                  ) : (
+                    <Button kind="danger" testId="S-31.btn.deleteStaff" onClick={() => setConfirm("delete")}>
+                      Удалить сотрудника
+                    </Button>
+                  )}
                 </div>
-                {creds ? <CredentialsBox credentials={creds} /> : null}
-              </>
+              </section>
             ) : null}
           </div>
         )}

@@ -1,0 +1,71 @@
+/*
+ * `S-61` · кабинет завуча (AR-193): раскладка сводки готовности.
+ *
+ * Здесь только то, чего в `app.css` нет: две колонки чек-листов и строка
+ * пункта с кружком состояния. Плитки, бейджи, карточки, кнопки — из `app.css`.
+ *
+ * Цвета — только токенами (G-37, AR-42). Кружок состояния кодирует «сделано»
+ * формой (галочка внутри) и цветом одновременно — цвет один смысла не несёт
+ * (AR-80); рядом у каждой строки есть `data-done` для смока.
+ */
+
+.sch-dep-head { flex-wrap: wrap; }
+.sch-dep-head-meta { display: flex; align-items: center; gap: var(--sp-12); flex-wrap: wrap; padding-top: var(--sp-4); }
+
+/* Мобайл — одна колонка; с 768px — УТЦ | КПЦ рядом (75-adaptive §6). */
+.sch-dep-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-16); align-items: start; margin-bottom: var(--sp-24); }
+@media (min-width: 768px) {
+  .sch-dep-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.sch-dep-list { display: flex; flex-direction: column; gap: var(--sp-12); min-width: 0; }
+.sch-dep-list-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-12); flex-wrap: wrap; }
+/* С тегом: базовое `.sch h2.sch-section-title` (0,2,1) иначе перебивает отступ. */
+.sch-dep-list-head h2.sch-section-title { margin: 0; }
+
+.sch-dep-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.sch-dep-item {
+  display: flex; align-items: flex-start; gap: var(--sp-12);
+  padding: var(--sp-12) 0;
+  border-top: 1px solid var(--c-border-default);
+  min-width: 0;
+}
+.sch-dep-item:first-child { border-top: 0; }
+.sch-dep-item .sch-btn { flex: 0 0 auto; align-self: center; }
+
+/* Кружок состояния 24px: сделано — заливка success и белая галочка,
+   не сделано — пустой контур той же геометрии. Без анимаций: состояние
+   выведено из данных и не «выполняется» на глазах у человека. */
+.sch-dep-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; flex: 0 0 auto;
+  border-radius: var(--r-pill);
+  border: 2px solid var(--c-border-default);
+  margin-top: var(--sp-4);
+}
+.sch-dep-mark--done {
+  background: var(--c-state-success);
+  border-color: var(--c-state-success);
+  color: var(--c-ink-on-violet);
+}
+
+.sch-dep-item-text { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; flex: 1 1 auto; }
+.sch-dep-item-title { font-weight: var(--fw-medium); overflow-wrap: anywhere; }
+.sch-dep-item-owner { display: flex; }
+
+.sch-dep-actions { margin-bottom: var(--sp-24); flex-wrap: wrap; }
+.sch-dep-foot { max-width: 64ch; }
+
+/* Текст только для читалки: статус пункта словами рядом с кружком (AR-80). */
+.sch-visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
+
+@media (max-width: 767px) {
+  .sch-dep-actions .sch-btn { flex: 1 1 auto; }
+  /* «Открыть» в строке пункта — не во всю ширину (базовое `.sch-btn { width: 100% }`
+     в `app.css` иначе съедает строку): текст переносится, кнопка справа. */
+  .sch-dep-item .sch-btn { width: auto; flex: 0 0 auto; }
+}

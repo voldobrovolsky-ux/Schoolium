@@ -59,6 +59,14 @@ function useDeviceLink(active: boolean, next: string | null) {
   return { token, status, error, issue };
 }
 
+/** «48 часов», «24 часа»: срок — из `ACCESS_PARAMS`, склоняется только слово. */
+const hoursWord = (n: number): string => {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  const word = m100 >= 11 && m100 <= 14 ? "часов" : m10 === 1 ? "час" : m10 >= 2 && m10 <= 4 ? "часа" : "часов";
+  return `${n} ${word}`;
+};
+
 function AuthFrame({ children }: { children: React.ReactNode }) {
   return (
     <div className="sch sch-auth">
@@ -145,6 +153,81 @@ export function SchoolDirectoryScreen() {
   );
 }
 
+// ─────────────────────────── ячейки кода (S-05.code, M-21.code) ───────────────────────────
+
+/**
+ * Шесть ячеек кода — одна реализация на экран и модалку: автофокус на первую,
+ * автопереход, Backspace назад и ВСТАВКА. Код приходит человеку сообщением,
+ * и шесть цифр, вставленные в ячейку, заполняют ряд целиком — иначе от вставки
+ * оставалась одна цифра, и человек набирал остальные пять руками.
+ * Отправку по последней цифре решает родитель: он же знает, куда идти после.
+ */
+function CodeCells({
+  digits,
+  disabled,
+  shake,
+  testId,
+  onDigits,
+}: {
+  digits: string[];
+  disabled: boolean;
+  shake: boolean;
+  testId: string;
+  onDigits: (next: string[]) => void;
+}) {
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Пустой ряд — фокус на первую ячейку: при старте и после очистки по ошибке.
+  const empty = digits.every((d) => !d);
+  useEffect(() => {
+    if (empty && !disabled) refs.current[0]?.focus();
+  }, [empty, disabled]);
+
+  const setAt = (i: number, v: string) => {
+    const d = v.replace(/\D/g, "").slice(-1);
+    const next = [...digits];
+    next[i] = d;
+    onDigits(next);
+    if (d && i < digits.length - 1) refs.current[i + 1]?.focus();
+  };
+
+  const paste = (i: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    const chars = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, digits.length - i).split("");
+    if (chars.length === 0) return;
+    e.preventDefault();
+    const next = [...digits];
+    chars.forEach((c, k) => {
+      next[i + k] = c;
+    });
+    onDigits(next);
+    refs.current[Math.min(i + chars.length, digits.length - 1)]?.focus();
+  };
+
+  return (
+    <div className={shake ? "sch-code-cells sch-shake" : "sch-code-cells"} data-testid={testId}>
+      {digits.map((d, i) => (
+        <input
+          key={i}
+          ref={(el) => (refs.current[i] = el)}
+          className="sch-code-cell"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={1}
+          value={d}
+          disabled={disabled}
+          aria-label={`Цифра ${i + 1}`}
+          autoFocus={i === 0}
+          onChange={(e) => setAt(i, e.target.value)}
+          onPaste={(e) => paste(i, e)}
+          onKeyDown={(e) => {
+            if (e.key === "Backspace" && !digits[i] && i > 0) refs.current[i - 1]?.focus();
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─────────────────────────── M-21 · модалка входа ───────────────────────────
 
 /**
@@ -196,7 +279,6 @@ function ModalCodeEntry() {
   const [digits, setDigits] = useState<string[]>(Array(ACCESS_PARAMS.loginCodeDigits).fill(""));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const refs = useRef<(HTMLInputElement | null)[]>([]);
 
   const submit = async (code: string) => {
     setBusy(true);
@@ -204,47 +286,24 @@ function ModalCodeEntry() {
       const r = await api.verifyLoginCode(code);
       window.location.assign(r.startScreen);
     } catch (e) {
+      // Ошибка: встряска + очистка; фокус на первую ячейку возвращает `CodeCells`.
       setError(e instanceof SchoolApiError ? e.message : "Неверный код");
       setDigits(Array(ACCESS_PARAMS.loginCodeDigits).fill(""));
-      refs.current[0]?.focus();
     } finally {
       setBusy(false);
     }
   };
 
-  const setAt = (i: number, v: string) => {
-    const d = v.replace(/\D/g, "").slice(-1);
-    const next = [...digits];
-    next[i] = d;
+  const onDigits = (next: string[]) => {
     setDigits(next);
     setError(null);
-    if (d && i < digits.length - 1) refs.current[i + 1]?.focus();
     const code = next.join("");
     if (code.length === ACCESS_PARAMS.loginCodeDigits && !next.includes("")) void submit(code);
   };
 
   return (
     <>
-      <div className={error ? "sch-code-cells sch-shake" : "sch-code-cells"} data-testid="M-21.code">
-        {digits.map((d, i) => (
-          <input
-            key={i}
-            ref={(el) => (refs.current[i] = el)}
-            className="sch-code-cell"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={1}
-            value={d}
-            disabled={busy}
-            aria-label={`Цифра ${i + 1}`}
-            autoFocus={i === 0}
-            onChange={(e) => setAt(i, e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Backspace" && !digits[i] && i > 0) refs.current[i - 1]?.focus();
-            }}
-          />
-        ))}
-      </div>
+      <CodeCells digits={digits} disabled={busy} shake={!!error} testId="M-21.code" onDigits={onDigits} />
       {error ? (
         <p className="sch-danger-text" role="alert">
           {error}
@@ -271,12 +330,13 @@ export function LoginScreen({ next }: { next: string | null }) {
     return (
       <AuthFrame>
         <div className="sch-card sch-auth-card sch-stack">
+          <h2>Вход</h2>
           <p data-testid="S-01.caption">
             Наведите камеру на QR из вашей карточки
           </p>
           <p data-testid="S-01.status">{status === "used" ? "Устройство подключено" : "Ожидание сканирования…"}</p>
-          <Button kind="primary" testId="S-01.link.byCode" onClick={() => navigate("/login/code")}>
-            Войти по коду от модератора
+          <Button kind="secondary" testId="S-01.link.byCode" onClick={() => navigate("/login/code")}>
+            Войти по коду
           </Button>
           <PasswordLoginBlock next={next} />
           {/* Тупик назван честно (AR-92, G-44): без якоря и модератора входа нет — и написано, к кому идти. */}
@@ -288,9 +348,17 @@ export function LoginScreen({ next }: { next: string | null }) {
     );
   }
 
+  /*
+   * Иерархия карточки (§6 `S-01` desktop): заголовок, QR крупно — основной
+   * путь, подпись и статус под ним, затем запасные пути по убыванию:
+   * код от модератора, юзернейм и пароль. Карточка — колонка `sch-stack`, и
+   * кнопки в ней растягиваются на её 420px сами, без ширин в разметке; QR со
+   * своими подписями центрирован внутри `sch-qr`.
+   */
   return (
     <AuthFrame>
-      <div className="sch-card sch-auth-card sch-qr">
+      <div className="sch-card sch-auth-card sch-stack">
+        <h2>Вход</h2>
         {error ? (
           <>
             <p className="sch-danger-text" role="alert">
@@ -302,24 +370,28 @@ export function LoginScreen({ next }: { next: string | null }) {
           </>
         ) : (
           <>
-            <div className="sch-qr-frame" data-testid="S-01.qr">
-              {token ? (
-                /* Ссылка своего origin, а не схема `schoolium:` (В1): штатная
-                   камера iPhone открывает ссылку сама, а схему без
-                   обработчика открыть нечем. */
-                <QRCodeSVG value={`${window.location.origin}/link/${token.token}`} size={240} />
-              ) : (
-                <div className="sch-skeleton sch-skeleton--qr" />
-              )}
+            <div className="sch-qr">
+              <div className="sch-qr-frame" data-testid="S-01.qr">
+                {token ? (
+                  /* Ссылка своего origin, а не схема `schoolium:` (В1): штатная
+                     камера iPhone открывает ссылку сама, а схему без
+                     обработчика открыть нечем. */
+                  <QRCodeSVG value={`${window.location.origin}/link/${token.token}`} size={240} />
+                ) : (
+                  <div className="sch-skeleton sch-skeleton--qr" />
+                )}
+              </div>
+              <p data-testid="S-01.caption" className="sch-muted">
+                Наведите камеру телефона, в котором уже открыт кабинет
+              </p>
+              <p data-testid="S-01.status">{status === "used" ? "Устройство подключено" : "Ожидание сканирования…"}</p>
             </div>
-            <p data-testid="S-01.caption" className="sch-muted">
-              Наведите камеру телефона, в котором уже открыт кабинет
-            </p>
-            <p data-testid="S-01.status">{status === "used" ? "Устройство подключено" : "Ожидание сканирования…"}</p>
-            <Button kind="ghost" testId="S-01.link.byCode" onClick={() => navigate("/login/code")}>
-              Нет телефона под рукой? Войти по коду от модератора
+            <Button kind="secondary" testId="S-01.link.byCode" onClick={() => navigate("/login/code")}>
+              Войти по коду
             </Button>
             <PasswordLoginBlock next={next} />
+            {/* Тупик назван честно (AR-92, G-44): доступ выдаёт школа, и это
+                сказано один раз — здесь, а не подвалом на каждом экране. */}
             <p className="sch-muted" data-testid="S-01.note.help">
               Первый раз здесь? Доступ выдаёт модератор школы
             </p>
@@ -364,7 +436,7 @@ function PasswordLoginBlock({ next }: { next: string | null }) {
   };
 
   return (
-    <div className="sch-stack" style={{ width: "100%" }}>
+    <div className="sch-stack">
       <Field
         label="Юзернейм"
         testId="S-05p.input.username"
@@ -405,7 +477,6 @@ export function LoginCodeScreen({ code }: { code?: string }) {
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [denied, setDenied] = useState(false);
-  const refs = useRef<(HTMLInputElement | null)[]>([]);
 
   const submit = async (code: string) => {
     setBusy(true);
@@ -413,10 +484,10 @@ export function LoginCodeScreen({ code }: { code?: string }) {
       const r = await api.verifyLoginCode(code);
       window.location.assign(r.startScreen);
     } catch (e) {
-      // Ошибка: встряска + очистка (`S-05.code` состояния)
+      // Ошибка: встряска + очистка (`S-05.code` состояния); фокус на первую
+      // ячейку возвращает `CodeCells` по пустому ряду.
       setError(e instanceof SchoolApiError ? e.message : "Неверный код");
       setDigits(Array(ACCESS_PARAMS.loginCodeDigits).fill(""));
-      refs.current[0]?.focus();
     } finally {
       setBusy(false);
     }
@@ -435,13 +506,9 @@ export function LoginCodeScreen({ code }: { code?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
-  const setAt = (i: number, v: string) => {
-    const d = v.replace(/\D/g, "").slice(-1);
-    const next = [...digits];
-    next[i] = d;
+  const onDigits = (next: string[]) => {
     setDigits(next);
     setError(null);
-    if (d && i < digits.length - 1) refs.current[i + 1]?.focus();
     const code = next.join("");
     if (code.length === ACCESS_PARAMS.loginCodeDigits && !next.includes("")) void submit(code);
   };
@@ -492,26 +559,8 @@ export function LoginCodeScreen({ code }: { code?: string }) {
   return (
     <AuthFrame>
       <div className="sch-card sch-auth-card sch-stack">
-        <div className={error ? "sch-code-cells sch-shake" : "sch-code-cells"} data-testid="S-05.code">
-          {digits.map((d, i) => (
-            <input
-              key={i}
-              ref={(el) => (refs.current[i] = el)}
-              className="sch-code-cell"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={1}
-              value={d}
-              disabled={busy}
-              aria-label={`Цифра ${i + 1}`}
-              autoFocus={i === 0}
-              onChange={(e) => setAt(i, e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Backspace" && !digits[i] && i > 0) refs.current[i - 1]?.focus();
-              }}
-            />
-          ))}
-        </div>
+        <h2>Вход по коду</h2>
+        <CodeCells digits={digits} disabled={busy} shake={!!error} testId="S-05.code" onDigits={onDigits} />
         {error ? (
           <p className="sch-danger-text" role="alert">
             {error}
@@ -580,7 +629,7 @@ export function JoinScreen({ token }: { token: string }) {
         ) : noSession ? (
           <p data-testid="S-03.hint.otherDevice">
             Это устройство уже занято другой учёткой. Откройте ссылку со своего телефона
-            или войдите кодом с карточки: «Вход по коду» на странице входа.
+            или войдите кодом с карточки: кнопка «Войти по коду» на странице входа.
           </p>
         ) : (
           <p data-testid="S-03.hint.progress">Подключаем устройство…</p>
@@ -659,8 +708,8 @@ export function BootstrapScreen({ token }: { token: string }) {
               {error}
             </p>
             <p className="sch-muted">
-              Ссылка одноразова и живёт {ACCESS_PARAMS.bootstrapLinkTtlHours} часа. Новую выпускает администратор
-              платформы.
+              Ссылка живёт {hoursWord(ACCESS_PARAMS.bootstrapLinkTtlHours)} и открывается повторно, пока не истекла. Новую выпускает
+              администратор школы или платформы.
             </p>
           </>
         ) : (

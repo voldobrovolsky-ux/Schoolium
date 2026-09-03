@@ -1,38 +1,52 @@
 /**
  * `S-60` кабинет модератора, `S-70` сканер QR, `S-80` устройства и сессии,
- * плюс 403-экран для тех, кто пришёл на `/admin` не модератором.
+ * плюс 403-экран для тех, кто пришёл в кабинет модератора без права на него.
  *
  * Общее у трёх экранов одно: они говорят человеку правду о том, чего он не
  * может, и почему. Пустой страницы и молчаливого редиректа нет ни в одном
  * случае (`70-screens.md`, `S-60`).
+ *
+ * Словари канала входа и вида клиента (AR-187) живут здесь и отдаются
+ * карточке сотрудника (`S-31`): у сессии одни и те же слова на всех экранах.
  */
 import { useEffect, useRef, useState } from "react";
-import type { AuditEntryDto, SessionDto } from "@edustore/shared";
+import { SCHOOL_STATE_LABELS, SESSION_CLIENT_LABELS, SESSION_VIA_LABELS, type AuditEntryDto, type SessionDto } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile } from "../hooks";
-import { Badge, Button, EmptyState, ErrorState, Modal, Skeletons, Toast, useToast } from "../ui";
+import { Badge, Button, EmptyState, ErrorState, LinkRow, Modal, Skeletons, StatusDot, Toast, useToast } from "../ui";
+import { Icon, type IconName } from "../icons";
 import { CameraDenied, hasCamera, parseQr, QrCamera } from "../qr";
 import { useSession } from "../session";
 import { navigate } from "../router";
+import "./misc.css";
 
-const dateTime = (iso: string): string =>
+export const dateTime = (iso: string): string =>
   new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+/** Словари каналов входа, видов клиента и состояний — из общего контракта (П-5). */
+export const VIA_LABELS = SESSION_VIA_LABELS;
+export const CLIENT_KIND_LABELS = SESSION_CLIENT_LABELS;
+const STATE_LABELS = SCHOOL_STATE_LABELS;
 
 // ─────────────────────────── 403 · раздел не для этой роли ───────────────────────────
 
 /**
- * Экраны общие, действия гейтятся (AR-69) — но `/admin` целиком принадлежит
- * модератору, и остальным здесь показывается причина, а не пустота.
+ * Экраны общие, действия гейтятся (AR-69) — но кабинет модератора целиком
+ * принадлежит модератору, и остальным здесь показывается причина, а не
+ * пустота. Кнопка ведёт на стартовый экран РОЛИ (AR-95): у завуча это
+ * сводка, у педагога журнал, у родителя дневник — «/journal» для всех врал бы.
  */
 export function ForbiddenScreen() {
+  const { state } = useSession();
+  const home = state.status === "authed" ? state.me.startScreen : "/";
   return (
     <EmptyState
       testId="forbidden"
       title="Раздел доступен модератору школы"
-      hint="Ведение школы — классы, предметы, персонал, расписание — за модератором. Остальное вам открыто."
+      hint="Классы, предметы, персонал и расписание ведёт кабинет модератора. Сеть, устройства и доступ — кабинет администратора, сводка по школе — кабинет завуча. Ваш раздел открывается со стартового экрана."
       action={
-        <Button kind="primary" onClick={() => navigate("/journal")}>
-          К журналу
+        <Button kind="primary" onClick={() => navigate(home)}>
+          На стартовый экран
         </Button>
       }
     />
@@ -41,37 +55,58 @@ export function ForbiddenScreen() {
 
 // ─────────────────────────── S-60 · кабинет модератора ───────────────────────────
 
-const SECTIONS: { to: string; label: string; hint: string }[] = [
-  { to: "/classes", label: "Классы", hint: "контингент и профили учеников" },
-  { to: "/subjects", label: "Предметы", hint: "карточки «предмет × класс» и привязки педагогов" },
-  { to: "/staff", label: "Персонал", hint: "карточки сотрудников, роли, доступ" },
-  { to: "/guardians", label: "Родители", hint: "учётки родителей и связи с детьми" },
-  { to: "/schedule", label: "Расписание", hint: "сетка недели и её пересборка" },
+const SECTIONS: { to: string; label: string; hint: string; icon: IconName }[] = [
+  { to: "/classes", label: "Классы", hint: "контингент и профили учеников", icon: "users" },
+  { to: "/subjects", label: "Предметы", hint: "карточки «предмет × класс» и привязки педагогов", icon: "subjects" },
+  { to: "/staff", label: "Персонал", hint: "карточки сотрудников, роли, доступ", icon: "staff" },
+  { to: "/guardians", label: "Родители", hint: "учётки родителей и связи с детьми", icon: "users" },
+  { to: "/schedule", label: "Расписание", hint: "сетка недели и её пересборка", icon: "calendar" },
 ];
 
-export function AdminScreen() {
+export function ModeratorScreen() {
   const { can } = useSession();
-  const [state, reload] = useAsync(() => api.admin());
+  const [state, reload] = useAsync(() => api.moderatorCabinet());
 
   if (!can("school.manage")) return <ForbiddenScreen />;
   if (state.status === "loading") return <Skeletons count={4} kind="row" />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
 
+  const s = state.data.state;
+
   return (
     <>
       <div className="sch-page-head">
         <h1>Кабинет модератора</h1>
-        <Badge muted>состояние школы: {state.data.state}</Badge>
+        {/* Тон кодирует смысл (AR-80): журнал ведётся — сделано, сетка
+            устарела — ждёт человека, остальное — путь ещё идёт. */}
+        <Badge tone={s === "ready" ? "success" : s === "stale" ? "warning" : "muted"}>{STATE_LABELS[s]}</Badge>
       </div>
 
       <div className="sch-cards--4" data-testid="S-60.nav">
-        {SECTIONS.map((s) => (
-          <button key={s.to} className="sch-card sch-card--link" onClick={() => navigate(s.to)}>
-            <span className="sch-card-title">{s.label}</span>
-            <span className="sch-muted">{s.hint}</span>
+        {SECTIONS.map((x) => (
+          <button key={x.to} className="sch-card sch-card--link" onClick={() => navigate(x.to)}>
+            <span className="sch-linkrow-icon" aria-hidden="true">
+              <Icon name={x.icon} size={20} />
+            </span>
+            <span className="sch-card-title">{x.label}</span>
+            <span className="sch-muted">{x.hint}</span>
           </button>
         ))}
       </div>
+
+      {/* Соседние кабинеты (AR-186): администратор и завуч часто те же люди,
+          что и модератор, — переход к своему второму кабинету стоит здесь, а
+          не только в сайдбаре, которого на телефоне нет. */}
+      {can("school.admin") || can("school.oversee") ? (
+        <div className="sch-list--rows sch-s60-cabinets">
+          {can("school.admin") ? (
+            <LinkRow icon="shieldCheck" label="Администрирование" hint="сеть, устройства, доступ" onClick={() => navigate("/admin")} />
+          ) : null}
+          {can("school.oversee") ? (
+            <LinkRow icon="checklist" label="Кабинет завуча" hint="сводка по школе" onClick={() => navigate("/deputy")} />
+          ) : null}
+        </div>
+      ) : null}
 
       {/* S-32 · «Не авторизованные» (AR-161): рабочий экран события 30.08 —
           заведено, но не активировано; активация убирает строку сама. */}
@@ -344,10 +379,10 @@ export function DevicesScreen({ linkToken }: { linkToken?: string } = {}) {
   if (state.status === "loading") return <Skeletons count={3} kind="row" />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
 
-  /* Основной случай — телефон подключает ноутбук (`S-80` mobile): кнопка
-     открывает КАМЕРУ во весь экран (§6), а не поле для ручного ввода кода.
-     На десктопе камера смотрит на человека, а не на чужой экран, поэтому там
-     остаётся ввод кода — тот же разбор, что у `S-70`. */
+  /* Телефон подключает ноутбук (`S-80` mobile): кнопка открывает КАМЕРУ во
+     весь экран (§6), а не поле для ручного ввода кода. На десктопе кнопки нет:
+     экран входа десктопа показывает только QR, кода там нет — вводить нечего,
+     а камера ноутбука смотрит на человека, а не на чужой экран. */
   if (scanning) {
     if (denied) return <CameraDenied testId="S-80.error.denied" />;
     return (
@@ -371,24 +406,24 @@ export function DevicesScreen({ linkToken }: { linkToken?: string } = {}) {
   return (
     <>
       <div className="sch-page-head">
-        <h1>Устройства и сессии</h1>
-        {/* Кнопка скрыта, если камеры нет: подключать нечем, а неработающая
-            кнопка врёт о возможности (§6). */}
-        {hasCamera() ? (
-          <Button
-            kind="primary"
-            testId="S-80.btn.linkDevice"
-            onClick={() => {
-              if (mobile) return setScanning(true);
-              const raw = window.prompt("Код с экрана входа подключаемого устройства");
-              if (!raw) return;
-              const qr = parseQr(raw) ?? { kind: "link" as const, value: raw.trim() };
-              setPending({ token: qr.value, hint: "новое устройство" });
-            }}
-          >
+        <div className="sch-s80-head">
+          <h1>Устройства и сессии</h1>
+          {/* Одна строка о том, что такое сессия: без неё «Завершить» читается
+              как «удалить устройство», а не как «выйти на нём». */}
+          <p className="sch-s80-lead">
+            Сессия — это вход с одного устройства. Завершение сессии выводит это устройство из кабинета.
+          </p>
+        </div>
+        {/* Кнопка только на телефоне с камерой: без камеры подключать нечем, а
+            неработающая кнопка врёт о возможности (§6); на десктопе — одна
+            строка, откуда подключение делается. */}
+        {mobile && hasCamera() ? (
+          <Button kind="primary" testId="S-80.btn.linkDevice" onClick={() => setScanning(true)}>
             Подключить устройство
           </Button>
-        ) : null}
+        ) : mobile ? null : (
+          <p className="sch-muted">Подключить устройство можно с телефона: наведите его камеру на QR с экрана входа</p>
+        )}
       </div>
 
       <div className="sch-list" data-testid="S-80.list.sessions">
@@ -446,6 +481,12 @@ export function DevicesScreen({ linkToken }: { linkToken?: string } = {}) {
   );
 }
 
+/**
+ * Строка сессии (AR-187): устройство, вид клиента, канал входа, «в сети» либо
+ * время последней активности. Сессия, выданная сканом с телефона, подписана
+ * отдельно — человек видит, откуда у ноутбука доступ, и что закрывать, если
+ * телефон потерян.
+ */
 function SessionRow({
   session,
   onEnded,
@@ -457,12 +498,31 @@ function SessionRow({
 }) {
   const [busy, setBusy] = useState(false);
   return (
-    <div className="sch-card sch-row sch-row--between">
-      <div>
-        <div>
-          {session.deviceHint} {session.current ? <Badge>это устройство</Badge> : null}
+    <div className="sch-card sch-s80-session" data-parent={session.parentSessionId ?? undefined}>
+      <div className="sch-s80-session-main">
+        <div className="sch-s80-session-title">
+          <strong>{session.deviceHint}</strong>
+          <Badge tone="brand" testId="S-80.session.kind">
+            {CLIENT_KIND_LABELS[session.clientKind]}
+          </Badge>
+          {session.parentSessionId ? <Badge muted>подключена с телефона</Badge> : null}
+          {session.current ? <Badge>это устройство</Badge> : null}
         </div>
-        <span className="sch-muted">последняя активность: {dateTime(session.lastSeenAt)}</span>
+        <div className="sch-s80-session-meta">
+          <span>
+            {session.online ? (
+              <>
+                <StatusDot tone="success" />в сети
+              </>
+            ) : (
+              <>
+                <StatusDot tone="muted" />
+                активность: {dateTime(session.lastSeenAt)}
+              </>
+            )}
+          </span>
+          <span>{VIA_LABELS[session.via]}</span>
+        </div>
       </div>
       {/* Текущую сессию завершить нельзя: это «выйти», и кнопка для этого своя. */}
       {session.current ? null : (

@@ -4,7 +4,8 @@
  * продаёт школе продукт, а не сама школа.
  *
  * Создаёт `Workspace`, `User` и членство модератора по номеру телефона и печатает
- * ОДНОРАЗОВУЮ ссылку входа на 24 часа. Та же команда перевыпускает ссылку, если
+ * ОДНОРАЗОВУЮ ссылку входа на 48 часов (`ACCESS_PARAMS.bootstrapLinkTtlHours`,
+ * AR-189). Та же команда перевыпускает ссылку, если
  * единственный модератор остался без единой живой сессии, — школа не запирается
  * навсегда.
  *
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
       process.exit(3);
     }
     const url = await issueLink(m.workspaceId, user.id);
-    console.log(`Ссылка перевыпущена (одноразовая, ${ACCESS_PARAMS.bootstrapLinkTtlHours} ч):\n${url}`);
+    console.log(`Ссылка перевыпущена (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч, открывать можно повторно):\n${url}`);
     return;
   }
 
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
       `Школа создана: ${schoolName} (workspace ${workspace.id})`,
       `Модератор: ${displayName}, телефон ${phone}`,
       `Креды: ${credentialsNote}`,
-      `Одноразовая ссылка входа (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч) — передайте директору лично:`,
+      `Ссылка входа (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч, открывать можно повторно) — передайте директору лично:`,
       url,
     ].join('\n'),
   );

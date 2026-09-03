@@ -1611,11 +1611,20 @@ model AppSession {
   workspaceId   String
   roles         String[]
   deviceHint    String    @default("")
+  // 1.3.0 (AR-187): происхождение сессии — для карты устройств администратора.
+  // `via` — канал входа; `clientKind` — вкладка браузера либо установленное
+  // приложение (заголовок `x-schoolium-client`); `ip` — адрес первого хопа за
+  // прокси (журнал подключений, «новая сеть»); `parentSessionId` — сессия
+  // телефона, подтвердившая подключение сканом (AR-94), иначе NULL — прямой вход.
+  via             String    @default("unknown")
+  clientKind      String    @default("browser")
+  ip              String?
+  parentSessionId String?
   createdAt     DateTime  @default(now())
   lastSeenAt    DateTime  @default(now())
   expiresAt     DateTime
   revokedAt     DateTime?
-  revokedReason String? // deactivated | deleted | manual
+  revokedReason String? // deactivated | deleted | manual | activation_revoked | incident | limit | admin
 
   @@index([userId])
   @@index([workspaceId])
@@ -1685,9 +1694,57 @@ model BootstrapLink {
   workspaceId String
   token       String    @unique
   userId      String
+  // 1.3.0 (AR-189): та же одноразовая ссылка выпускается и администратором с
+  // карточки сотрудника (`purpose = login_link`, `issuedBy` — его userId);
+  // консольная — `bootstrap`, `issuedBy` NULL. Срок обеих — 48 часов.
+  purpose     String    @default("bootstrap")
+  issuedBy    String?
   usedAt      DateTime?
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
 
   @@index([workspaceId])
+}
+
+// ─────────────────── кабинет администратора 1.3.0 (AR-186, AR-188) ───────────────────
+// Три реестровые таблицы школы под tenant-guard. Ничего из контура доступа
+// они не дублируют: сессии остаются в `AppSession`, ссылки — в `BootstrapLink`.
+
+/// Wi-Fi сеть школы: справочник для администратора (кто к чему подключается).
+model SchoolNetwork {
+  id          String   @id @default(cuid())
+  workspaceId String
+  ssid        String
+  audience    String   @default("staff") // staff | students | guests | devices
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+}
+
+/// Корпоративное устройство школы: принтер, сканер, компьютер, проектор.
+model SchoolAsset {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  kind        String   @default("other") // printer | scanner | computer | projector | router | other
+  location    String?
+  networkId   String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+}
+
+/// Политика доступа школы (AR-188): лимиты одновременных сессий по ролям и
+/// след последнего инцидент-режима. Одна строка на школу, создаётся лениво.
+model SchoolAccessPolicy {
+  id             String    @id @default(cuid())
+  workspaceId    String    @unique
+  sessionLimits  Json      @default("{}")
+  incidentAt     DateTime?
+  incidentBy     String?
+  updatedAt      DateTime  @updatedAt
 }

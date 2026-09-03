@@ -37,8 +37,12 @@ function swBuild(): Plugin {
 }
 
 // Алиасы: @ → src, @edustore/shared → пакет контрактов (как TS-исходник, без сборки).
+/** Версия приложения — из корневого package.json (один источник, П-5). */
+const APP_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL("../../package.json", import.meta.url)), "utf8")) as { version: string }).version;
+
 export default defineConfig({
   plugins: [react(), swBuild()],
+  define: { __APP_VERSION__: JSON.stringify(APP_VERSION) },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

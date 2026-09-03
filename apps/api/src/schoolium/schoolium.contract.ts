@@ -1,5 +1,6 @@
 /**
- * Событийный контракт Schoolium 1.1.1 — двадцать два события версии.
+ * Событийный контракт Schoolium 1.1.1 — двадцать два события версии, плюс три
+ * события кабинета администратора 1.3.0 (AR-186, AR-188, AR-189): двадцать пять.
  *
  * Канон имени (AR-23): `<домен>.<агрегат>.<глаголПрош>.v<N>`; публикация — только
  * через transactional outbox (AR-5), доставка каждому подписчику — через inbox
@@ -33,6 +34,13 @@ export const SCHOOL_EVENTS = {
   markPosted: 'journal.mark.posted.v1',
   markRemoved: 'journal.mark.removed.v1',
   topicSet: 'journal.topic.set.v1',
+  // 1.3.0 — кабинет администратора: ссылка входа с карточки (AR-189), лимиты
+  // сессий (AR-188), реестры сети и устройств (AR-186). Все три — «только
+  // аудит»: администратор держит полные права, противовес им тот же, что у
+  // модератора (AR-88) — след каждого действия с его идентичностью.
+  loginLinkIssued: 'staff.login_link.issued.v1',
+  policySet: 'school.policy.set.v1',
+  registryChanged: 'school.registry.changed.v1',
 } as const;
 
 export type SchoolEventType = (typeof SCHOOL_EVENTS)[keyof typeof SCHOOL_EVENTS];
@@ -80,10 +88,17 @@ export interface StaffReactivatedV1 { userId: string }
 export interface StaffDeletedV1 { userId: string; unboundSubjects: string[] }
 export interface SessionStartedV1 {
   userId: string;
-  via: 'registration' | 'device_link' | 'login_code' | 'bootstrap_link' | 'password';
+  /** Канал входа (AR-187): `login_link` — одноразовая ссылка с карточки (AR-189). */
+  via: 'registration' | 'device_link' | 'login_code' | 'bootstrap_link' | 'login_link' | 'password';
   deviceHint: string;
+  /** Вкладка браузера либо установленное приложение — заголовок `x-schoolium-client`. */
+  clientKind: 'browser' | 'pwa';
 }
-export interface SessionRevokedV1 { userId: string; reason: 'deactivated' | 'deleted' | 'manual' | 'activation_revoked' }
+export interface SessionRevokedV1 {
+  userId: string;
+  /** `incident` — инцидент-режим (AR-188), `limit` — лимит сессий роли, `admin` — адресный отзыв из `S-62`. */
+  reason: 'deactivated' | 'deleted' | 'manual' | 'activation_revoked' | 'incident' | 'limit' | 'admin';
+}
 export interface TermSetV1 { termNo: number; dateFrom: string; dateTo: string }
 export interface TemplateConfirmedV1 { templateId: string; seed: number; weekSlots: number }
 export interface LessonMaterializedV1 {
@@ -99,6 +114,17 @@ export interface LessonDetachedV1 { lessonId: string; date: string; classId: str
 export interface MarkPostedV1 { lessonId: string; studentId: string; mark: string; postedBy: string }
 export interface MarkRemovedV1 { lessonId: string; studentId: string; removedBy: string }
 export interface TopicSetV1 { lessonId: string; topic: string; setBy: string }
+/** Одноразовая ссылка входа с карточки сотрудника, 48 часов (AR-189). */
+export interface LoginLinkIssuedV1 { userId: string; issuedBy: string; expiresAt: string }
+/** Лимиты одновременных сессий по ролям (AR-188): `null` — без лимита. */
+export interface PolicySetV1 { sessionLimits: Record<string, number | null> }
+/** Реестр Wi-Fi сетей и корпоративных устройств школы (AR-186). */
+export interface RegistryChangedV1 {
+  kind: 'network' | 'asset';
+  op: 'created' | 'updated' | 'deleted';
+  id: string;
+  name: string;
+}
 
 // ─────────────── реестр «издатель → подписчик → реакция» (AR-108) ───────────────
 
@@ -139,6 +165,10 @@ export const EVENT_CONTRACT: EventContractRow[] = [
   { type: SCHOOL_EVENTS.markPosted, publisher: 'journal', subscribers: [], reaction: 'нет подписчика (только аудит): средний балл считается чтением' },
   { type: SCHOOL_EVENTS.markRemoved, publisher: 'journal', subscribers: [], reaction: 'нет подписчика (только аудит): снятие отметки именное (AR-88)' },
   { type: SCHOOL_EVENTS.topicSet, publisher: 'journal', subscribers: [], reaction: 'нет подписчика (только аудит): тема не влияет ни на что, кроме себя' },
+  // 1.3.0 (AR-186…AR-189): три события кабинета администратора
+  { type: SCHOOL_EVENTS.loginLinkIssued, publisher: 'access', subscribers: [], reaction: 'нет подписчика (только аудит): кто и кому выпустил одноразовую ссылку входа на 48 часов' },
+  { type: SCHOOL_EVENTS.policySet, publisher: 'administration', subscribers: [], reaction: 'нет подписчика (только аудит): кто изменил лимиты сессий; лимит применяется при следующей выдаче сессии, живые не трогает' },
+  { type: SCHOOL_EVENTS.registryChanged, publisher: 'administration', subscribers: [], reaction: 'нет подписчика (только аудит): изменение реестра Wi-Fi сетей и корпоративных устройств школы' },
 ];
 
 /**
@@ -173,6 +203,10 @@ export const AUDIT_LABELS: Record<SchoolEventType, { action: string; object: str
   [SCHOOL_EVENTS.markPosted]: { action: 'выставлена отметка', object: 'ученик' },
   [SCHOOL_EVENTS.markRemoved]: { action: 'снята отметка', object: 'ученик' },
   [SCHOOL_EVENTS.topicSet]: { action: 'записана тема урока', object: 'урок' },
+  // 1.3.0: строки аудита кабинета администратора (`S-62.audit`)
+  [SCHOOL_EVENTS.loginLinkIssued]: { action: 'выпущена ссылка входа', object: 'сотрудник' },
+  [SCHOOL_EVENTS.policySet]: { action: 'изменены лимиты сессий', object: 'политика доступа' },
+  [SCHOOL_EVENTS.registryChanged]: { action: 'изменён реестр сети и устройств', object: 'реестр' },
 };
 
 /**

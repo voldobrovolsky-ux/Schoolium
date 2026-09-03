@@ -51,6 +51,10 @@ const HOME = {
   'S-23': ['screens/subjects.tsx'],
   'S-32': ['screens/misc.tsx'],
   'S-90': ['screens/diary.tsx'], 'S-91': ['screens/diary.tsx'],
+  // 1.3.0 (AR-186, AR-191): три кабинета и настройки
+  'S-61': ['screens/deputy.tsx'],
+  'S-62': ['screens/admin.tsx'],
+  'S-81': ['screens/settings.tsx'], 'S-82': ['screens/settings.tsx'],
 };
 
 const spec = fs.readFileSync(SPEC, 'utf8');

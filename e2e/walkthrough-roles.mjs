@@ -276,9 +276,11 @@ async function main() {
     const M = 'модератор';
 
     console.log('\n▶ 1. Контроль: кто из педагогов не заполнил журнал');
-    await mod.goto(`${WEB}/admin`);
+    // С 1.3.0 кабинет модератора живёт на `/moderator`; `/admin` отдан
+    // кабинету администратора `S-62` (AR-186) — обход его не расширяет.
+    await mod.goto(`${WEB}/moderator`);
     await settle(mod, '[data-testid="S-60.nav"]');
-    await shot(mod, 'moder-01-admin');
+    await shot(mod, 'moder-01-moderator');
     await can(mod, M, 'видит, кто не заполнил журнал', '[data-testid="S-60.journal.gaps"], [data-testid="S-60.control"]');
     await can(mod, M, 'видит сводку по школе (успеваемость, посещаемость)', '[data-testid="S-60.summary"], [data-testid="S-60.stats"]');
 

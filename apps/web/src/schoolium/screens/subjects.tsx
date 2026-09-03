@@ -20,6 +20,7 @@ import {
 } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile, usePolling } from "../hooks";
+import { Icon } from "../icons";
 import { Avatar, Button, EmptyState, ErrorState, Field, Modal, Skeletons, Toast, useToast } from "../ui";
 import { useSession } from "../session";
 import { navigate } from "../router";
@@ -165,6 +166,7 @@ export function SubjectsScreen({ openId, competenceId }: { openId?: string; comp
 
       {subjects.length === 0 ? (
         <EmptyState
+          icon="subjects"
           testId="S-20.empty"
           title="Предметов пока нет"
           hint={mayWrite ? "Создайте предметы — к ним привяжете педагогов" : "Предметы появятся, когда модератор их создаст"}
@@ -389,7 +391,7 @@ function SubjectCardModal({ subject, onClose, onChanged }: { subject: SubjectDto
                 Вручную
               </Button>
               <Button kind="fab" testId="S-21.btn.bind" aria-label="Привязать педагога" onClick={() => setBind(true)}>
-                +
+                <Icon name="plus" />
               </Button>
             </span>
           ) : null}
@@ -978,6 +980,7 @@ export function CompetenceLink({ teacherId }: { teacherId: string }) {
   if (may) return null;
   return (
     <EmptyState
+      icon="qr"
       testId="S-20.competence.denied"
       title="Это личный QR педагога"
       hint="Компетенции назначает модератор: он сканирует этот код и отмечает предметы галочками в «Предметах» → «Управление компетенцией»"

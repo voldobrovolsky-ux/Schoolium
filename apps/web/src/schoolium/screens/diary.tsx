@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { type DiaryChildDto, type DiaryWeekDto, type SubjectAverageDto } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { useIsMobile } from "../hooks";
+import { Icon } from "../icons";
 import { Badge, Button, EmptyState, ErrorState, Skeletons } from "../ui";
 import { navigate } from "../router";
 import {
@@ -90,6 +91,7 @@ export function DiaryScreen() {
         <Skeletons count={4} />
       ) : children.length === 0 ? (
         <EmptyState
+          icon="journal"
           testId="S-90.empty"
           title="Дневников пока нет"
           hint="Записи появятся, когда модератор школы привяжет к вашей учётке ученика"
@@ -211,7 +213,7 @@ function WeekView({
   return (
     <div className="sch-stack" data-testid="S-90.week">
       {data.weeks.length === 0 && data.days.length === 0 ? (
-        <EmptyState testId="S-90.emptyWeek" title="Уроков на этой неделе нет" />
+        <EmptyState icon="journal" testId="S-90.emptyWeek" title="Уроков на этой неделе нет" />
       ) : mobile ? (
         <>
           <div className="sch-weekbar">
@@ -222,7 +224,7 @@ function WeekView({
               aria-label="Предыдущая неделя"
               onClick={() => prev && onPick(addDays(prev.monday, dayNoOf(open)))}
             >
-              ‹
+              <Icon name="chevronLeft" />
             </button>
             <span className="sch-weekrange" data-testid="S-90.weekRange">
               {weekRange(mondayOf(open), addDays(mondayOf(open), 5))}
@@ -234,7 +236,7 @@ function WeekView({
               aria-label="Следующая неделя"
               onClick={() => next && onPick(addDays(next.monday, dayNoOf(open)))}
             >
-              ›
+              <Icon name="chevronRight" />
             </button>
           </div>
 
@@ -277,7 +279,7 @@ function WeekView({
 /** `S-91` (AR-159): средние по предметам; рейтинг-ранжирование — отдельная спека. */
 function AveragesView({ rows }: { rows: SubjectAverageDto[] }) {
   if (rows.length === 0) {
-    return <EmptyState testId="S-91.empty" title="Предметов пока нет" hint="Успеваемость появится вместе с расписанием" />;
+    return <EmptyState icon="journal" testId="S-91.empty" title="Предметов пока нет" hint="Успеваемость появится вместе с расписанием" />;
   }
   return (
     <div className="sch-card" data-testid="S-91.table">

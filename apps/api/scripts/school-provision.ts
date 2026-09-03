@@ -9,19 +9,23 @@
  *   3. `--admin-name/--admin-username` — учётка администратора школы
  *      (roles `admin`+`moderator`, как у оператора bootstrap);
  *   4. `--moderator-name/--moderator-username` — учётка модератора школы;
- *   5. каждой созданной или найденной учётке перевыпускает ОДНОРАЗОВУЮ ссылку
- *      входа (24 ч) и печатает её; новой — печатает и креды (один раз).
+ *   5. `--deputy-name/--deputy-username` — учётка завуча (1.3.0, AR-186:
+ *      роль `deputy_academic`, карточка секции «Заместители», кабинет `S-61`);
+ *   6. каждой созданной или найденной учётке перевыпускает ОДНОРАЗОВУЮ ссылку
+ *      входа (48 ч, `purpose = bootstrap`, AR-189) и печатает её; новой —
+ *      печатает и креды (один раз). Вход по ссылке активирует учётку (AR-161).
  *
  * Существующая учётка (по юзернейму) НЕ пересоздаётся: роли дополняются до
  * запрошенных, пароль не трогается, ссылка перевыпускается.
  *
  *   npm --workspace apps/api run school:provision -- \
  *     --admin-name="Фамилия Имя" --admin-username=vol \
- *     --moderator-name="Иванова Оксана" --moderator-username=veles
+ *     --moderator-name="Иванова Оксана" --moderator-username=veles \
+ *     --deputy-name="Сидорова Елена" --deputy-username=elena
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { ACCESS_PARAMS, type SchoolRole } from '@edustore/shared';
+import { ACCESS_PARAMS, usernameProblem, type SchoolRole } from '@edustore/shared';
 import { generatePassword, hashPassword } from '../src/schoolium/staff/credentials';
 
 const prisma = new PrismaClient();
@@ -34,10 +38,17 @@ const arg = (name: string): string | undefined => {
 
 const HOUR = 3600 * 1000;
 
+/** Платформенная ссылка: `purpose = bootstrap`, без `issuedBy` — выпущена консолью, а не администратором (AR-189). */
 async function issueLink(workspaceId: string, userId: string): Promise<string> {
   const token = randomBytes(24).toString('hex');
   await prisma.bootstrapLink.create({
-    data: { workspaceId, userId, token, expiresAt: new Date(Date.now() + ACCESS_PARAMS.bootstrapLinkTtlHours * HOUR) },
+    data: {
+      workspaceId,
+      userId,
+      token,
+      purpose: 'bootstrap',
+      expiresAt: new Date(Date.now() + ACCESS_PARAMS.loginLinkTtlHours * HOUR),
+    },
   });
   const base = process.env.WEB_ORIGIN ?? 'http://localhost:5173';
   return `${base}/bootstrap/${token}`;
@@ -47,8 +58,21 @@ async function ensure(
   workspaceId: string,
   roles: SchoolRole[],
   displayName: string,
-  username: string,
+  rawUsername: string,
+  card: { section: number; plannedRoles: SchoolRole[] } = { section: 1, plannedRoles: roles.filter((r) => r === 'moderator') },
 ): Promise<string[]> {
+  // Юзернейм — как его примет форма входа (S-05′): без пробелов и в нижнем
+  // регистре; иначе `Vol ` заведёт учётку, в которую нельзя войти.
+  const username = rawUsername.trim().toLowerCase();
+  const problem = usernameProblem(username);
+  if (problem) {
+    console.error(
+      problem === 'reserved'
+        ? `юзернейм «${username}» зарезервирован — выберите другой`
+        : `юзернейм «${username}» недопустим: 3–30 знаков, только латиница в нижнем регистре, цифры и _`,
+    );
+    process.exit(3);
+  }
   const [lastName, firstName] = displayName.split(/\s+/);
   let user = await prisma.user.findUnique({ where: { username } });
   let creds = 'креды прежние — учётка уже существовала, пароль не тронут';
@@ -77,17 +101,17 @@ async function ensure(
       await prisma.membership.update({ where: { id: membership.id }, data: { roles: merged } });
     }
   }
-  const card = await prisma.staffCard.findFirst({ where: { workspaceId, userId: user.id } });
-  if (!card) {
+  const existing = await prisma.staffCard.findFirst({ where: { workspaceId, userId: user.id } });
+  if (!existing) {
     await prisma.staffCard.create({
-      data: { workspaceId, section: 1, plannedRoles: roles.filter((r) => r === 'moderator'), userId: user.id, seq: 0 },
+      data: { workspaceId, section: card.section, plannedRoles: card.plannedRoles, userId: user.id, seq: 0 },
     });
   }
   const url = await issueLink(workspaceId, user.id);
   return [
     `— ${displayName} (@${username}) · роли: ${roles.join(', ')}`,
     `  ${creds}`,
-    `  одноразовая ссылка входа (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч): ${url}`,
+    `  ссылка входа (${ACCESS_PARAMS.loginLinkTtlHours} ч, открывать можно повторно): ${url}`,
   ];
 }
 
@@ -125,6 +149,14 @@ async function main(): Promise<void> {
   if (modName && modUsername) {
     out.push('', 'Модератор школы:');
     out.push(...(await ensure(ws.id, ['moderator'], modName, modUsername)));
+  }
+  const depName = arg('deputy-name');
+  const depUsername = arg('deputy-username');
+  if (depName && depUsername) {
+    out.push('', 'Завуч (заместитель по учебной работе):');
+    // Секция 2 — «Заместители» (S-30); `plannedRoles` пусты: роль живёт в
+    // членстве, а карточка с учёткой не является слотом (AR-182).
+    out.push(...(await ensure(ws.id, ['deputy_academic'], depName, depUsername, { section: 2, plannedRoles: [] })));
   }
   console.log(out.join('\n'));
 }

@@ -85,6 +85,9 @@ export const MUTATION_PERMISSIONS = [
   'journal.mark.post',
   'journal.topic.set',
   'staff.self.write',
+  // 1.3.0 (AR-186): кабинет администратора — сеть, устройства, политики,
+  // реестры, полный аудит школы. Держит ТОЛЬКО `admin`; модератор — нет.
+  'school.admin',
 ] as const;
 
 /** Пять читающих прав штатных ролей. Шаблона «*.read» не существует. */
@@ -99,7 +102,20 @@ export const READ_PERMISSIONS = [
 /** Проекции ученика и родителя (AR-158): дневник и средние по предметам. */
 export const PROJECTION_PERMISSIONS = ['diary.read'] as const;
 
-export const SCHOOL_PERMISSIONS = [...MUTATION_PERMISSIONS, ...READ_PERMISSIONS, ...PROJECTION_PERMISSIONS] as const;
+/**
+ * Надзорное право завуча (AR-186): кабинет `S-61` — сводки готовности УТЦ и
+ * КПЦ, чтение без единой мутации. Отдельная группа, а не «читающее право»:
+ * пятёрка `*.read` выдаётся всем штатным ролям, а кабинет завуча — только
+ * завучу и администратору.
+ */
+export const OVERSIGHT_PERMISSIONS = ['school.oversee'] as const;
+
+export const SCHOOL_PERMISSIONS = [
+  ...MUTATION_PERMISSIONS,
+  ...READ_PERMISSIONS,
+  ...PROJECTION_PERMISSIONS,
+  ...OVERSIGHT_PERMISSIONS,
+] as const;
 export type SchoolPermission = (typeof SCHOOL_PERMISSIONS)[number];
 
 /**
@@ -112,12 +128,14 @@ export type SchoolPermission = (typeof SCHOOL_PERMISSIONS)[number];
  * отметку в непроведённый урок и админу.
  */
 export const ROLE_PERMISSIONS: Record<SchoolRole, SchoolPermission[]> = {
-  admin: [...MUTATION_PERMISSIONS, ...READ_PERMISSIONS],
+  // 1.3.0 (AR-186): администратор держит все мутации, чтения и надзор —
+  // три кабинета (`/admin`, `/moderator`, `/deputy`) открыты ему целиком.
+  admin: [...MUTATION_PERMISSIONS, ...READ_PERMISSIONS, ...OVERSIGHT_PERMISSIONS],
   // AR-174: панель УТЦ (предметы, привязки, расписание) переезжает модератору…
   moderator: [...READ_PERMISSIONS, 'school.manage', 'contingent.write', 'staff.manage', 'staff.self.write', 'schedule.build', 'subject.write'],
   // …а завуч расставляет ТОЛЬКО годовые нормы часов: ни скелета, ни генерации,
   // ни календаря, ни привязок (решение владельца 2026-08-30, №9)
-  deputy_academic: [...READ_PERMISSIONS, 'schedule.load.write', 'staff.self.write'],
+  deputy_academic: [...READ_PERMISSIONS, 'schedule.load.write', 'staff.self.write', 'school.oversee'],
   teacher: [...READ_PERMISSIONS, 'journal.mark.post', 'journal.topic.set', 'staff.self.write'],
   founder: [...READ_PERMISSIONS, 'staff.self.write'],
   director: [...READ_PERMISSIONS, 'staff.self.write'],
@@ -234,7 +252,18 @@ export const ACCESS_PARAMS = {
   bindTokenTtlMinutes: 5,
   loginCodeTtlMinutes: 5,
   loginCodeDigits: 6,
-  bootstrapLinkTtlHours: 24,
+  /**
+   * Ссылка входа — bootstrap первого модератора (AR-93), учётки `provision`
+   * и ссылка с карточки сотрудника из кабинета администратора (AR-189).
+   * 48 часов — решение владельца 2026-09-02 (прежде 24); многоразовая до
+   * истечения срока — решение владельца 2026-09-03 (AR-195).
+   */
+  bootstrapLinkTtlHours: 48,
+  loginLinkTtlHours: 48,
+  /** Порог «в сети»: последняя активность сессии не старше N минут (AR-187). */
+  sessionOnlineMinutes: 15,
+  /** Хранение завершённых сессий в журнале подключений (AR-187, AR-194). */
+  sessionJournalDays: 90,
   pollIntervalMs: 2000,
 } as const;
 
@@ -992,12 +1021,59 @@ export interface SchoolDirectoryEntryDto {
 
 // ─────────────────────────── сессии и устройства ───────────────────────────
 
+/**
+ * Состояние школы словами — ОДИН словарь на все кабинеты (S-60, S-61, S-62):
+ * код FSM человеку не показывается.
+ */
+export const SCHOOL_STATE_LABELS: Record<SchoolState, string> = {
+  empty: 'школа пустая',
+  classes_created: 'классы созданы',
+  students_filled: 'профили заполнены',
+  subjects_created: 'предметы созданы',
+  staff_activated: 'персонал активирован',
+  teachers_bound: 'педагоги привязаны',
+  terms_set: 'четверти заданы',
+  load_set: 'нормы заданы',
+  priorities_set: 'приоритеты заданы',
+  day_params_set: 'параметры дня заданы',
+  generated: 'сетка собрана',
+  stale: 'сетка устарела',
+  ready: 'школа ведёт журнал',
+};
+
+/** Канал, которым выдана сессия (AR-187): читается из `AppSession.via`. */
+export type SessionVia = 'registration' | 'device_link' | 'login_code' | 'bootstrap_link' | 'login_link' | 'password' | 'unknown';
+/** Где живёт сессия: вкладка браузера либо установленное приложение (PWA). */
+export type SessionClientKind = 'browser' | 'pwa';
+
+/** Слова для канала входа и вида клиента — одни на S-31, S-62, S-80 (AR-187). */
+export const SESSION_VIA_LABELS: Record<SessionVia, string> = {
+  registration: 'активация по QR',
+  device_link: 'QR с телефона',
+  login_code: 'код входа',
+  bootstrap_link: 'ссылка платформы',
+  login_link: 'ссылка входа',
+  password: 'пароль',
+  unknown: 'не записан',
+};
+export const SESSION_CLIENT_LABELS: Record<SessionClientKind, string> = {
+  browser: 'в браузере',
+  pwa: 'в приложении',
+};
+
 export interface SessionDto {
   id: string;
   deviceHint: string;
   lastSeenAt: string;
   createdAt: string;
   current: boolean;
+  /** 1.3.0 (AR-187): канал входа и вид клиента — `S-80` называет их словами. */
+  via: SessionVia;
+  clientKind: SessionClientKind;
+  /** Сессия выдана сканом с телефона — идентификатор якорной сессии. */
+  parentSessionId: string | null;
+  /** «В сети» — активность не старше `ACCESS_PARAMS.sessionOnlineMinutes`. */
+  online: boolean;
 }
 
 export interface DeviceLinkTokenDto {
@@ -1023,6 +1099,9 @@ export interface MeDto {
 /** Стартовый экран роли по первому найденному праву (карта сайта, AR-95). */
 export function startScreenFor(permissions: readonly string[]): string {
   if (permissions.includes('school.manage')) return '/classes';
+  // завуч (AR-186): единственная роль, чей рабочий день начинается со сводки —
+  // кабинет `S-61` и есть его стартовый экран [дефолт]
+  if (permissions.includes('school.oversee') && !permissions.includes('school.manage')) return '/deputy';
   if (permissions.includes('journal.mark.post')) return '/journal';
   // ученик и родитель (AR-158): единственная поверхность — дневник
   if (permissions.includes('diary.read') && !permissions.includes('journal.read')) return '/diary';
@@ -1038,6 +1117,215 @@ export function safeNext(next: string | null | undefined, fallback: string): str
   if (!next.startsWith('/') || next.startsWith('//')) return fallback;
   if (next.includes('://') || next.includes('\\')) return fallback;
   return next;
+}
+
+// ─────────────────────────── кабинет администратора (S-62, AR-186…AR-189) ───────────────────────────
+
+/** Строка аудита всей школы: то же, что `AuditEntryDto`, плюс кто действовал. */
+export interface SchoolAuditEntryDto extends AuditEntryDto {
+  actorId: string | null;
+  actorName: string | null;
+}
+
+/** Сессия глазами администратора (AR-187): карта устройств и журнал подключений. */
+export interface AdminSessionDto {
+  id: string;
+  userId: string;
+  deviceHint: string;
+  via: SessionVia;
+  clientKind: SessionClientKind;
+  /** Адрес входа как его увидел сервер; `null` — сессия выдана до 1.3.0. */
+  ip: string | null;
+  /** Первая сессия человека из этой сети (/24): подозрительный вход выделяется. */
+  newNetwork: boolean;
+  parentSessionId: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  /** `active` — живая; `ended` — отозвана либо истекла. */
+  status: 'active' | 'ended';
+  online: boolean;
+  /** Сессия того, кто смотрит карту: завершать её здесь нельзя — для этого «Выйти». */
+  current: boolean;
+  revokedAt: string | null;
+  revokedReason: SessionRevokeReason | null;
+  expiresAt: string;
+}
+
+export type SessionRevokeReason = 'manual' | 'deactivated' | 'deleted' | 'activation_revoked' | 'incident' | 'limit' | 'admin';
+export const SESSION_REVOKE_REASON_LABELS: Record<SessionRevokeReason, string> = {
+  manual: 'завершена человеком',
+  deactivated: 'доступ закрыт',
+  deleted: 'учётка удалена',
+  activation_revoked: 'активация отозвана',
+  incident: 'инцидент-режим',
+  limit: 'лимит сессий',
+  admin: 'завершена администратором',
+};
+
+/** Узел карты устройств: человек и его сессии (живые — всегда, завершённые — по запросу). */
+export interface AdminDeviceUserDto {
+  userId: string;
+  name: string;
+  username: string | null;
+  avatarUrl: string | null;
+  roles: SchoolRole[];
+  deactivated: boolean;
+  activated: boolean;
+  sessions: AdminSessionDto[];
+}
+
+export interface AdminDeviceMapDto {
+  users: AdminDeviceUserDto[];
+  /** Сколько живых сессий во всей школе — сводка над картой. */
+  activeSessions: number;
+  onlineSessions: number;
+  generatedAt: string;
+}
+
+/** Лимит одновременных сессий на роль (AR-188): `null` — без лимита. */
+export type SessionLimits = Partial<Record<SchoolRole, number | null>>;
+
+export interface AccessPolicyDto {
+  sessionLimits: SessionLimits;
+  /** Последний инцидент-режим: когда и кто закрыл все сессии школы. */
+  incidentAt: string | null;
+  incidentByName: string | null;
+  updatedAt: string | null;
+}
+
+export interface SetAccessPolicyDto {
+  sessionLimits: SessionLimits;
+}
+
+/** Сводка кабинета администратора (`S-62` обзор). */
+export interface AdminOverviewDto {
+  schoolName: string;
+  logoUrl: string | null;
+  timezone: string;
+  state: SchoolState;
+  membersByRole: Partial<Record<SchoolRole, number>>;
+  membersTotal: number;
+  activatedTotal: number;
+  pendingActivations: number;
+  activeSessions: number;
+  onlineSessions: number;
+  pwaSessions: number;
+  browserSessions: number;
+  networks: number;
+  assets: number;
+  policy: AccessPolicyDto;
+}
+
+/** Ссылка входа с карточки сотрудника (AR-189, AR-195): 48 часов, многоразовая до истечения. */
+export interface LoginLinkDto {
+  url: string;
+  token: string;
+  expiresAt: string;
+}
+
+/** Активность учётки для карточки `M-06` (AR-187). */
+export interface StaffActivityDto {
+  userId: string;
+  activated: boolean;
+  activatedAt: string | null;
+  lastSeenAt: string | null;
+  activeSessions: number;
+  totalSessions: number;
+  sessions: AdminSessionDto[];
+  /** Постоянная ссылка на карточку — переходник на профиль, не путь в кабинет. */
+  profileUrl: string;
+}
+
+/** Wi-Fi сеть школы (реестр, AR-186). */
+export type NetworkAudience = 'staff' | 'students' | 'guests' | 'devices';
+export const NETWORK_AUDIENCES: NetworkAudience[] = ['staff', 'students', 'guests', 'devices'];
+export const NETWORK_AUDIENCE_LABELS: Record<NetworkAudience, string> = {
+  staff: 'персонал',
+  students: 'ученики',
+  guests: 'гости',
+  devices: 'оборудование',
+};
+
+export interface SchoolNetworkDto {
+  id: string;
+  ssid: string;
+  audience: NetworkAudience;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertNetworkDto {
+  ssid: string;
+  audience: NetworkAudience;
+  note?: string | null;
+}
+
+/** Корпоративное устройство школы: принтер, сканер, компьютер (реестр, AR-186). */
+export type AssetKind = 'printer' | 'scanner' | 'computer' | 'projector' | 'router' | 'other';
+export const ASSET_KINDS: AssetKind[] = ['printer', 'scanner', 'computer', 'projector', 'router', 'other'];
+export const ASSET_KIND_LABELS: Record<AssetKind, string> = {
+  printer: 'принтер',
+  scanner: 'сканер',
+  computer: 'компьютер',
+  projector: 'проектор',
+  router: 'роутер',
+  other: 'другое',
+};
+
+export interface SchoolAssetDto {
+  id: string;
+  name: string;
+  kind: AssetKind;
+  location: string | null;
+  networkId: string | null;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertAssetDto {
+  name: string;
+  kind: AssetKind;
+  location?: string | null;
+  networkId?: string | null;
+  note?: string | null;
+}
+
+/** Инцидент-режим (AR-188): закрыть все сессии школы, кроме текущей администратора. */
+export interface IncidentResultDto {
+  ok: boolean;
+  revoked: number;
+  users: number;
+}
+
+// ─────────────────────────── кабинет завуча (S-61, AR-193) ───────────────────────────
+
+/** Пункт чек-листа готовности: факт выведен из данных, не хранится. */
+export interface ChecklistItemDto {
+  key: string;
+  title: string;
+  /** Что именно есть или чего не хватает — с цифрами. */
+  detail: string;
+  done: boolean;
+  /** Кто закрывает пункт по матрице ролей (AR-152, AR-174). */
+  owner: 'moderator' | 'deputy' | 'admin' | 'teacher';
+  /** Куда идти закрывать: маршрут приложения. */
+  to: string;
+}
+
+export interface DeputyCabinetDto {
+  state: SchoolState;
+  today: string;
+  lessonsToday: number;
+  /** УТЦ — учебно-тематический цикл: календарь, нормы, скелет, сетка, журнал. */
+  utc: ChecklistItemDto[];
+  /** КПЦ — контингентно-персональный центр: классы, ученики, персонал, родители. */
+  kpc: ChecklistItemDto[];
+  /** Покрытие предметов педагогами: сколько закрыто из скольких. */
+  coverage: { covered: number; total: number };
+  /** Нормы часов: сколько привязок с годовой нормой из скольких. */
+  load: { set: number; total: number };
 }
 
 // ─────────────────────────── маршруты API (`70-screens.md` §11) ───────────────────────────
@@ -1118,4 +1406,22 @@ export const SCHOOL_API = {
   lessonTopic: (id: string) => `/api/v1/lessons/${id}/topic`,
   lessonMarks: (id: string) => `/api/v1/lessons/${id}/marks`,
   lessonMark: (id: string, studentId: string) => `/api/v1/lessons/${id}/marks/${studentId}`,
+  // кабинет модератора (S-60) — прежний `/api/v1/admin` (AR-186)
+  moderatorCabinet: '/api/v1/moderator',
+  // кабинет администратора (S-62, AR-186…AR-189)
+  adminOverview: '/api/v1/admin/overview',
+  adminDevices: '/api/v1/admin/devices',
+  adminConnections: '/api/v1/admin/connections',
+  adminSessionRevoke: (sid: string) => `/api/v1/admin/sessions/${sid}/revoke`,
+  adminIncident: '/api/v1/admin/sessions/revoke-all',
+  adminPolicy: '/api/v1/admin/policy',
+  adminAudit: '/api/v1/admin/audit',
+  adminNetworks: '/api/v1/admin/networks',
+  adminNetwork: (id: string) => `/api/v1/admin/networks/${id}`,
+  adminAssets: '/api/v1/admin/assets',
+  adminAsset: (id: string) => `/api/v1/admin/assets/${id}`,
+  staffLoginLink: (id: string) => `/api/v1/staff/${id}/login-link`,
+  staffActivity: (id: string) => `/api/v1/staff/${id}/activity`,
+  // кабинет завуча (S-61, AR-193)
+  deputyCabinet: '/api/v1/deputy',
 } as const;

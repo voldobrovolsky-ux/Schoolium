@@ -5,8 +5,10 @@
  * сессии, и аноним на них уходит на `/login?next=<путь>` — не на пустую
  * страницу и не в молчаливый редирект на корень.
  *
- * `/admin` целиком принадлежит модератору (AR-69): остальные роли получают
- * 403-экран с причиной.
+ * Кабинетов три (AR-186): `/admin` — администратора (`school.admin`),
+ * `/moderator` — модератора (`school.manage`), `/deputy` — завуча
+ * (`school.oversee`). Остальные роли на них получают 403-экран с причиной,
+ * а не пустую страницу.
  */
 import "./tokens.css";
 import "./app.css";
@@ -20,9 +22,12 @@ import { CompetenceLink, SubjectsScreen } from "./screens/subjects";
 import { StaffScreen } from "./screens/staff";
 import { ScheduleScreen } from "./screens/schedule";
 import { JournalScreen } from "./screens/journal";
-import { AdminScreen, BindScreen, DevicesScreen, ScanScreen } from "./screens/misc";
+import { ModeratorScreen, BindScreen, DevicesScreen, ScanScreen } from "./screens/misc";
 import { GuardiansScreen } from "./screens/family";
 import { DiaryScreen } from "./screens/diary";
+import { AdminScreen } from "./screens/admin";
+import { DeputyScreen } from "./screens/deputy";
+import { AppInstallScreen, SettingsScreen } from "./screens/settings";
 
 export function SchooliumApp() {
   return (
@@ -180,10 +185,37 @@ function AppScreen({
           />
         </Shell>
       );
+    // ─── три кабинета (AR-186) ───
     case "/admin":
+    case "/admin/:section":
       return (
-        <Shell active="admin" title="Кабинет модератора">
-          <AdminScreen />
+        <Shell active="admin" title="Кабинет администратора">
+          <AdminScreen section={params.section ?? "overview"} />
+        </Shell>
+      );
+    case "/moderator":
+      return (
+        <Shell active="moderator" title="Кабинет модератора">
+          <ModeratorScreen />
+        </Shell>
+      );
+    case "/deputy":
+      return (
+        <Shell active="deputy" title="Кабинет завуча">
+          <DeputyScreen />
+        </Shell>
+      );
+    // ─── настройки и приложение (AR-191) ───
+    case "/settings":
+      return (
+        <Shell active="" title="Настройки">
+          <SettingsScreen />
+        </Shell>
+      );
+    case "/settings/app":
+      return (
+        <Shell active="" title="Приложение" breadcrumb={{ label: "Настройки", to: "/settings", current: "приложение" }}>
+          <AppInstallScreen />
         </Shell>
       );
     case "/scan":
@@ -194,7 +226,7 @@ function AppScreen({
       );
     case "/settings/devices":
       return (
-        <Shell active="" title="Устройства и сессии">
+        <Shell active="" title="Устройства и сессии" breadcrumb={{ label: "Настройки", to: "/settings", current: "устройства" }}>
           <DevicesScreen />
         </Shell>
       );

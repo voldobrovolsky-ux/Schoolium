@@ -1,7 +1,8 @@
 /**
  * G-41 (AR-88, AR-30) — **полные права модератора и аудит как противовес.**
  *
- * Перечислением по ВСЕМ 38 мутациям версии (`70-screens.md` §11):
+ * Перечислением по ВСЕМ 48 мутациям версии (`70-screens.md` §11, строки
+ * 39–48 — кабинет администратора 1.3.0, право `school.admin`):
  *   · модератор проходит каждую — отказа ПО ПРАВУ он получить не может;
  *   · четыре читающие роли не проходят ни одной;
  *   · педагог проходит только отметки и темы, и только в своих уроках;
@@ -31,7 +32,9 @@ const MUTATIONS = new Set([RequestMethod.POST, RequestMethod.PUT, RequestMethod.
 const SCHOOLIUM_CONTROLLERS = [
   'SchoolAuthController', 'MeController', 'ClassesController', 'StudentsController',
   'SubjectsController', 'StaffController', 'CalendarController', 'ScheduleController',
-  'SchoolJournalController', 'SchoolAdminController',
+  'SchoolJournalController',
+  // 1.3.0 (AR-186): три кабинета вместо одного `SchoolAdminController`
+  'ModeratorCabinetController', 'AdminCabinetController', 'DeputyCabinetController',
 ];
 
 async function main(): Promise<void> {
@@ -49,6 +52,8 @@ async function main(): Promise<void> {
   // AR-174 (УТЦ v1.4): панель УТЦ переехала модератору, завуч держит ТОЛЬКО
   // годовые нормы часов (schedule.load.write) — ни скелета, ни генерации,
   // ни привязок, ни календаря.
+  // 1.3.0 (AR-186): `school.admin` в список НЕ входит — кабинет администратора
+  // закрыт модератору, и это проверяется ниже отдельно.
   const MOD_MUT = ['school.manage', 'contingent.write', 'staff.manage', 'staff.self.write', 'schedule.build', 'subject.write'];
   const mod = await authz.resolveForRoles(['moderator']);
   check(
@@ -109,7 +114,7 @@ async function main(): Promise<void> {
       }
     }
   }
-  check(rows.length >= 38, `мутаций контура 1.1.1 обнаружено: ${rows.length} (в §11 их 38)`);
+  check(rows.length >= 48, `мутаций контура обнаружено: ${rows.length} (в §11 их 48: 38 базовых + 10 кабинета администратора)`);
   const gated = rows.filter((r) => permsOf(r).length > 0);
   const passesBy = (acc: { permissions: string[] }, r: { perm: string | string[] | undefined }): string[] =>
     permsOf(r).filter((p) => acc.permissions.includes(p));
@@ -179,7 +184,7 @@ async function main(): Promise<void> {
     check(Boolean(markEntry), 'отметка администратора в чужом уроке записана в аудит с его идентичностью');
   });
 
-  // ─── 5. все 22 события версии аудируются ───
+  // ─── 5. все 25 событий версии аудируются ───
   const missing = EVENT_CONTRACT.filter((r) => !AUDITED_TYPES.includes(r.type));
   check(missing.length === 0, missing.length === 0
     ? `все ${EVENT_CONTRACT.length} событий версии попадают в аудит-леджер`

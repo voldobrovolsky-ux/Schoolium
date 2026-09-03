@@ -25,7 +25,7 @@ cp .env.prod.example .env.prod && $EDITOR .env.prod   # POSTGRES_PASSWORD, SITE_
 docker compose -f docker-compose.prod.yml --env-file .env.prod --profile caddy up -d --build
 
 # завести школу и оператора (роли admin+moderator) — печатает одноразовую
-# ссылку входа на 24 часа И резервные креды (юзернейм+пароль, один раз)
+# ссылку входа на 48 часов (AR-189) И резервные креды (юзернейм+пароль, один раз)
 docker compose -f docker-compose.prod.yml exec api \
   npm run school:bootstrap -- --phone=+79990000000 --school="Школа №17" --name="Иванова Мария"
 ```
