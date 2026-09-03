@@ -2,14 +2,24 @@
  * `S-31` · карточка сотрудника (`M-06`): панель управления группами и строки
  * активности учётки (AR-187, AR-189).
  *
- * Здесь только раскладка: заголовок группы, ряд действий с переносом, пары
- * «подпись — значение», строки сессий. Кнопки, бейджи, поле копирования,
+ * Здесь только раскладка (1.4.0, AR-198): группы разделены линией, заголовок
+ * группы — подпись, ряд действий с переносом, пары «подпись — значение»,
+ * строки сессий. Кнопки, бейджи, поле копирования,
  * канва — из `app.css`, второй реализации у них не появляется.
  * Цвета — только токенами (G-37, AR-42).
  */
 
-.sch-m06-groups { display: flex; flex-direction: column; gap: var(--sp-24); }
+.sch-m06-groups { display: flex; flex-direction: column; gap: var(--sp-20); }
 .sch-m06-group { display: flex; flex-direction: column; gap: var(--sp-12); }
+/* Группы разделены линией, как секции настроек Linear: заголовок группы —
+   подпись 13px, а не третий заголовок; глаз ведёт линия, не размер. */
+.sch-m06-group + .sch-m06-group { border-top: 1px solid var(--c-border-default); padding-top: var(--sp-20); }
+.sch-m06-group > h3.sch-section-title { font-family: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--c-ink-secondary); letter-spacing: 0; }
+/* Ряд «бейдж роли + Снять»: кнопка компактная (28), чтобы ряд ролей читался
+   строкой, а не столбиком кнопок. На телефоне мишень §4 возвращает 44. */
+@media (min-width: 768px) {
+  .sch-m06-group .sch-chips .sch-btn--ghost { height: var(--ctl-h-sm); padding: 0 var(--sp-8); }
+}
 /* С тегом: базовое `.sch h3.sch-section-title` (0,2,1) иначе перебивает
    `.sch-m06-group > .sch-section-title` (0,2,0) и возвращает нижний отступ —
    внутри группы зазор задаёт её `gap`. */
@@ -22,7 +32,7 @@
 .sch-m06-who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Шесть цифр кода входа — крупно и с разрядкой, чтобы диктовались по одной. */
-.sch-m06-code { font-family: var(--font-display); font-size: var(--fs-h2); letter-spacing: 0.2em; font-variant-numeric: tabular-nums; }
+.sch-m06-code { font-family: var(--font-display); font-size: var(--fs-h1); font-weight: var(--fw-semibold); letter-spacing: 0.22em; font-variant-numeric: tabular-nums; line-height: 1.1; }
 /* Панель ссылки: поле копирования тянется на всю ширину канвы, а не сжимается
    к длине токена внутри центрирующей колонки `.sch-qr`. */
 .sch-m06-link .sch-copy { align-self: stretch; }
@@ -32,7 +42,8 @@
 .sch-m06-kv dd { margin: 0; min-width: 0; }
 
 .sch-m06-sessions { display: flex; flex-direction: column; }
-.sch-m06-session { display: flex; flex-direction: column; gap: var(--sp-4); padding: var(--sp-12) 0; border-top: 1px solid var(--c-border-default); font-size: var(--fs-sm); }
+.sch-m06-session { display: flex; flex-direction: column; gap: 2px; padding: var(--sp-8) 0; border-top: 1px solid var(--c-border-default); font-size: var(--fs-sm); }
+.sch-m06-session:first-child { border-top: 0; }
 .sch-m06-session-title { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
 .sch-m06-session-meta { display: flex; gap: var(--sp-12); flex-wrap: wrap; color: var(--c-ink-secondary); }
 /* Завершённая сессия приглушена, но слово «завершена» стоит рядом (AR-80). */
