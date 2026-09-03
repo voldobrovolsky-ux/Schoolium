@@ -75,11 +75,14 @@ WCAG 2.1 в G-37, литеральных цветов в контуре 0. Сп�
 | 3 · `ui.tsx` на Radix, G-84 | [#5](https://github.com/voldobrovolsky-ux/Schoolium/pull/5) | 39e6623 | [run 87](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33712264406) |
 | 4 · оболочка | [#6](https://github.com/voldobrovolsky-ux/Schoolium/pull/6) | c6d1561 | [run 90](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33714090485) |
 | 5 · карточка сотрудника | [#7](https://github.com/voldobrovolsky-ux/Schoolium/pull/7) | b0799a0 | [run 93](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33715813906) |
-| 6 · проход экранов, снимки | см. PR шага 6 | — | — |
+| 6 · проход экранов, снимки; версия 1.4.0 | [#8](https://github.com/voldobrovolsky-ux/Schoolium/pull/8) | 169c19f, 9db7820 | [run 96](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33717739766), [run 33719274839](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33719274839), [run 33719278542](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33719278542) |
+
+Деплой с `main` (0549400): прогон deploy-school №31 — [run 33720540447](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33720540447), `API /healthz: 200`, бандл `index-Bo8DgBT7`, воркер версионирован, оболочка `no-cache`; теги `deploy/20260903-0554-run31`, `deploy-current → 0549400`, `deploy-previous → b90d332`. Подробности для стенда — `docs/PROD-STATUS.md`, раздел «Релиз 1.4.0».
 
 Все прогоны G-53 и G-55: 65 шагов, 0 нарушений, 20 модалок реестра §3 открыты и закрыты.
 Первый мобильный прогон шага 2 поймал регресс мишеней 44px (вкладки `S-42`) — исправлен
 до мержа, ворота сделали свою работу.
+CI на мерж-коммите 0549400 в `main` ([run 100](https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33720525270)) один раз упал в легаси-чеке `flow:check` («llm упал → fallback regexp разобрал карты», контур учебника, к диффу 1.4.0 не относится — PR #8 менял снимки, отчёт и версию); повтор того же коммита прошёл этот шаг зелёным — тот же класс флейка, что у смока учебника на шаге 1.
 
 ## 6. Снимки до/после
 
