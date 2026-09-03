@@ -76,7 +76,10 @@
 .sch-adm-session .sch-btn { flex: 0 0 auto; }
 
 .sch-adm-link { display: flex; gap: var(--sp-16); align-items: flex-start; padding-top: var(--sp-12); border-top: 1px solid var(--c-border-default); }
-.sch-adm-link .sch-copy { flex: 1 1 auto; }
+/* Стопка с полем копирования — флекс-элемент строки и обязана сжиматься: без
+   `min-width: 0` длинная ссылка держала её по содержимому, и QR выезжал за
+   правый край карточки (проход экранов 1.4.0). */
+.sch-adm-link > .sch-stack, .sch-adm-link .sch-copy { flex: 1 1 auto; min-width: 0; }
 .sch-adm-link .sch-qr-frame { flex: 0 0 auto; }
 
 /* ─── матрица ролей (AR-35: каталог прав — код, здесь только чтение) ─── */

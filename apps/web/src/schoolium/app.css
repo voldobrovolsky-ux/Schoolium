@@ -788,10 +788,11 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-modal[data-shape='fullscreen'] {
   width: 100%; max-width: none; max-height: none; height: 100%;
   border-radius: 0; box-shadow: none;
-  /* Появление БЕЗ смещения: поток во весь экран, ему неоткуда подъезжать;
-     а пока шёл `transform`, мишень 44px мерилась меньше заявленной. */
-  animation: sch-fade 120ms ease-out;
+  /* Без анимации вовсе: потоку во весь экран неоткуда подъезжать, а пока шёл
+     fade, экран под ним просвечивал (и мишень 44px мерилась меньше заявленной). */
+  animation: none;
 }
+.sch-overlay[data-shape='fullscreen'] { animation: none; }
 .sch-modal[data-shape='fullscreen'] .sch-modal-head { min-height: 56px; }
 /* Кнопки полноэкранного потока прижаты к низу над safe-area (§3). Прижимает
    их флекс-колонка карточки, а не `position: sticky`. */
@@ -988,6 +989,13 @@ select.sch-input { padding-right: var(--sp-8); }
     background: var(--c-surface-canvas);
     min-width: 56px;
   }
+
+  /* S-42 · вкладки студии на телефоне: кнопка «Закрыть» в шапке — иконка 44,
+     а не кнопка во всю ширину (базовое мобильное `.sch-btn { width: 100% }`
+     иначе выталкивало обе вкладки к `min-width` и обрезало подписи). */
+  .sch-tabsbar .sch-btn { width: var(--tap-min); min-width: var(--tap-min); padding: 0; flex: 0 0 auto; }
+  .sch-tabsbar .sch-topbar-spacer { flex: 0 1 auto; }
+  .sch-studiotab { flex: 1 1 auto; max-width: none; }
 
   /* S-30 · сворачиваемые секции (§6). */
   .sch-section-toggle {
