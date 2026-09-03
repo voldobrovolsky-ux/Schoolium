@@ -638,10 +638,16 @@ async function main() {
     const teacherCards = page.locator('[data-testid="S-30.section.level3"] [data-testid="S-30.card.person"]');
     await teacherCards.first().waitFor({ timeout: 20_000 });
     await has(page, 'S-30.card.person');
-    // Карточка по эскизу владельца (2026-08-31): плашка-фото со срезом.
-    const plaques = await page.locator('[data-testid="S-30.card.person"] .sch-staff-plaque').count();
-    if (plaques > 0) console.log(`    ✅ карточки персонала несут градиентную плашку (${plaques})`);
-    else { console.error('    ❌ у карточек персонала нет .sch-staff-plaque — эскизная раскладка потеряна'); failures++; }
+    // Карточка по эскизу владельца (2026-08-31): плашка-фото слева. С 1.4.0
+    // (AR-198) плашка — ровная заливка: градиент запрещён по всему контуру, и
+    // здесь это проверяется вычисленным стилем, а не наличием класса.
+    const plaques = await page.locator('[data-testid="S-30.card.person"] .sch-staff-plaque').evaluateAll(
+      (els) => els.map((el) => getComputedStyle(el).backgroundImage),
+    );
+    const gradients = plaques.filter((bg) => bg !== 'none');
+    if (plaques.length > 0 && gradients.length === 0) console.log(`    ✅ карточки персонала несут плашку-фото без градиента (${plaques.length}, AR-198)`);
+    else if (plaques.length === 0) { console.error('    ❌ у карточек персонала нет .sch-staff-plaque — эскизная раскладка потеряна'); failures++; }
+    else { console.error(`    ❌ плашка карточки сотрудника градиентная (${gradients.length} из ${plaques.length}) — AR-198 запрещает градиентные плашки`); failures++; }
     await teacherCards.last().click();
     await page.waitForSelector('[data-testid="M-06"]', { timeout: 20_000 });
     await modalOpen(page, 'M-06');
