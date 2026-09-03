@@ -30,6 +30,7 @@
   --c-ink-on-pink: #FFFFFF;
   /* color.border */
   --c-border-default: #E7E2F2;
+  --c-border-strong: #CFC9DE;
   --c-border-focus: #7B3AED;
   /* color.sex */
   --c-sex-boy-bg: #E8F4FD;
@@ -60,12 +61,12 @@
   --font-family: 'Inter', 'SF Pro Text', system-ui, sans-serif;
   --font-display: 'Manrope', 'Inter', system-ui, sans-serif;
   --fs-xs: 12px;
-  --fs-sm: 14px;
-  --fs-md: 16px;
-  --fs-lg: 18px;
-  --fs-xl: 22px;
-  --fs-h2: 28px;
-  --fs-h1: 34px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-h2: 24px;
+  --fs-h1: 32px;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
@@ -80,15 +81,20 @@
   --sp-32: 32px;
   --sp-40: 40px;
   --sp-56: 56px;
+  /* control (1.4.0, AR-198): одна высота у кнопок и полей на раскладку */
+  --ctl-h: 36px;
+  --ctl-h-mobile: 48px;
+  --ctl-h-sm: 28px;
   /* radius */
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-card: 20px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-card: 12px;
   --r-pill: 999px;
   /* shadow */
-  --sh-card: 0 1px 3px rgba(34,24,51,0.06), 0 4px 16px rgba(123,58,237,0.07);
-  --sh-modal: 0 8px 40px rgba(59,27,110,0.22);
+  --sh-card: 0 1px 2px rgba(23,16,38,0.05);
+  --sh-pop: 0 4px 16px rgba(23,16,38,0.10), 0 0 0 1px rgba(23,16,38,0.05);
+  --sh-modal: 0 16px 48px rgba(23,16,38,0.18);
   /* tap */
   --tap-min: 44px;
 }

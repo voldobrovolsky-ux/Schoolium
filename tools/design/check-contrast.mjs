@@ -31,6 +31,9 @@ const pairs = [
   // ── пары калибровки 1.3.0 (кабинет админа, AR-190) ──
   ['вторичный текст на disabled-заливке', T.ink.secondary, T.state['disabled-bg'], 4.5],
   ['вторичный текст на карточке', T.ink.secondary, T.surface.card, 4.5],
+  // ── пары 1.4.0 (плотная система, AR-198): подписи таблиц и рамки контролов ──
+  ['вторичный текст на канве (шапка таблицы, сайдбар)', T.ink.secondary, T.surface.canvas, 4.5],
+  ['рамка strong на белом (только нетекстовый UI: hover контрола)', T.border.strong, T.surface.page, 1.0],
   ['disabled-текст на disabled-заливке (только UI: выключенные контролы)', T.state['disabled-ink'], T.state['disabled-bg'], 3.0],
   ['violet-700 на violet-100 (активный пункт подменю, бейдж)', T.brand['violet-700'], T.brand['violet-100'], 4.5],
   ['violet-700 на violet-050', T.brand['violet-700'], T.brand['violet-050'], 4.5],
