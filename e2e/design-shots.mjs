@@ -165,6 +165,15 @@ async function main() {
       await page.waitForTimeout(250);
       await shot('11-M-15-user-menu');
       await page.keyboard.press('Escape');
+      await page.waitForSelector('[data-testid="M-15"]', { state: 'detached' }).catch(() => undefined);
+      // Свёрнутый сайдбар с подсказкой пункта (шаг 4 пакета) — только десктоп.
+      if (!layout.isMobile) {
+        await page.locator('[data-testid="L.sidebar.collapse"]').click();
+        await page.locator('[data-testid="L.sidebar.item.staff"]').hover();
+        await page.waitForTimeout(500);
+        await shot('12-L-sidebar-collapsed');
+        await page.locator('[data-testid="L.sidebar.collapse"]').click();
+      }
       await ctx.close();
     }
   } finally {

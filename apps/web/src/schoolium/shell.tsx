@@ -15,10 +15,14 @@
  *     вместе с контентом; скролл только в контентной области;
  *   · таб-бар уходит под полноэкранный поток и возвращается по его завершении
  *     (§2.2) — признак ставит сам слой, оболочка его только читает;
- *   · иконки — `lucide` через `Icon` (AR-190), не юникод-глифы.
+ *   · иконки — `lucide` через `Icon` (AR-190), не юникод-глифы;
+ *   · подписи свёрнутого сайдбара — подсказки `Tooltip` Radix (AR-197), а не
+ *     атрибут `title`: тот появляется с секундной задержкой, не читается с
+ *     клавиатуры и рисуется системой по-разному.
  */
 import { useEffect, useState, type ReactNode } from "react";
 import { QRCodeSVG } from "qrcode.react";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { ROLE_LABELS, type SchoolPermission, type SchoolRole } from "@edustore/shared";
 import { Avatar, Button, Modal, PopoverOrSheet } from "./ui";
 import { Icon, type IconName } from "./icons";
@@ -226,6 +230,7 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
 
   return (
     <div className="sch sch-shell">
+      <Tooltip.Provider delayDuration={200} skipDelayDuration={400}>
       <nav className="sch-sidebar" data-collapsed={collapsed} data-testid="L.sidebar">
         {/* Под логотипом — только «Schoolium»: название школы снято решением владельца 2026-09-03. */}
         <button className="sch-logo" data-testid="L.sidebar.logo" onClick={() => navigate(me.startScreen)}>
@@ -234,48 +239,55 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
         <div className="sch-sidebar-sep" />
         <div className="sch-nav">
           {NAV.map((n) => (
-            <button key={n.key} className="sch-nav-item" data-testid={`L.sidebar.item.${n.key}`} aria-current={active === n.key ? "page" : undefined} onClick={() => navigate(n.path)} title={collapsed ? n.label : undefined}>
-              <span className="sch-nav-icon">
-                <Icon name={n.icon} />
-              </span>
-              <span className="sch-nav-label">{n.label}</span>
-            </button>
+            <SidebarHint key={n.key} label={n.label} collapsed={collapsed}>
+              <button className="sch-nav-item" data-testid={`L.sidebar.item.${n.key}`} aria-current={active === n.key ? "page" : undefined} onClick={() => navigate(n.path)}>
+                <span className="sch-nav-icon">
+                  <Icon name={n.icon} />
+                </span>
+                <span className="sch-nav-label">{n.label}</span>
+              </button>
+            </SidebarHint>
           ))}
           {/* Кабинеты по правам (AR-186): отсутствуют у остальных ролей, а не задизейблены. */}
           {cabinets.length > 0 ? (
             <>
               <div className="sch-sidebar-sep" />
               {cabinets.map((c) => (
-                <button
-                  key={c.key}
-                  className="sch-nav-item"
-                  /* Литералы, а не шаблон: G-52 сверяет элементы оболочки буквально. */
-                  data-testid={c.key === "admin" ? "L.sidebar.item.admin" : c.key === "moderator" ? "L.sidebar.item.moderator" : "L.sidebar.item.deputy"}
-                  aria-current={active === c.key ? "page" : undefined}
-                  onClick={() => navigate(c.path)}
-                  title={collapsed ? c.label : undefined}
-                >
-                  <span className="sch-nav-icon">
-                    <Icon name={c.icon} />
-                  </span>
-                  <span className="sch-nav-label">{c.label}</span>
-                </button>
+                <SidebarHint key={c.key} label={c.label} collapsed={collapsed}>
+                  <button
+                    className="sch-nav-item"
+                    /* Литералы, а не шаблон: G-52 сверяет элементы оболочки буквально. */
+                    data-testid={c.key === "admin" ? "L.sidebar.item.admin" : c.key === "moderator" ? "L.sidebar.item.moderator" : "L.sidebar.item.deputy"}
+                    aria-current={active === c.key ? "page" : undefined}
+                    onClick={() => navigate(c.path)}
+                  >
+                    <span className="sch-nav-icon">
+                      <Icon name={c.icon} />
+                    </span>
+                    <span className="sch-nav-label">{c.label}</span>
+                  </button>
+                </SidebarHint>
               ))}
             </>
           ) : null}
         </div>
 
-        <button className="sch-user" data-testid="L.sidebar.user" onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}>
+        <SidebarHint label={me.name} collapsed={collapsed}>
+          <button className="sch-user" data-testid="L.sidebar.user" aria-label={collapsed ? me.name : undefined} onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}>
           <Avatar name={me.name} url={me.avatarUrl} />
           <span className="sch-user-text">
             <span className="sch-user-name">{me.name}</span>
             <span className="sch-user-roles">{me.roles.map((r) => ROLE_LABELS[r as SchoolRole]).join(", ")}</span>
           </span>
-        </button>
-        <Button kind="icon" testId="L.sidebar.collapse" aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"} onClick={() => setCollapsed((v) => !v)}>
-          <Icon name={collapsed ? "expand" : "collapse"} />
-        </Button>
+          </button>
+        </SidebarHint>
+        <SidebarHint label={collapsed ? "Развернуть меню" : "Свернуть меню"} collapsed>
+          <Button kind="icon" testId="L.sidebar.collapse" aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"} onClick={() => setCollapsed((v) => !v)}>
+            <Icon name={collapsed ? "expand" : "collapse"} />
+          </Button>
+        </SidebarHint>
       </nav>
+      </Tooltip.Provider>
 
       <div className="sch-main">
         <header className="sch-topbar">
@@ -304,5 +316,25 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
       {userMenu}
       {myQrModal}
     </div>
+  );
+}
+
+/**
+ * Подпись пункта свёрнутого сайдбара — подсказкой справа (Radix Tooltip):
+ * появляется по наведению и по фокусу с клавиатуры, закрывается `Esc`,
+ * доступна читалке через `aria-describedby`. В развёрнутом сайдбаре подпись
+ * видна и подсказка не рендерится вовсе — второй раз то же слово не нужно.
+ */
+function SidebarHint({ label, collapsed, children }: { label: string; collapsed: boolean; children: ReactNode }) {
+  if (!collapsed) return <>{children}</>;
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="sch-tooltip" side="right" sideOffset={8} collisionPadding={8}>
+          {label}
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   );
 }
