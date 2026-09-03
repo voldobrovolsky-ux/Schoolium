@@ -24,6 +24,7 @@ Vite 5.4.21), `vite build`, размер ассетов raw и `gzip -9`.
 | `prim-dialog` | `@radix-ui/react-dialog` 1.1.23 | 58,8 КБ | **+12,2 КБ** | 0,4 КБ |
 | `primitives` | Dialog + Popover + Toast + Tooltip | 78,9 КБ | **+32,3 КБ** | 0,4 КБ |
 | `prim-select` | один `@radix-ui/react-select` 2.3.7 | 75,9 КБ | +29,3 КБ | 0,4 КБ |
+| `prim-avatar` | один `@radix-ui/react-avatar` 1.2.6 | 48,6 КБ | +2,0 КБ | 0,4 КБ |
 | `shadcn` | Dialog + Popover + Select + Slot + cva + clsx + tailwind-merge + Tailwind 4.3.3 | 87,7 КБ | +41,1 КБ | 3,1 КБ (12 КБ) |
 | `themes` | `@radix-ui/themes` 3.3.0: Theme, Button, Dialog, Popover, Select, TextField, Badge | 89,0 КБ | +42,4 КБ | **81,9 КБ (695 КБ)** |
 
@@ -48,7 +49,8 @@ CSS (`index-B68Xx8iW.js`, `index-CeHufslL.css`, сборка от 2026-09-03). C
 ## 3. Вывод
 
 Принят вариант (в): Radix Primitives как headless-слой (`react-dialog`,
-`react-popover`, `react-toast`, `react-tooltip`), стили — наши, на переменных из
+`react-popover`, `react-toast`, `react-tooltip`; плюс `react-avatar` за 2,0 КБ —
+инициалы до загрузки фото и при битой ссылке), стили — наши, на переменных из
 `tokens.json`. Единственный вариант, при котором G-37 и G-83 продолжают что-то
 доказывать, а бандл растёт на ~32 КБ gzip, не на ~124.
 

@@ -1,27 +1,26 @@
 /**
- * Библиотека Schoolium: девять типов кнопок (§4), модалка с ловушкой фокуса
- * (§3, AR-82), три состояния экрана (§5) и мелкие элементы.
+ * Библиотека Schoolium: девять типов кнопок (§4), слои на Radix Primitives
+ * (AR-197), три состояния экрана (§5) и мелкие элементы.
+ *
+ * Слои — модалка, поповер, тост — с 1.4.0 держатся на `@radix-ui/react-dialog`,
+ * `react-popover` и `react-toast`: `role="dialog"`, `aria-modal`, ловушка и
+ * возврат фокуса (в том числе когда сфокусированный узел исчез — мастер сменил
+ * шаг), `Esc`, закрытие по клику мимо, блокировка прокрутки и позиционирование
+ * с уходом от края берутся из библиотеки, а не пишутся здесь по третьему разу.
+ * Radix входит в контур ТОЛЬКО через этот файл и `shell.tsx` — держится
+ * воротами G-84 (`tools/design/check-layers.mjs`). Порталы Radix рендерятся в
+ * `body`, вне корня `.sch`, поэтому каждый слой несёт класс `sch-portal` —
+ * ту же базовую типографику без фона.
  *
  * Раскладок ДВЕ, и обе живут здесь, а не в экранах (`75-adaptive.md` §1):
- * геометрия слоя выбирается по точке останова, гарантии §3 — фокус, `Esc`,
- * закрытие фоном, два уровня вложенности — у обеих одни и те же. Иначе мобайл
- * получил бы вторую реализацию тех же правил и вторую же возможность их
- * потерять: ровно так этап 2 потерял фокус в поповере.
- *
- * Правила, которые здесь ЗАШИТЫ, а не оставлены на дисциплину экрана:
- *   · модалка и поповер закрываются крестиком, `Esc` и кликом мимо, держат фокус
- *     внутри и возвращают его открывателю;
- *   · уровней вложенности слоя ровно два — третий не выразим типом (AR-82);
- *   · ни одного литерального цвета: всё через классы на CSS-переменных.
+ * геометрия слоя выбирается по точке останова (`data-shape`), гарантии §3 у
+ * обеих одни и те же — библиотека одна.
  *
  * Правило «кнопка, недоступная роли, НЕ рендерится» (AR-69) живёт НЕ здесь:
- * библиотека не знает прав, их знает экран. Экран получает право из `session`
- * и не передаёт кнопку в `action`/разметку — `disabled` означает «нельзя
- * сейчас», отсутствие означает «не ваша роль». Держится это перечислением
- * гейтов `can(...)` в экранах и живой проверкой смока G-53 на сессии педагога.
+ * библиотека не знает прав, их знает экран. `disabled` означает «нельзя
+ * сейчас», отсутствие означает «не ваша роль».
  */
 import {
-  useCallback,
   useEffect,
   useId,
   useRef,
@@ -30,6 +29,10 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
 } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
+import * as ToastPrimitive from "@radix-ui/react-toast";
+import * as AvatarPrimitive from "@radix-ui/react-avatar";
 import { MARK_VALUES, type MarkValue } from "@edustore/shared";
 import { useIsMobile } from "./hooks";
 import { Icon, type IconName } from "./icons";
@@ -105,9 +108,9 @@ export function Field({ label, error, testId, hint, ...rest }: FieldProps) {
 }
 
 /**
- * Числовое поле с шаговыми кнопками «−»/«+» 44×44 рядом (§7). На десктопе
- * кнопки не рендерятся визуально (CSS `min-width: 768px`): там поле правится
- * с клавиатуры, и лишняя пара мишеней — шум. На телефоне обратное: попасть в
+ * Числовое поле с шаговыми кнопками «−»/«+» рядом (§7). На десктопе кнопки не
+ * рендерятся визуально (CSS `min-width: 768px`): там поле правится с
+ * клавиатуры, и лишняя пара мишеней — шум. На телефоне обратное: попасть в
  * узкое поле и вызвать цифровую клавиатуру ради «+1» дороже, чем нажать шаг.
  *
  * Значение остаётся СТРОКОЙ: пустое поле — это не ноль, и мастер обязан
@@ -185,13 +188,13 @@ export function NumberField({
   );
 }
 
-// ─────────────────────────── модалка (§3) ───────────────────────────
+// ─────────────────────────── модалка (§3, AR-82, AR-197) ───────────────────────────
 
 /**
  * Мобильная форма слоя (`75-adaptive.md` §3, колонка Mobile). Значение НЕ
- * угадывается компонентом: у каждой из пятнадцати модалок реестра она уже
- * названа, и экран обязан её передать — «по умолчанию полноэкранная» молча
- * превратило бы подтверждение удаления в поток на весь экран.
+ * угадывается компонентом: у каждой модалки реестра она уже названа, и экран
+ * обязан её передать — «по умолчанию полноэкранная» молча превратило бы
+ * подтверждение удаления в поток на весь экран.
  */
 export type MobileShape = "fullscreen" | "sheet";
 
@@ -219,7 +222,7 @@ export interface ModalProps {
  * завершении. Считаем ГЛУБИНОЙ, а не флагом: `M-01` может открыть `M-14`
  * вторым уровнем, и закрытие верхнего слоя не должно возвращать таб-бар под
  * ещё открытый мастер. Признак — атрибут на `body`, потому что таб-бар живёт
- * в оболочке, а слой — в портале своего экрана: общего React-предка у них нет.
+ * в оболочке, а слой — в портале: общего React-предка у них нет.
  */
 let flowDepth = 0;
 const enterFlow = () => {
@@ -234,8 +237,7 @@ const leaveFlow = () => {
 /**
  * Тот же признак для полноэкранного потока, который НЕ является модалкой:
  * сканер `S-70` — экран, а не слой, но таб-бар при камере во весь экран
- * прячется по тому же правилу §2.2. Считать глубину в двух местах нельзя —
- * счётчик один.
+ * прячется по тому же правилу §2.2. Счётчик один.
  */
 export function useFullscreenFlow(active: boolean): void {
   useEffect(() => {
@@ -245,35 +247,22 @@ export function useFullscreenFlow(active: boolean): void {
   }, [active]);
 }
 
+/**
+ * Модалка на `Dialog` Radix. Библиотека даёт `role="dialog"`, `aria-modal`,
+ * `aria-labelledby`, ловушку фокуса (`FocusScope` следит и за удалением
+ * сфокусированного узла — дефект G-53 «`Esc` со второго шага мастера» закрыт
+ * по построению), возврат фокуса открывателю, `Esc`, закрытие по клику мимо и
+ * блокировку прокрутки под слоем. Наши — форма (`data-shape`), уровень,
+ * шапка, футер, ручка и свайп листа.
+ *
+ * `Content` вложен в `Overlay`, а не стоит рядом: центрирование и раскладка
+ * листа/потока живут в CSS на `.sch-overlay[data-shape]`, и смок читает уровни
+ * вложенности числом `.sch-overlay` (AR-82).
+ */
 export function Modal({ title, width, onClose, children, footer, testId, level = 1, mobile, onBack }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const opener = useRef<Element | null>(null);
-  const titleId = useId();
   const isMobile = useIsMobile();
   const shape = isMobile ? mobile : "desktop";
-
-  useEffect(() => {
-    opener.current = document.activeElement;
-    const body = document.body;
-    const prev = body.style.overflow;
-    body.style.overflow = "hidden"; // контент под блюром не скроллится
-    // Фокус: если поле с autoFocus уже взяло его (или фокус и так внутри
-    // карточки) — не перебивать кнопкой «Закрыть» из шапки. Иначе сначала
-    // элемент с [autofocus], и только потом первый интерактивный.
-    const card = ref.current;
-    if (card && !card.contains(document.activeElement)) {
-      const first =
-        card.querySelector<HTMLElement>("[autofocus]") ??
-        card.querySelector<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        );
-      first?.focus();
-    }
-    return () => {
-      body.style.overflow = prev;
-      (opener.current as HTMLElement | null)?.focus?.(); // возврат фокуса открывателю
-    };
-  }, []);
 
   // Таб-бар уходит только под полноэкранный поток: нижний лист его не прячет —
   // человек видит, откуда пришёл, и куда вернётся (§3).
@@ -283,105 +272,61 @@ export function Modal({ title, width, onClose, children, footer, testId, level =
     return leaveFlow;
   }, [shape]);
 
-  /**
-   * Фокус не уходит из модалки, даже когда исчезает элемент, на котором он был.
-   * Мастер меняет шаг — кнопка «Далее» размонтируется вместе с содержимым, и
-   * фокус падает на `body`. `Esc` и `Tab`-ловушка висят на карточке и ждут
-   * события ИЗНУТРИ — а изнутри больше ничего не приходит. Дефект найден смоком
-   * G-53: со второго шага мастера расписания `Esc` переставал закрывать `M-08`.
-   *
-   * Проверка идёт ПОСЛЕ КАЖДОГО рендера, а не по событию: браузер не обещает
-   * `focusout`, когда сфокусированный узел удалён, — на это событие полагаться
-   * нельзя. Два условия, при которых модалка фокус НЕ отнимает: окно потеряло
-   * фокус целиком (человек ушёл в адресную строку) и открыт вложенный слой
-   * (AR-82) — забирает верхняя из открытых модалок.
-   */
-  useEffect(() => {
-    const card = ref.current;
-    if (!card || !document.hasFocus()) return;
-    const active = document.activeElement;
-    if (active && card.contains(active)) return;
-    // Верхним слоем бывает не только модалка: `M-07` на десктопе — поповер у
-    // кнопки (§3), и он живёт вне стопки `.sch-overlay`. Без этой уступки
-    // модалка-родитель отбирала бы у него фокус тем же проходом, каким чинила
-    // свой, и `Esc` с ловушкой фокуса переставали бы работать — ровно тот
-    // дефект, который этап 2 уже ловил в поповере журнала.
-    if (document.querySelector('.sch-popover')) return;
-    const overlays = document.querySelectorAll('.sch-overlay');
-    if (overlays[overlays.length - 1] !== card.parentElement) return;
-    card.focus();
-  });
-
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      // ловушка фокуса: Tab не выводит за пределы карточки
-      const nodes = ref.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (!nodes || nodes.length === 0) return;
-      const list = Array.from(nodes);
-      const firstEl = list[0];
-      const lastEl = list[list.length - 1];
-      if (e.shiftKey && document.activeElement === firstEl) {
-        e.preventDefault();
-        lastEl.focus();
-      } else if (!e.shiftKey && document.activeElement === lastEl) {
-        e.preventDefault();
-        firstEl.focus();
-      }
-    },
-    [onClose],
-  );
-
   const swipe = useSwipeDown(shape === "sheet" ? onClose : null);
 
   return (
-    <div
-      className="sch-overlay"
-      data-level={level}
-      data-shape={shape}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose(); // клик по фону
+    <Dialog.Root
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
-      onKeyDown={onKeyDown}
     >
-      <div
-        className="sch-modal"
-        data-shape={shape}
-        /* Ширина из реестра — ДЕСКТОПНАЯ величина. На мобайле лист и поток
-           занимают всю ширину вьюпорта, и инлайновое значение победило бы CSS. */
-        style={shape === "desktop" ? { width } : undefined}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        data-testid={testId}
-        ref={ref}
-        tabIndex={-1}
-        {...swipe}
-      >
-        {shape === "sheet" ? <div className="sch-sheet-handle" aria-hidden="true" /> : null}
-        <div className="sch-modal-head">
-          {/* У мастера на мобайле в хедере «Назад», а не крестик (§3). */}
-          {shape === "fullscreen" && onBack ? (
-            <Button kind="icon" onClick={onBack} aria-label="Назад" testId={testId ? `${testId}.back.header` : undefined}>
-              <Icon name="chevronLeft" />
-            </Button>
-          ) : null}
-          <h2 id={titleId}>{title}</h2>
-          <Button kind="icon" onClick={onClose} aria-label="Закрыть" testId={testId ? `${testId}.close` : undefined}>
-            <Icon name="close" />
-          </Button>
-        </div>
-        <div className="sch-modal-body">{children}</div>
-        {footer ? <div className="sch-modal-foot">{footer}</div> : null}
-      </div>
-    </div>
+      <Dialog.Portal>
+        <Dialog.Overlay className="sch-portal sch-overlay" data-level={level} data-shape={shape}>
+          <Dialog.Content
+            ref={ref}
+            className="sch-modal"
+            data-shape={shape}
+            data-testid={testId}
+            /* Ширина из реестра — ДЕСКТОПНАЯ величина. На мобайле лист и поток
+               занимают всю ширину вьюпорта, и инлайновое значение победило бы CSS. */
+            style={shape === "desktop" ? { width } : undefined}
+            /* Описания у модалок реестра нет — заголовка достаточно; явный
+               `undefined` снимает предупреждение Radix о недостающем Description. */
+            aria-describedby={undefined}
+            onOpenAutoFocus={(e) => {
+              // Поле с autoFocus берёт фокус первым, а не кнопка «Закрыть» из шапки.
+              const first = ref.current?.querySelector<HTMLElement>("[autofocus]");
+              if (first) {
+                e.preventDefault();
+                first.focus();
+              }
+            }}
+            {...swipe}
+          >
+            {shape === "sheet" ? <div className="sch-sheet-handle" aria-hidden="true" /> : null}
+            <div className="sch-modal-head">
+              {/* У мастера на мобайле в хедере «Назад», а не крестик (§3). */}
+              {shape === "fullscreen" && onBack ? (
+                <Button kind="icon" onClick={onBack} aria-label="Назад" testId={testId ? `${testId}.back.header` : undefined}>
+                  <Icon name="chevronLeft" />
+                </Button>
+              ) : null}
+              <Dialog.Title asChild>
+                <h2>{title}</h2>
+              </Dialog.Title>
+              <Dialog.Close asChild>
+                <Button kind="icon" aria-label="Закрыть" testId={testId ? `${testId}.close` : undefined}>
+                  <Icon name="close" />
+                </Button>
+              </Dialog.Close>
+            </div>
+            <div className="sch-modal-body">{children}</div>
+            {footer ? <div className="sch-modal-foot">{footer}</div> : null}
+          </Dialog.Content>
+        </Dialog.Overlay>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -411,11 +356,15 @@ function useSwipeDown(onClose: (() => void) | null) {
 }
 
 /**
- * Поповер — второй способ показать слой (`S-51`, `S-52`): якорится к клетке
- * таблицы, но подчиняется тем же правилам §0, что и модалка — ловушка фокуса,
- * `Esc` закрывает, фокус возвращается открывателю. Разница лишь в геометрии:
- * поповер не затемняет экран и не блокирует прокрутку, потому что журнал под
- * ним остаётся контекстом действия.
+ * Поповер — второй способ показать слой (`S-51`, `S-52`, `M-07`, `M-15`):
+ * якорится к клетке таблицы или кнопке и подчиняется тем же правилам §0, что
+ * и модалка — ловушка фокуса, `Esc`, возврат фокуса открывателю. Разница в
+ * геометрии: без затемнения, у якоря, с уходом от края окна.
+ *
+ * Якорь остаётся `DOMRect`: экраны передают прямоугольник клетки, а не
+ * элемент, и `Popover.Anchor virtualRef` принимает ровно это. `modal` — потому
+ * что реестр §3 требует ловушку фокуса, а немодальный поповер Radix её не
+ * держит (Tab уходит наружу и закрывает слой).
  */
 export function Popover({
   anchor,
@@ -433,85 +382,32 @@ export function Popover({
   /** Ширина из реестра §3: поповеры версии — 240, 280 и 320px. */
   width?: number;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const opener = useRef<Element | null>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-
-  useEffect(() => {
-    opener.current = document.activeElement;
-    const el = ref.current;
-    if (el) {
-      const box = el.getBoundingClientRect();
-      // Поповер не выходит за окно: если снизу/справа не хватает места —
-      // разворачивается вверх/влево от якоря.
-      const below = anchor.bottom + 8;
-      const top = below + box.height > window.innerHeight ? Math.max(8, anchor.top - box.height - 8) : below;
-      const left = Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8));
-      setPos({ top, left });
-    }
-    return () => {
-      (opener.current as HTMLElement | null)?.focus?.();
-    };
-  }, [anchor]);
-
-  /**
-   * Фокус ставится ОТДЕЛЬНЫМ проходом — после того, как позиция посчитана и
-   * слой перестал быть `visibility: hidden`. Скрытый элемент сфокусировать
-   * нельзя: браузер молча отказывает, и вместе с фокусом пропадают обе гарантии
-   * §0 — `Esc` закрывает (обработчик висит на слое и ждёт события изнутри) и
-   * `Tab` не уводит наружу. Дефект найден смоком G-53: после сохранения темы
-   * `Esc` не закрывал `S-51`.
-   */
-  useEffect(() => {
-    if (!pos) return;
-    ref.current?.querySelector<HTMLElement>('button, input, [tabindex]:not([tabindex="-1"])')?.focus();
-  }, [pos]);
-
-  useEffect(() => {
-    const onDocDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener("mousedown", onDocDown);
-    return () => document.removeEventListener("mousedown", onDocDown);
-  }, [onClose]);
-
+  const virtualRef = useRef({ getBoundingClientRect: () => anchor });
+  virtualRef.current = { getBoundingClientRect: () => anchor };
   return (
-    <div
-      className="sch-popover"
-      role="dialog"
-      aria-label={label}
-      data-testid={testId}
-      ref={ref}
-      style={
-        pos
-          ? { top: pos.top, left: pos.left, width }
-          : { top: anchor.bottom + 8, left: anchor.left, width, visibility: "hidden" }
-      }
-      onKeyDown={(e) => {
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          onClose();
-          return;
-        }
-        if (e.key !== "Tab") return;
-        const nodes = ref.current?.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        );
-        if (!nodes || nodes.length === 0) return;
-        const list = Array.from(nodes);
-        const firstEl = list[0];
-        const lastEl = list[list.length - 1];
-        if (e.shiftKey && document.activeElement === firstEl) {
-          e.preventDefault();
-          lastEl.focus();
-        } else if (!e.shiftKey && document.activeElement === lastEl) {
-          e.preventDefault();
-          firstEl.focus();
-        }
+    <PopoverPrimitive.Root
+      open
+      modal
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
     >
-      {children}
-    </div>
+      <PopoverPrimitive.Anchor virtualRef={virtualRef} />
+      <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Content
+          className="sch-portal sch-popover"
+          data-testid={testId}
+          aria-label={label}
+          side="bottom"
+          align="start"
+          sideOffset={8}
+          collisionPadding={8}
+          style={{ width }}
+        >
+          {children}
+        </PopoverPrimitive.Content>
+      </PopoverPrimitive.Portal>
+    </PopoverPrimitive.Root>
   );
 }
 
@@ -521,9 +417,7 @@ export function Popover({
  * `M-12` (`S-52`) и `M-15`.
  *
  * Экран не выбирает форму сам и не пишет её дважды: он говорит, к чему слой
- * якорится и как называется, а раскладку выбирает библиотека. Иначе четыре
- * экрана завели бы четыре реализации одного правила — и три из них рано или
- * поздно разошлись бы с четвёртой.
+ * якорится и как называется, а раскладку выбирает библиотека.
  */
 export function PopoverOrSheet({
   anchor,
@@ -575,10 +469,8 @@ export function Skeletons({ count, kind = "card" }: { count: number; kind?: "car
  * следующему шагу онбординга. У роли без права кнопка НЕ рендерится, и текст
  * другой: «появятся, когда модератор их создаст» (AR-69, красная линия 7).
  *
- * Иллюстрация — иконка `lucide` (AR-190), а не глиф: экран называет её по
- * имени (`icon`), по умолчанию — документ. Проп `glyph` оставлен ради
- * совместимости с экранами, написанными до 1.3.0, и НЕ читается: глиф
- * рендерился системным шрифтом и на каждой платформе выглядел иначе.
+ * Иллюстрация — иконка `lucide` (AR-190). Проп `glyph` оставлен ради
+ * совместимости с экранами, написанными до 1.3.0, и НЕ читается.
  */
 export function EmptyState({
   title,
@@ -620,11 +512,20 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry: () 
   );
 }
 
+/**
+ * Тост на `Toast` Radix: область уведомлений с `role="region"` и горячей
+ * клавишей, сам тост — `role="status"` с живой областью, свайп вниз закрывает.
+ * Время жизни считает `useToast` (4 секунды, максимум один — §5): библиотечный
+ * таймер выключен, чтобы два таймера не спорили, кто гасит.
+ */
 export function Toast({ text }: { text: string }) {
   return (
-    <div className="sch-toast" role="status" data-testid="toast">
-      {text}
-    </div>
+    <ToastPrimitive.Provider swipeDirection="down" label="Уведомления ({hotkey})">
+      <ToastPrimitive.Root className="sch-toast" data-testid="toast" defaultOpen duration={Infinity}>
+        <ToastPrimitive.Description>{text}</ToastPrimitive.Description>
+      </ToastPrimitive.Root>
+      <ToastPrimitive.Viewport className="sch-portal sch-toasts" />
+    </ToastPrimitive.Provider>
   );
 }
 
@@ -641,9 +542,13 @@ export function useToast() {
 
 // ─────────────────────────── мелкие элементы ───────────────────────────
 
+/**
+ * Аватар на `Avatar` Radix: картинка показывается только после загрузки,
+ * до неё и при ошибке — инициалы; без библиотеки битая ссылка на фото
+ * рисовала пустую рамку с alt-текстом.
+ */
 export function Avatar({ name, url, large }: { name: string | null; url?: string | null; large?: boolean }) {
   const cls = large ? "sch-avatar sch-avatar--lg" : "sch-avatar";
-  if (url) return <img className={cls} src={url} alt={name ?? ""} />;
   const initials = (name ?? "")
     .split(/\s+/)
     .filter(Boolean)
@@ -651,9 +556,10 @@ export function Avatar({ name, url, large }: { name: string | null; url?: string
     .map((w) => w[0]?.toUpperCase())
     .join("");
   return (
-    <span className={cls} aria-hidden={name ? undefined : true}>
-      {initials || "·"}
-    </span>
+    <AvatarPrimitive.Root className={cls} aria-hidden={name ? undefined : true}>
+      {url ? <AvatarPrimitive.Image className="sch-avatar-img" src={url} alt={name ?? ""} /> : null}
+      <AvatarPrimitive.Fallback delayMs={url ? 300 : 0}>{initials || "·"}</AvatarPrimitive.Fallback>
+    </AvatarPrimitive.Root>
   );
 }
 
@@ -673,7 +579,7 @@ export function Badge({ children, muted, tone, testId }: { children: ReactNode; 
   );
 }
 
-// ─────────────────────────── общие блоки кабинетов 1.3.0 (AR-186, AR-190) ───────────────────────────
+// ─────────────────────────── общие блоки кабинетов (AR-186, AR-190) ───────────────────────────
 
 /**
  * Плитка показателя: число крупно, подпись мелко. Плитки живут только в
@@ -697,8 +603,8 @@ export function StatGrid({ children, testId }: { children: ReactNode; testId?: s
 }
 
 /**
- * Навигация разделов внутри экрана (`S-62.subnav`): сегменты в ряд на
- * десктопе, лента чипов с прокруткой внутри контейнера на мобайле (§6).
+ * Навигация разделов внутри экрана (`S-62.subnav`): вкладки с подчёркиванием
+ * в ряд на десктопе, лента с прокруткой внутри контейнера на мобайле (§6).
  * Активный раздел — `aria-current`, а не класс: смок читает атрибут.
  */
 export function SubNav<K extends string>({

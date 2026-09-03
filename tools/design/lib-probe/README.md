@@ -11,6 +11,7 @@ TypeScript 5.6): кнопка, поле, выпадающий список, бе
 | `primitives` | Radix Primitives (`Dialog`, `Popover`, `Toast`, `Tooltip`) + свой CSS на переменных |
 | `prim-select` | один `@radix-ui/react-select` — цена кастомного селекта |
 | `prim-dialog` | один `@radix-ui/react-dialog` — цена одного слоя |
+| `prim-avatar` | один `@radix-ui/react-avatar` — цена аватара с фолбэком |
 
 Запуск: `npm install && npm run probe`. Результаты и выводы — `docs/design/1.4.0/library-choice.md`.
 Зонд не является частью приложения и не входит в workspaces монорепо.

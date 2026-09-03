@@ -1,0 +1,8 @@
+:root { --c-brand: #6427C9; --c-ink: #221833; --c-border: #E7E2F2; --r-md: 8px; }
+.sch { font-family: Inter, system-ui; color: var(--c-ink); }
+.sch-btn { height: 36px; padding: 0 12px; border-radius: var(--r-md); background: var(--c-brand); color: #fff; border: 1px solid transparent; }
+.sch-input { height: 36px; border: 1px solid var(--c-border); border-radius: var(--r-md); }
+.sch-badge { border-radius: 999px; padding: 0 8px; background: #EDE6FC; color: var(--c-brand); }
+.sch-overlay { position: fixed; inset: 0; background: rgba(23,16,38,.6); display: flex; align-items: center; justify-content: center; }
+.sch-modal { background: #fff; border-radius: 12px; padding: 24px; width: 480px; }
+.sch-popover { position: fixed; background: #fff; border: 1px solid var(--c-border); border-radius: 12px; padding: 16px; }
