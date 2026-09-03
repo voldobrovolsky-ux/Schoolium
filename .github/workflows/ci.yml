@@ -52,6 +52,8 @@ jobs:
         run: node tools/method/check-testids.mjs
       - name: G-83 — иконки без юникод-глифов (AR-190)
         run: node tools/design/check-icons.mjs
+      - name: G-84 — слои только через Radix, Radix только через ui.tsx (AR-197)
+        run: node tools/design/check-layers.mjs
 
   # Слой качества расписания (G-56…G-63): чистые функции, без БД и сети.
   # Раскладка по джобам задокументирована в docs/G-CHECKS.md.

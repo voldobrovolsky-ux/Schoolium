@@ -21,31 +21,34 @@
 
 /* ─────────────────────────── основа ─────────────────────────── */
 
-.sch {
+/* `.sch` — корень контура; `.sch-portal` — та же типографика без фона для
+   слоёв Radix (модалка, поповер, тост, подсказка): порталы рендерятся в `body`,
+   вне корня, и без этого класса наследовали бы шрифт легаси-страницы. */
+.sch, .sch-portal {
   font-family: var(--font-family);
   color: var(--c-ink-primary);
-  background: var(--c-surface-page);
   font-size: var(--fs-md);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-.sch *,
-.sch *::before,
-.sch *::after { box-sizing: border-box; }
+.sch { background: var(--c-surface-page); }
+.sch *, .sch-portal *,
+.sch *::before, .sch-portal *::before,
+.sch *::after, .sch-portal *::after { box-sizing: border-box; }
 
-.sch h1, .sch h2, .sch h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01em; }
+:is(.sch, .sch-portal) :is(h1, h2, h3) { font-family: var(--font-display); margin: 0; letter-spacing: -0.01em; }
 /* Лестница заголовков внутри оболочки: h1 = `fs-h2` (24), h2 = `fs-xl` (20),
    h3 и `.sch-section-title` = `fs-lg` (16). `fs-h1` остаётся лендингу — там
    заголовок один на экран и стоит на пустом фоне, а не над таблицей. */
-.sch h1 { font-size: var(--fs-h2); font-weight: var(--fw-semibold); line-height: 1.25; }
-.sch h2 { font-size: var(--fs-xl); font-weight: var(--fw-semibold); line-height: 1.3; }
-.sch h3 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); line-height: 1.35; }
-.sch p { margin: 0; }
+:is(.sch, .sch-portal) h1 { font-size: var(--fs-h2); font-weight: var(--fw-semibold); line-height: 1.25; }
+:is(.sch, .sch-portal) h2 { font-size: var(--fs-xl); font-weight: var(--fw-semibold); line-height: 1.3; }
+:is(.sch, .sch-portal) h3 { font-size: var(--fs-lg); font-weight: var(--fw-semibold); line-height: 1.35; }
+:is(.sch, .sch-portal) p { margin: 0; }
 
 /* Видимая фокус-рамка на ВСЁМ интерактивном (`70-screens.md` §0): человек,
    работающий с клавиатуры, обязан видеть, где он находится. */
-.sch :focus-visible {
+:is(.sch, .sch-portal) :focus-visible {
   outline: 2px solid var(--c-border-focus);
   outline-offset: 2px;
   border-radius: var(--r-sm);
@@ -388,9 +391,12 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-modal-body { padding: var(--sp-20); overflow-y: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior-y: contain; }
 .sch-modal-foot { padding: var(--sp-12) var(--sp-20); border-top: 1px solid var(--c-border-default); flex: 0 0 auto; }
 
-/* Поповер — второй способ показать слой; ловушка фокуса та же (§3). */
+/* Поповер — второй способ показать слой; ловушка фокуса та же (§3).
+   Без `position`: позиционирует обёртка Popper Radix (transform), а `z-index`
+   она копирует с содержимого. Свой `position: fixed` обнулял высоту обёртки,
+   и коллизии с краем окна не считались — слой уезжал за низ экрана. */
 .sch-popover {
-  position: fixed; z-index: 45;
+  z-index: 45;
   background: var(--c-surface-card);
   border: 1px solid var(--c-border-default);
   border-radius: var(--r-lg);
@@ -693,15 +699,39 @@ select.sch-input { padding-right: var(--sp-8); }
   overscroll-behavior: contain;
 }
 
-/* ─────────────────────────── тосты (§5) ─────────────────────────── */
+/* ─────────────────────────── тосты (§5, Radix Toast) ─────────────────────────── */
 
-.sch-toast {
+/* Область уведомлений — `<ol>` Radix снизу по центру; сам тост — `<li>`.
+   Позиционируется область, а не тост: так свайп и очередь живут внутри неё. */
+.sch-toasts {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--sp-24); z-index: 60;
+  display: flex; flex-direction: column; align-items: center; gap: var(--sp-8);
+  list-style: none; margin: 0; padding: 0; outline: none;
+  width: max-content; max-width: min(480px, calc(100vw - 2 * var(--sp-16)));
+}
+.sch-toast {
   background: var(--c-ink-primary); color: var(--c-ink-on-violet);
   padding: var(--sp-8) var(--sp-16); border-radius: var(--r-lg);
   box-shadow: var(--sh-pop); font-size: var(--fs-sm); line-height: 1.4;
-  max-width: min(480px, calc(100vw - 2 * var(--sp-16)));
+  animation: sch-rise 150ms ease-out;
 }
+/* Свайп вниз (Radix ставит смещение переменной): тост едет за пальцем и уходит. */
+.sch-toast[data-swipe='move'] { transform: translateY(var(--radix-toast-swipe-move-y)); }
+.sch-toast[data-swipe='cancel'] { transform: translateY(0); transition: transform 150ms ease-out; }
+.sch-toast[data-swipe='end'] { animation: sch-toast-out 120ms ease-out forwards; }
+@keyframes sch-toast-out { to { transform: translateY(100%); opacity: 0; } }
+
+/* Подсказка свёрнутого сайдбара (Radix Tooltip): тёмная плашка 12px. */
+.sch-tooltip {
+  z-index: 70; background: var(--c-ink-primary); color: var(--c-ink-on-violet);
+  padding: var(--sp-4) var(--sp-8); border-radius: var(--r-md);
+  font-size: var(--fs-xs); font-weight: var(--fw-medium); line-height: 1.4;
+  box-shadow: var(--sh-pop); animation: sch-fade 100ms ease-out;
+}
+
+/* Аватар Radix: картинка — дочерний элемент, круг режет её рамкой. */
+.sch-avatar { overflow: hidden; position: relative; }
+.sch-avatar-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 
 /* ─────────────────────────── мелочи ─────────────────────────── */
 
@@ -711,7 +741,7 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-stack { display: flex; flex-direction: column; gap: var(--sp-12); }
 .sch-sections { display: flex; flex-direction: column; gap: var(--sp-32); }
 /* Селектор с тегом: `.sch h2` (0,1,1) иначе перебивает класс (0,1,0). */
-.sch-section-title, .sch h2.sch-section-title, .sch h3.sch-section-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold); letter-spacing: -0.01em; margin: 0 0 var(--sp-12); }
+.sch-section-title, :is(.sch, .sch-portal) h2.sch-section-title, :is(.sch, .sch-portal) h3.sch-section-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold); letter-spacing: -0.01em; margin: 0 0 var(--sp-12); }
 .sch-canvas { background: var(--c-surface-canvas); border: 1px solid var(--c-border-default); border-radius: var(--r-lg); padding: var(--sp-16); }
 .sch-inline-avatars { display: flex; gap: calc(var(--sp-4) * -1); }
 .sch-card--link { cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: var(--sp-8); font: inherit; color: inherit; border: 1px solid var(--c-border-default); }
@@ -817,7 +847,7 @@ select.sch-input { padding-right: var(--sp-8); }
   /* Кнопка во всю ширину (§4) не помещается рядом с заголовком: шапка экрана
      и строки «заголовок + действие» складываются в колонку. */
   .sch-page-head { flex-direction: column; align-items: stretch; gap: var(--sp-12); }
-  .sch h1 { font-size: var(--fs-xl); }
+  :is(.sch, .sch-portal) h1 { font-size: var(--fs-xl); }
   .sch-row--between { flex-wrap: wrap; }
   .sch-row { min-width: 0; }
 
@@ -949,8 +979,8 @@ select.sch-input { padding-right: var(--sp-8); }
   .sch-stepper .sch-btn { width: var(--ctl-h-mobile); flex: 0 0 var(--ctl-h-mobile); }
 
   /* Тост — над таб-баром, а не под ним (§5). */
-  .sch-toast { bottom: calc(64px + var(--sp-16) + env(safe-area-inset-bottom, 0px)); }
-  body[data-sch-flow] .sch-toast { bottom: var(--sp-24); }
+  .sch-toasts { bottom: calc(64px + var(--sp-16) + env(safe-area-inset-bottom, 0px)); }
+  body[data-sch-flow] .sch-toasts { bottom: var(--sp-24); }
 
   /* S-40 · закреплён столбец времени (§6). */
   .sch-week-time {
@@ -1196,7 +1226,7 @@ select.sch-input { padding-right: var(--sp-8); }
    «идёт загрузка» на кнопке, чей текст на это время скрыт (§5). */
 @media (prefers-reduced-motion: reduce) {
   .sch-overlay, .sch-modal, .sch-modal[data-shape='fullscreen'], .sch-modal[data-shape='sheet'],
-  .sch-skeleton, .sch-shake, .sch-unfold { animation: none; }
+  .sch-skeleton, .sch-shake, .sch-unfold, .sch-toast, .sch-tooltip { animation: none; }
   .sch-btn, .sch-card, .sch-code-cell, .sch-input, .sch-nav-item, .sch-linkrow, .sch-subnav-item { transition: none; }
 }
 
