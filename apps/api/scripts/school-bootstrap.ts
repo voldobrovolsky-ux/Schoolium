@@ -73,7 +73,7 @@ async function main(): Promise<void> {
       process.exit(3);
     }
     const url = await issueLink(m.workspaceId, user.id);
-    console.log(`Ссылка перевыпущена (одноразовая, ${ACCESS_PARAMS.bootstrapLinkTtlHours} ч):\n${url}`);
+    console.log(`Ссылка перевыпущена (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч, открывать можно повторно):\n${url}`);
     return;
   }
 
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
       `Школа создана: ${schoolName} (workspace ${workspace.id})`,
       `Модератор: ${displayName}, телефон ${phone}`,
       `Креды: ${credentialsNote}`,
-      `Одноразовая ссылка входа (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч) — передайте директору лично:`,
+      `Ссылка входа (${ACCESS_PARAMS.bootstrapLinkTtlHours} ч, открывать можно повторно) — передайте директору лично:`,
       url,
     ].join('\n'),
   );

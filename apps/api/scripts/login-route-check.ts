@@ -134,14 +134,13 @@ async function main(): Promise<void> {
   );
   const bootSession = await access.useBootstrapLink(bootstrapLink.token, 'ноутбук директора');
   await drain();
-  check(bootSession.session.token.length > 0, 'первый модератор входит по одноразовой ссылке платформы (AR-93)');
-  let reuseBoot = 'нет отказа';
-  try {
-    await access.useBootstrapLink(bootstrapLink.token, 'ещё раз');
-  } catch (e) {
-    reuseBoot = (e as { response?: { code?: string } }).response?.code ?? 'ошибка';
-  }
-  check(reuseBoot === 'TOKEN_USED', `повторное использование ссылки → ${reuseBoot}: она одноразова`);
+  check(bootSession.session.token.length > 0, 'первый модератор входит по ссылке платформы (AR-93)');
+  // AR-195: ссылка многоразовая до истечения 48 часов — второе открытие даёт
+  // вторую сессию (телефон и ноутбук), а не TOKEN_USED.
+  const bootAgain = await access.useBootstrapLink(bootstrapLink.token, 'ещё раз');
+  await drain();
+  check(bootAgain.session.token.length > 0 && bootAgain.session.token !== bootSession.session.token,
+    'повторное открытие ссылки в срок — вторая сессия, ссылка многоразовая (AR-195)');
   const relink = await sys(() =>
     b.prisma.bootstrapLink.create({
       data: {

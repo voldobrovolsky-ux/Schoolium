@@ -54,8 +54,11 @@ export function ScheduleScreen() {
   const [loadOpen, setLoadOpen] = useState(false);
   const [preview, setPreview] = useState<SchedulePreviewDto | null>(null);
   const mayBuild = can("schedule.build");
-  // Завуч (AR-174): единственная панель УТЦ — годовые нормы часов по предмету.
-  const mayLoadOnly = !mayBuild && can("schedule.load.write");
+  // Нормы часов — только у держателя `schedule.load.write`: завуч и
+  // администратор; модератор кнопки не видит (AR-196). У завуча это
+  // единственная кнопка панели (AR-174) — потому primary.
+  const mayLoad = can("schedule.load.write");
+  const mayLoadOnly = !mayBuild && mayLoad;
 
   if (state.status === "loading") return <Skeletons count={5} kind="row" />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
@@ -71,10 +74,9 @@ export function ScheduleScreen() {
             Настроить расписание
           </Button>
         ) : null}
-        {/* Нормы часов (AR-174, AR-180): экран годовых норм — завуча, но право
-            «любое из» открывает его и строителю; у завуча это ЕДИНСТВЕННАЯ
-            кнопка панели. */}
-        {mayBuild || mayLoadOnly ? (
+        {/* Нормы часов (AR-174, AR-180, AR-196): экран годовых норм — завуча и
+            администратора; модератору не показывается. */}
+        {mayLoad ? (
           <Button kind={mayLoadOnly ? "primary" : "secondary"} testId="S-40.btn.load" onClick={() => setLoadOpen(true)}>
             Нормы часов
           </Button>

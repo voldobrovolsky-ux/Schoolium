@@ -317,7 +317,7 @@ function LoginLinkBox({ link }: { link: LoginLinkDto }) {
     <div className="sch-canvas sch-qr sch-m06-link" data-testid="S-31.loginLink">
       <QRCodeSVG value={url} size={160} />
       <CopyField value={url} label="Ссылка для входа" />
-      <p className="sch-muted">одноразовая, действует до {dateTime(link.expiresAt)}</p>
+      <p className="sch-muted">действует до {dateTime(link.expiresAt)}, открывать можно повторно</p>
     </div>
   );
 }

@@ -238,15 +238,19 @@ export class AccessService {
     const c = asClient(client);
     const link = await TenantContext.runAsSystem(() => this.prisma.bootstrapLink.findUnique({ where: { token } }));
     if (!link) throw new SchoolError('TOKEN_EXPIRED');
-    if (link.usedAt) throw new SchoolError('TOKEN_USED');
+    // Ссылка МНОГОРАЗОВАЯ до истечения срока (AR-195, решение владельца
+    // 2026-09-03): человек открывает её с телефона и с ноутбука, каждое
+    // открытие — новая сессия; `usedAt` помнит первое открытие для аудита.
     if (link.expiresAt < new Date()) throw new SchoolError('TOKEN_EXPIRED');
     const membership = await TenantContext.runAsSystem(() =>
       this.prisma.membership.findFirst({ where: { userId: link.userId, workspaceId: link.workspaceId } }),
     );
     if (!membership || membership.deactivatedAt) throw new SchoolError('ACCESS_REVOKED');
-    await TenantContext.runAsSystem(() =>
-      this.prisma.bootstrapLink.update({ where: { id: link.id }, data: { usedAt: new Date() } }),
-    );
+    if (!link.usedAt) {
+      await TenantContext.runAsSystem(() =>
+        this.prisma.bootstrapLink.update({ where: { id: link.id }, data: { usedAt: new Date() } }),
+      );
+    }
     await this.markActivated(membership.id, membership.activatedAt);
     const via: SessionVia = link.purpose === 'bootstrap' ? 'bootstrap_link' : 'login_link';
     const session = await this.sessions.issue({
@@ -263,10 +267,10 @@ export class AccessService {
   }
 
   /**
-   * Ссылка входа с карточки сотрудника (AR-189): та же одноразовая ссылка, что
+   * Ссылка входа с карточки сотрудника (AR-189, AR-195): та же ссылка, что
    * у bootstrap, но выпускает её администратор из `S-62`/`S-31`, и аудит
-   * помнит, кто и кому. Срок — 48 часов; повторный выпуск не гасит прежнюю —
-   * каждая одноразова сама по себе.
+   * помнит, кто и кому. Срок — 48 часов, открывать можно повторно до истечения;
+   * повторный выпуск не гасит прежнюю.
    */
   async issueLoginLink(userId: string, workspaceId: string, issuedBy: string) {
     const expiresAt = new Date(Date.now() + ACCESS_PARAMS.loginLinkTtlHours * HOUR);

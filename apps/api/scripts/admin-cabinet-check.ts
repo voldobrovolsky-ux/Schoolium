@@ -126,7 +126,9 @@ async function main(): Promise<void> {
   check(linkSession?.via === 'login_link', `сессия по ссылке с карточки несёт канал ${linkSession?.via} (не bootstrap_link)`);
   const after = await sys(() => b.prisma.membership.findFirst({ where: { userId: teacher.userId, workspaceId: a.workspaceId } }));
   check(after?.activatedAt !== null, 'вход по ссылке поставил activatedAt — учётка ушла из «Не авторизованных» (AR-161)');
-  await refuses(() => access.useBootstrapLink(link.token, 'ещё раз'), 'TOKEN_USED', 'повторное использование ссылки');
+  const again = await access.useBootstrapLink(link.token, 'ноутбук сотрудника');
+  await drain();
+  check(again.session.token !== entered.session.token, 'повторное открытие ссылки в срок — вторая сессия (AR-195, многоразовая)');
   const issuedAudit = await sys(() => b.prisma.auditLog.findFirst({ where: { workspaceId: a.workspaceId, action: SCHOOL_EVENTS.loginLinkIssued } }));
   check(issuedAudit?.actor === a.moderator.userId && issuedAudit?.subjectUserId === teacher.userId,
     'выпуск ссылки в аудите: кто (администратор) и кому (сотрудник)');
@@ -146,7 +148,7 @@ async function main(): Promise<void> {
   check(dlSession?.parentSessionId === linkSession!.id && dlSession?.via === 'device_link',
     'подтверждение сканом записывает родителем сессию телефона — карта устройств покажет, кто кого подключил');
   const activity = await inSchool(a.workspaceId, () => staff.activity(teacher.cardId, 'https://school.example'));
-  check(activity.activated && activity.activeSessions === 2 && activity.profileUrl === `https://school.example/staff/${teacher.cardId}`,
+  check(activity.activated && activity.activeSessions === 3 && activity.profileUrl === `https://school.example/staff/${teacher.cardId}`,
     `активность карточки: активирован, живых сессий ${activity.activeSessions}, ссылка на карточку постоянная`);
 
   // ─── 5. лимит сессий роли (AR-188) ───

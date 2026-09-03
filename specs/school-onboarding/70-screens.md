@@ -414,7 +414,7 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 | `S-31.btn.revokeSessions` | danger-текст | «Закрыть активные сессии» — `POST /api/v1/staff/:id/sessions/revoke`; при деактивации и удалении выполняется автоматически (AR-92) |
 | `S-31.btn.close` | secondary | «Закрыть» — **гасит QR** (правило AR-76) |
 | `S-31.btn.loginLink` | secondary | «Ссылка для входа на 48 часов» — только `school.admin` (AR-189) | `POST /api/v1/staff/:id/login-link` → `S-31.loginLink` | видна администратору; у заполненной и у активированной карточки |
-| `S-31.loginLink` | блок | URL + QR 160px + «Скопировать»; «одноразовая, действует до …» | — | — |
+| `S-31.loginLink` | блок | URL + QR 160px + «Скопировать»; «действует до …, открывать можно повторно» (AR-195) | — | — |
 | `S-31.activity` | блок | `GET /api/v1/staff/:id/activity` (право `staff.manage`): активирован, последняя активность, «живых сессий N из M»; адрес входа виден только `admin` (AR-194) | — | loading / error / данные |
 | `S-31.activity.session` | строка | устройство · «в приложении / в браузере» · канал входа · состояние — до пяти последних | — | — |
 | `S-31.btn.copyProfile` | поле-копия | постоянная ссылка на карточку `/staff/:id` — переходник на профиль, не путь в кабинет | копирует | — |
@@ -1032,7 +1032,7 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 | 36 | POST `/api/v1/auth/login-code/verify` | S-05 | аноним | `staff.session.started.v1` | `LOGIN_CODE_INVALID`, `LOGIN_CODE_EXPIRED`, `ACCESS_REVOKED` |
 | 37 | POST `/api/v1/staff/:id/sessions/revoke` | S-31 | `staff.manage` | `staff.session.revoked.v1` | — |
 | 38 | DELETE `/api/v1/auth/sessions/:sid` | S-80 | владелец сессии | `staff.session.revoked.v1` (reason: manual) | — |
-| 39 | POST `/api/v1/staff/:id/login-link` | S-31, S-62 | `school.admin` | `staff.login_link.issued.v1` | — (одноразовая ссылка 48 ч, AR-189) |
+| 39 | POST `/api/v1/staff/:id/login-link` | S-31, S-62 | `school.admin` | `staff.login_link.issued.v1` | — (ссылка 48 ч, многоразовая до истечения, AR-189, AR-195) |
 | 40 | POST `/api/v1/admin/sessions/:sid/revoke` | S-62 | `school.admin` | `staff.session.revoked.v1` (reason: admin) | `ACCESS_REVOKED` — сессия уже завершена |
 | 41 | POST `/api/v1/admin/sessions/revoke-all` | S-62 (`M-28`) | `school.admin` | `staff.session.revoked.v1` ×N (reason: incident) | — |
 | 42 | PUT `/api/v1/admin/policy` | S-62 | `school.admin` | `school.policy.set.v1` | — |
@@ -1045,11 +1045,11 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 
 Вне HTTP: **bootstrap школы** (AR-93) — консольная операция платформы
 `npm run school:bootstrap -- --phone=… --school=…`: создаёт школу, пользователя и
-членство модератора, печатает одноразовую ссылку входа на 48 часов (AR-189) и
+членство модератора, печатает ссылку входа на 48 часов (многоразовую до истечения, AR-189, AR-195) и
 пишет факт в аудит. Экрана у операции нет и не будет: её выполняет владелец
 продукта. Парная операция `school:provision` доводит существующую школу до
 рабочих кабинетов: заводит учётки администратора, модератора и завуча и
-печатает каждой одноразовую ссылку входа на 48 часов.
+печатает каждой ссылку входа на 48 часов (многоразовую до истечения, AR-195).
 
 Строки 39–48 — кабинет администратора 1.3.0 (AR-186): их проходит только
 `admin`; модератор получает отказ по праву, и это единственная роль версии,

@@ -111,7 +111,7 @@ async function ensure(
   return [
     `— ${displayName} (@${username}) · роли: ${roles.join(', ')}`,
     `  ${creds}`,
-    `  одноразовая ссылка входа (${ACCESS_PARAMS.loginLinkTtlHours} ч): ${url}`,
+    `  ссылка входа (${ACCESS_PARAMS.loginLinkTtlHours} ч, открывать можно повторно): ${url}`,
   ];
 }
 

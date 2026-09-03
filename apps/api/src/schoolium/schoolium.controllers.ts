@@ -622,9 +622,10 @@ export class ScheduleController {
 
   /**
    * §11 строка 18 · раздел «Нагрузка». Несёт версию агрегата (AR-109).
-   * Открыт и завучу: годовые нормы часов — его единственное право УТЦ (AR-174).
+   * Годовые нормы часов — право завуча (AR-174) и администратора; модератор
+   * их не выставляет (AR-196, решение владельца 2026-09-03).
    */
-  @RequirePermission(['schedule.build', 'schedule.load.write'])
+  @RequirePermission('schedule.load.write')
   @Put('load')
   setLoad(@Req() req: Req0, @Body() body: SetLoadDto) {
     return this.svc.setLoad(body, actorOf(req));

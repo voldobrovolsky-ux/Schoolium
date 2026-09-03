@@ -708,7 +708,7 @@ export function BootstrapScreen({ token }: { token: string }) {
               {error}
             </p>
             <p className="sch-muted">
-              Ссылка одноразова и живёт {hoursWord(ACCESS_PARAMS.bootstrapLinkTtlHours)}. Новую выпускает
+              Ссылка живёт {hoursWord(ACCESS_PARAMS.bootstrapLinkTtlHours)} и открывается повторно, пока не истекла. Новую выпускает
               администратор школы или платформы.
             </p>
           </>
