@@ -252,13 +252,6 @@
 .sch-menu-item--danger:hover { background: var(--c-mark-m2-bg); }
 .sch-menu-sep { height: 1px; background: var(--c-border-default); margin: var(--sp-4) var(--sp-8); }
 
-.sch-sidebar-school {
-  display: block; padding: 0 var(--sp-8); margin-top: calc(var(--sp-4) * -1);
-  /* Текст, а не UI-элемент: `ink.muted` на белом даёт 3.6:1 — для текста
-     не допускается (G-37), поэтому `ink.secondary`. */
-  font-size: var(--fs-xs); color: var(--c-ink-secondary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
 .sch-user-text { display: flex; flex-direction: column; }
 .sch-breadcrumb { display: inline-flex; align-items: center; gap: var(--sp-4); }
 .sch-header-title--back { display: inline-flex; align-items: center; gap: var(--sp-4); }

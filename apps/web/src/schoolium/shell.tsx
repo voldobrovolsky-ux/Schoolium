@@ -227,10 +227,10 @@ export function Shell({ active, title, breadcrumb, children }: ShellProps) {
   return (
     <div className="sch sch-shell">
       <nav className="sch-sidebar" data-collapsed={collapsed} data-testid="L.sidebar">
-        <button className="sch-logo" data-testid="L.sidebar.logo" onClick={() => navigate(me.startScreen)} title={collapsed ? me.schoolName : undefined}>
+        {/* Под логотипом — только «Schoolium»: название школы снято решением владельца 2026-09-03. */}
+        <button className="sch-logo" data-testid="L.sidebar.logo" onClick={() => navigate(me.startScreen)}>
           {collapsed ? "S" : "Schoolium"}
         </button>
-        {!collapsed && me.schoolName ? <span className="sch-sidebar-school">{me.schoolName}</span> : null}
         <div className="sch-sidebar-sep" />
         <div className="sch-nav">
           {NAV.map((n) => (
