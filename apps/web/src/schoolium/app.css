@@ -888,13 +888,13 @@ select.sch-input { padding-right: var(--sp-8); }
   .sch-copy-row { flex-direction: column; align-items: stretch; }
   .sch-copy-value { height: var(--ctl-h-mobile); }
 
-  /* Мишени §4 (≥44) — всё, что на десктопе стоит в 36: меню пользователя,
-     строки переходов, вкладки разделов и студии, строки позиций предмета,
-     текстовые возвраты, поля численности мастера. Смок G-55 меряет каждую. */
+  /* Меню пользователя, строки переходов, вкладки разделов — мишени §4.
+     Остальные элементы, объявленные НИЖЕ по файлу, поднимаются до 44 в
+     блоке «мишени §4» в самом конце: каскад одной специфичности решает
+     порядком, и правило отсюда они перебивали бы. */
   .sch-menu-item { min-height: var(--tap-min); font-size: var(--fs-md); }
   .sch-linkrow { min-height: 56px; }
-  .sch-subnav-item, .sch-studiotab, .sch-subject-row, .sch-linklike, .sch-check-row { min-height: var(--tap-min); }
-  .sch-headcount-input { height: var(--ctl-h-mobile); font-size: var(--fs-lg); }
+  .sch-subnav-item { min-height: var(--tap-min); }
 
   /* ─── чипы отметки 44px (§3, M-12) ─── */
   .sch-mark--btn { width: var(--tap-min); height: var(--tap-min); }
@@ -1237,3 +1237,15 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-skel-row select { flex: 0 0 110px; }
 .sch-skel-row input[type="time"] { flex: 0 0 104px; }
 .sch-skel-row input:not([type="time"]) { flex: 1 1 140px; min-width: 0; }
+
+/* ═══ Мишени §4 на телефоне — ПОСЛЕДНИЙ блок файла намеренно ═══
+ * Всё, что на десктопе стоит в 36 (`ctl-h`) и объявлено выше по файлу:
+ * вкладки студии `S-42`, строки позиций предмета, текстовые возвраты, строки
+ * компетенции, поля численности мастера. У правил одна специфичность, и
+ * побеждает порядок — поэтому блок стоит после всех объявлений компонентов.
+ * Первый мобильный прогон 1.4.0 поймал вкладки 37px ровно из-за порядка.
+ * Смок G-55 меряет каждую мишень перечислением. */
+@media (max-width: 767px) {
+  .sch-studiotab, .sch-subject-row, .sch-linklike, .sch-check-row { min-height: var(--tap-min); }
+  .sch-headcount-input { height: var(--ctl-h-mobile); font-size: var(--fs-lg); }
+}
