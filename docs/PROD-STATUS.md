@@ -110,6 +110,19 @@ psql …` внутри heredoc съедал остаток скрипта из s
 
 ## Релиз 1.3.0 — что меняется на сервере
 
+**Выкачен 2026-09-03 00:20 UTC** — прогон deploy-school №20 с ветки
+`claude/schoolium-1-3-0-recon-96bqyh` (пакет 1.3.0 + снятие названия школы
+под логотипом), коммит `c015912`:
+https://github.com/voldobrovolsky-ux/Schoolium/actions/runs/33698883218.
+`API /healthz: 200`, веб-контейнер: бандл `index-cDvN4w8p`, воркер
+версионирован, оболочка `no-cache`. Теги: `deploy/20260903-0020-run20`,
+`deploy-current → c015912`, `deploy-previous → 1adc821` (откат = запуск
+workflow с этим тегом). Миграция `20260902090000_admin_cabinet_130` применена
+контейнером API при старте (иначе `node dist/main.js` не запустился бы —
+`prisma migrate deploy && node …`). Ветка в `main` ещё не влита — см.
+`docs/RECON-2026-09-02.md` и порядок ниже.
+
+
 - **Одна миграция, expand-only**: `20260902090000_admin_cabinet_130` — четыре
   колонки в `AppSession`, две в `BootstrapLink`, три новые таблицы
   (`SchoolNetwork`, `SchoolAsset`, `SchoolAccessPolicy`). Строки не удаляются,
