@@ -64,6 +64,17 @@ import type {
   TokenStatus,
   UpsertStudentDto,
 } from "@edustore/shared";
+// Пакет 04.09, расписание: обед по классам (AR-200), предпочтения педагога
+// (AR-206), отмена урока и замена (AR-207).
+import type {
+  CancelLessonDto,
+  DatedLessonDto,
+  SetClassLunchDto,
+  SetSubstituteDto,
+  SetTeacherPreferenceDto,
+  SubstitutionResultDto,
+  TeacherPreferenceDto,
+} from "@edustore/shared";
 
 /** Отказ с кодом и текстом из реестра §9 — то, что экран показывает дословно. */
 export class SchoolApiError extends Error {
@@ -249,8 +260,9 @@ export const api = {
     call<{ entries: LoadEntry[]; version: number }>("GET", `${V1}/schedule/load`),
   setLoad: (dto: SetLoadDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/load`, dto),
   setPriorities: (dto: SetPrioritiesDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/priorities`, dto),
+  // Ответ без `cap` (AR-199): потолков дня нет, длина дня — справка.
   setDayParams: (dto: DayParamsDto) =>
-    call<{ ok: boolean; dayLengthMinutes: number; cap: number }>("PUT", `${V1}/schedule/day-params`, dto),
+    call<{ ok: boolean; dayLengthMinutes: number }>("PUT", `${V1}/schedule/day-params`, dto),
   generate: () => call<SchedulePreviewDto>("POST", `${V1}/schedule/generate`),
   cancelGeneration: () => call<{ ok: boolean }>("POST", `${V1}/schedule/generate/cancel`),
   skeleton: () => call<DaySkeletonDto>("GET", `${V1}/schedule/skeleton`),
@@ -259,6 +271,27 @@ export const api = {
   preview: () => call<SchedulePreviewDto>("GET", `${V1}/schedule/preview`),
   confirm: (dto: ConfirmScheduleDto) =>
     call<{ ok: boolean; detached: number; materialized: number }>("POST", `${V1}/schedule/confirm`, dto),
+  // Обед по классам (AR-200): пишется отдельно от скелета, версия агрегата (AR-109).
+  setLunch: (dto: SetClassLunchDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/lunch`, dto),
+  // Предпочтения педагога (AR-206): свои — педагог, все — строитель (`S-41.load.summary`).
+  teacherPreferences: () => call<TeacherPreferenceDto[]>("GET", `${V1}/schedule/preferences`),
+  myPreference: () => call<TeacherPreferenceDto>("GET", `${V1}/schedule/preferences/me`),
+  setMyPreference: (dto: SetTeacherPreferenceDto) =>
+    call<{ ok: boolean }>("PUT", `${V1}/schedule/preferences/me`, dto),
+  // Датированный оверлей недели (AR-207): отмены и замены поверх шаблона `S-40`.
+  datedLessons: (q: { from: string; to: string; classId?: string; teacherId?: string }) =>
+    call<DatedLessonDto[]>(
+      "GET",
+      `${V1}/schedule/lessons?from=${encodeURIComponent(q.from)}&to=${encodeURIComponent(q.to)}` +
+        (q.classId ? `&classId=${encodeURIComponent(q.classId)}` : "") +
+        (q.teacherId ? `&teacherId=${encodeURIComponent(q.teacherId)}` : ""),
+    ),
+  // Отмена своего урока, отзыв отмены, ручная замена (AR-207, §11 строки 54–56).
+  cancelLesson: (lessonId: string, dto: CancelLessonDto) =>
+    call<SubstitutionResultDto>("POST", `${V1}/lessons/${lessonId}/cancel`, dto),
+  withdrawCancel: (lessonId: string) => call<{ ok: boolean }>("DELETE", `${V1}/lessons/${lessonId}/cancel`),
+  setSubstitute: (lessonId: string, dto: SetSubstituteDto) =>
+    call<{ ok: boolean }>("POST", `${V1}/lessons/${lessonId}/substitute`, dto),
 
   // ─── журнал ───
   journal: (classId: string, subjectId: string, week?: string) =>

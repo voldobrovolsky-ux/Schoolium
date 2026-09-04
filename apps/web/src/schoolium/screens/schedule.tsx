@@ -10,24 +10,32 @@
  * Автоприменения нет и быть не может: материализация запускается только из
  * `S-42.btn.confirm`; ручная правка `S-43` тоже живёт ДО подтверждения.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  DAY_MINUTES_CAP,
+  LESSON_CANCEL_REASON_LABELS,
+  LESSON_CANCEL_REASONS,
   recommendedTerms,
   SCHOOL_YEAR_WEEKS,
+  skeletonLessonTimes,
   slotTimes,
   weeklyOfYear,
+  type ClassDto,
+  type DatedLessonDto,
   type GridKind,
+  type LessonCancelReason,
   type SchedulePreviewDto,
   type SkeletonKind,
   type SkeletonPositionDto,
+  type StaffCardDto,
+  type SubstitutionResultDto,
+  type TeacherPreferenceDto,
   type TermDto,
 } from "@edustore/shared";
 import { api, SchoolApiError, type LoadEntry } from "../api";
 import { useAsync, useIsMobile } from "../hooks";
 import { Icon } from "../icons";
 import { Button, EmptyState, ErrorState, Field, Modal, NumberField, Skeletons, Toast, useToast } from "../ui";
-import { useSession } from "../session";
+import { useMe, useSession } from "../session";
 import {
   addDays,
   buildDayRows,
@@ -40,10 +48,15 @@ import {
   dayNoOf,
   inTerms,
   mondayOf,
+  teacherInitials,
+  teacherShort,
   weekRange,
   WeekStrip,
   type DayCell,
+  type DayCellStatus,
 } from "../schedule-view";
+// Стили пакета 04.09 (маркеры, действия строки, обед по классам, M-30/M-31).
+import "./schedule.css";
 
 // ─────────────────────────── S-40 · расписание ───────────────────────────
 
@@ -53,17 +66,28 @@ export function ScheduleScreen() {
   const [setup, setSetup] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [preview, setPreview] = useState<SchedulePreviewDto | null>(null);
+  // Педагог (AR-206): «Мои предпочтения» — до сетки в шапке, при сетке в панели фильтров.
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  // Оверлей отмен изменился (AR-207) — плашка «Уроков без замены» пересчитывается.
+  const [overlayNonce, setOverlayNonce] = useState(0);
+  const [focus, setFocus] = useState<LessonFocus | null>(null);
+  const { toast, showToast } = useToast();
   const mayBuild = can("schedule.build");
   // Нормы часов — только у держателя `schedule.load.write`: завуч и
   // администратор; модератор кнопки не видит (AR-196). У завуча это
   // единственная кнопка панели (AR-174) — потому primary.
   const mayLoad = can("schedule.load.write");
   const mayLoadOnly = !mayBuild && mayLoad;
+  const mayPrefs = can("schedule.preference.self");
+  // Плашка «Уроков без замены: N» — строителю и завучу (AR-207).
+  const mayOversee = mayBuild || can("school.oversee");
 
   if (state.status === "loading") return <Skeletons count={5} kind="row" />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
 
   const tpl = state.data;
+  // Учебных дней школы — из шаблона; до первой сетки чипов M-30 шесть (ПН…СБ).
+  const schoolDays = tpl ? Math.max(5, ...tpl.slots.map((s) => s.dayNo + 1)) : 6;
 
   return (
     <>
@@ -81,7 +105,20 @@ export function ScheduleScreen() {
             Нормы часов
           </Button>
         ) : null}
+        {/* Сетки ещё нет — рабочие дни педагога нужны генератору ДО неё (AR-206). */}
+        {mayPrefs && !tpl ? (
+          <Button kind="secondary" testId="S-40.btn.preferences" onClick={() => setPrefsOpen(true)}>
+            Мои предпочтения
+          </Button>
+        ) : null}
       </div>
+
+      {tpl && mayOversee ? (
+        <NoSubstituteBanner
+          nonce={overlayNonce}
+          onShow={(l) => setFocus({ date: l.date, classId: l.classId, lessonId: l.lessonId, seq: Date.now() })}
+        />
+      ) : null}
 
       {/* Черновик, оставшийся без подтверждения (сценарий «закрыл вкладки»):
           ученики его не видят, и молчать об этом нельзя — AR-18 вслух. */}
@@ -134,8 +171,24 @@ export function ScheduleScreen() {
           }
         />
       ) : (
-        <ScheduleWeekView preview={tpl} />
+        <ScheduleWeekView
+          preview={tpl}
+          onPreferences={mayPrefs ? () => setPrefsOpen(true) : undefined}
+          onChanged={() => setOverlayNonce((n) => n + 1)}
+          focus={focus}
+        />
       )}
+
+      {prefsOpen ? (
+        <PreferencesModal
+          days={schoolDays}
+          onClose={() => setPrefsOpen(false)}
+          onSaved={() => {
+            setPrefsOpen(false);
+            showToast("Предпочтения сохранены — сетку пересоберёт модератор");
+          }}
+        />
+      ) : null}
 
       {setup ? (
         <ScheduleSetup
@@ -159,9 +212,53 @@ export function ScheduleScreen() {
           }}
         />
       ) : null}
+
+      {toast ? <Toast text={toast} /> : null}
     </>
   );
 }
+
+/** Адрес строки урока для прокрутки из плашки «Уроков без замены» (AR-207). */
+interface LessonFocus {
+  date: string;
+  classId: string;
+  lessonId: string;
+  /** Метка нажатия: тот же урок дважды — снова прокрутка. */
+  seq: number;
+}
+
+/**
+ * `S-40.banner.noSubstitute` (AR-207): отменённые уроки без заместителя на
+ * горизонте материализации — ближайшие три недели (AR-101). Строителю и
+ * завучу; нажатие ведёт к первой такой строке.
+ */
+function NoSubstituteBanner({ nonce, onShow }: { nonce: number; onShow: (l: DatedLessonDto) => void }) {
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [state] = useAsync(() => api.datedLessons({ from: todayIso, to: addDays(todayIso, 20) }), [nonce]);
+  if (state.status !== "ready") return null;
+  const open = state.data
+    .filter((l) => !l.detached && l.substitution?.status === "no_substitute")
+    .sort((a, b) => a.date.localeCompare(b.date) || a.slotNo - b.slotNo);
+  if (!open.length) return null;
+  return (
+    <div className="sch-banner" data-testid="S-40.banner.noSubstitute">
+      <span>Уроков без замены: {open.length}</span>
+      <Button kind="secondary" onClick={() => onShow(open[0])}>
+        Показать
+      </Button>
+    </div>
+  );
+}
+
+/** Ключ датированного урока — тот же, что ключ идемпотентности материализации (AR-101). */
+const lessonKey = (date: string, slotNo: number, classId: string, groupNo: number | null | undefined): string =>
+  `${date}|${slotNo}|${classId}|${groupNo ?? 0}`;
+
+/** «9:05» → минуты от полуночи (времена фолбэка `slotTimes` — строки). */
+const hm = (t: string): number => {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+};
 
 /**
  * `S-40` подтверждённая неделя (AR-175, УТЦ v1.4 фазы II-III): неделя читается
@@ -172,21 +269,46 @@ export function ScheduleScreen() {
  * сетка «класс × (день · урок)» осталась предпросмотру `S-42`: там модератор
  * проверяет ВСЮ школу разом, здесь человек читает СВОЮ неделю.
  */
-function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
+function ScheduleWeekView({
+  preview,
+  onPreferences,
+  onChanged,
+  focus,
+}: {
+  preview: SchedulePreviewDto;
+  /** «Мои предпочтения» (AR-206): кнопка есть, только когда экран дал обработчик — право у него. */
+  onPreferences?: () => void;
+  /** Отмена, отзыв или замена изменили датированный оверлей (AR-207). */
+  onChanged?: () => void;
+  /** Показать строку урока — из плашки «Уроков без замены». */
+  focus?: LessonFocus | null;
+}) {
   const mobile = useIsMobile();
+  const me = useMe();
+  const { can } = useSession();
+  const mayBuild = can("schedule.build");
+  const mayCancelSelf = can("lesson.cancel.self");
+  // Причина отмены словами — только штатным ролям с правом (AR-207); остальным «Отменён».
+  const seesReason = mayBuild || can("staff.manage") || can("school.oversee");
+  const isTeacher = me.roles.includes("teacher");
+  const { toast, showToast } = useToast();
+
   const classes = [...new Map(preview.slots.map((s) => [s.classId, s.classLabel])).entries()];
   const [classId, setClassId] = useState(classes[0]?.[0] ?? "");
   const current = classes.some(([id]) => id === classId) ? classId : (classes[0]?.[0] ?? "");
 
   // Фильтр панели (фаза III): неделя читается ЗА КЛАСС или ЗА ПРЕПОДАВАТЕЛЯ.
-  const [view, setView] = useState<"class" | "teacher">("class");
+  // У педагога по умолчанию — «Преподаватель», и это он сам (AR-206).
+  const [view, setView] = useState<"class" | "teacher">(isTeacher ? "teacher" : "class");
   const teachers = [...new Map(preview.slots.map((s) => [s.teacherId, s.teacherName])).entries()].sort((a, b) =>
     a[1].localeCompare(b[1], "ru"),
   );
-  const [teacherId, setTeacherId] = useState("");
+  const [teacherId, setTeacherId] = useState(isTeacher ? me.userId : "");
   const curTeacher = teachers.some(([id]) => id === teacherId) ? teacherId : (teachers[0]?.[0] ?? "");
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const todayIso = now.toISOString().slice(0, 10);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
   const [terms] = useAsync(() => api.terms());
   const weeks = useMemo(
     () => termWeeks(terms.status === "ready" ? terms.data : [], todayIso),
@@ -209,35 +331,242 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
       ? openDate
       : (days.find((d) => d.date >= todayIso) ?? days[days.length - 1]).date;
 
-  const cellsFor = (dayNo: number): Map<number, DayCell[]> => {
+  // ── Датированный оверлей недели (AR-207): отмены и замены поверх шаблона. ──
+  // За класс — только его уроки; за преподавателя — вся неделя школы: урок,
+  // доставшийся ему заменой, в шаблоне не стоит, и без общего чтения его не найти.
+  const weekMonday = mobile ? mondayOf(openDay) : openWeek;
+  const [overlayNonce, setOverlayNonce] = useState(0);
+  const [dated] = useAsync(
+    () =>
+      api.datedLessons({
+        from: weekMonday,
+        to: addDays(weekMonday, 6),
+        classId: view === "class" ? current : undefined,
+      }),
+    [weekMonday, view, current, overlayNonce],
+  );
+  const datedByKey = useMemo(() => {
+    const m = new Map<string, DatedLessonDto>();
+    if (dated.status === "ready") for (const l of dated.data) m.set(lessonKey(l.date, l.slotNo, l.classId, l.groupNo), l);
+    return m;
+  }, [dated]);
+  const reloadOverlay = () => {
+    setOverlayNonce((n) => n + 1);
+    onChanged?.();
+  };
+
+  // Заместитель назначается из педагогов школы (`S-40.select.substitute`, schedule.build).
+  const [staff] = useAsync(() => (mayBuild ? api.staff() : Promise.resolve([] as StaffCardDto[])), [mayBuild]);
+  const staffTeachers =
+    staff.status === "ready"
+      ? staff.data.filter((c) => c.roles.includes("teacher") && c.userId && !c.deactivated && c.name)
+      : [];
+
+  const [cancelling, setCancelling] = useState<{ lesson: DatedLessonDto; when: string } | null>(null);
+  const [substFor, setSubstFor] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Плашка «Уроков без замены» привела к уроку: класс, неделя/день, прокрутка к строке.
+  useEffect(() => {
+    if (!focus) return;
+    setView("class");
+    setClassId(focus.classId);
+    if (mobile) setOpenDate(focus.date);
+    else setWeek(mondayOf(focus.date));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.seq]);
+  useEffect(() => {
+    if (!focus || dated.status !== "ready") return;
+    document.querySelector(`[data-lesson-id="${focus.lessonId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.seq, dated.status]);
+
+  /** Начало урока в минутах: по скелету (AR-171), без него — арифметика фолбэка. */
+  const startMinOf = (dayNo: number, slotNo: number): number | null => {
+    const sk = preview.skeleton?.length ? skeletonLessonTimes(preview.skeleton, dayNo, slotNo) : null;
+    if (sk) return sk.startMin;
+    return preview.grid ? hm(slotTimes(preview.grid, slotNo).start) : null;
+  };
+  // Кнопка отмены — на ещё не начавшихся уроках; судья — сервер (`LESSON_ALREADY_HELD`
+  // по времени школы), экран лишь не предлагает заведомо прошедшее.
+  const notStarted = (d: DatedLessonDto, dayNo: number): boolean => {
+    if (d.date > todayIso) return true;
+    if (d.date < todayIso) return false;
+    const start = startMinOf(dayNo, d.slotNo);
+    return start === null ? true : start > nowMin;
+  };
+  const whenOf = (d: DatedLessonDto, dayNo: number): string => {
+    const start = startMinOf(dayNo, d.slotNo);
+    return `${dayMonth(d.date)}, ${d.slotNo}-й урок${start === null ? "" : `, ${toHHMM(start)}`}`;
+  };
+
+  const statusOf = (d: DatedLessonDto): DayCellStatus | null => {
+    const sub = d.substitution;
+    if (!sub || sub.status === "withdrawn") return null;
+    if (sub.status === "substituted") {
+      return { kind: "substituted", label: `Замена: ${teacherShort(sub.substituteTeacherName ?? d.teacherName)}` };
+    }
+    const why = seesReason ? ` · ${LESSON_CANCEL_REASON_LABELS[sub.reason]}${sub.reasonText ? ` — ${sub.reasonText}` : ""}` : "";
+    return { kind: "cancelled", label: `Отменён${why}` };
+  };
+
+  const withdraw = async (d: DatedLessonDto) => {
+    setBusyId(d.lessonId);
+    try {
+      await api.withdrawCancel(d.lessonId);
+      showToast("Отмена отозвана — урок снова у своего педагога");
+      reloadOverlay();
+    } catch (e) {
+      showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const assign = async (d: DatedLessonDto, substituteId: string) => {
+    setBusyId(d.lessonId);
+    try {
+      await api.setSubstitute(d.lessonId, { teacherId: substituteId });
+      showToast("Замена назначена");
+      setSubstFor(null);
+      reloadOverlay();
+    } catch (e) {
+      showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /** Действия строки (AR-207): отмена своего, отзыв, ручная замена — по правам. */
+  const actionsFor = (d: DatedLessonDto, dayNo: number): ReactNode => {
+    const sub = d.substitution && d.substitution.status !== "withdrawn" ? d.substitution : null;
+    const mayCancel = mayCancelSelf && d.teacherId === me.userId && !sub && !d.detached && notStarted(d, dayNo);
+    const mayWithdraw = sub !== null && (mayBuild || (mayCancelSelf && sub.originalTeacherId === me.userId));
+    const maySubstitute = sub !== null && mayBuild;
+    if (!mayCancel && !mayWithdraw && !maySubstitute) return null;
+    const busy = busyId === d.lessonId;
+    return (
+      <>
+        {mayCancel ? (
+          <Button
+            kind="ghost"
+            testId="S-40.btn.cancelLesson"
+            data-lesson-id={d.lessonId}
+            onClick={() => setCancelling({ lesson: d, when: whenOf(d, dayNo) })}
+          >
+            Отменить урок
+          </Button>
+        ) : null}
+        {mayWithdraw ? (
+          <Button kind="ghost" testId="S-40.btn.withdrawCancel" data-lesson-id={d.lessonId} loading={busy} onClick={() => withdraw(d)}>
+            Отозвать отмену
+          </Button>
+        ) : null}
+        {maySubstitute ? (
+          <Button
+            kind="ghost"
+            testId="S-40.btn.substitute"
+            data-lesson-id={d.lessonId}
+            aria-expanded={substFor === d.lessonId}
+            onClick={() => setSubstFor((cur) => (cur === d.lessonId ? null : d.lessonId))}
+          >
+            {sub?.status === "substituted" ? "Переназначить" : "Назначить замену"}
+          </Button>
+        ) : null}
+        {maySubstitute && substFor === d.lessonId ? (
+          <select
+            className="sch-input"
+            data-testid="S-40.select.substitute"
+            aria-label="Заместитель"
+            defaultValue=""
+            disabled={busy}
+            onChange={(e) => e.target.value && assign(d, e.target.value)}
+          >
+            <option value="">— выберите педагога —</option>
+            {staffTeachers
+              .filter((c) => c.userId !== d.teacherId)
+              .map((c) => (
+                <option key={c.id} value={c.userId ?? ""}>
+                  {c.name}
+                </option>
+              ))}
+          </select>
+        ) : null}
+      </>
+    );
+  };
+
+  /**
+   * Ячейки дня: шаблон, поверх него — датированный урок этой даты (педагог
+   * строки — фактический, т.е. заместитель при замене). Без даты — чистый
+   * шаблон (пустота дня недели для пикера).
+   */
+  const cellsFor = (dayNo: number, date: string | null): Map<number, DayCell[]> => {
     const map = new Map<number, DayCell[]>();
+    const covered = new Set<string>();
     for (const s of preview.slots) {
       if (s.dayNo !== dayNo) continue;
       if (view === "class" ? s.classId !== current : s.teacherId !== curTeacher) continue;
+      const d = date ? (datedByKey.get(lessonKey(date, s.slotNo, s.classId, s.groupNo)) ?? null) : null;
+      if (d) covered.add(d.lessonId);
       const cells = map.get(s.slotNo) ?? [];
+      const overlay = {
+        status: d ? statusOf(d) : null,
+        actions: d ? actionsFor(d, dayNo) : null,
+        lessonId: d?.lessonId ?? null,
+      };
       cells.push(
         view === "class"
           ? {
               key: `${s.subjectId}·${s.groupNo ?? 0}`,
               title: s.subjectName + (s.groupNo ? ` · гр. ${s.groupNo}` : ""),
-              sub: s.teacherName,
+              // в строке вместо исходного педагога — заместитель (AR-207)
+              sub: d?.teacherName ?? s.teacherName,
+              ...overlay,
             }
           : {
               // неделя преподавателя: что ведёт и у кого — класс вместо педагога
               key: `${s.subjectId}·${s.classId}·${s.groupNo ?? 0}`,
               title: s.subjectName + (s.groupNo ? ` · гр. ${s.groupNo}` : ""),
               sub: `${s.classLabel} класс`,
+              ...overlay,
             },
       );
       map.set(s.slotNo, cells);
     }
+    // Неделя преподавателя: уроки, доставшиеся ему заменой, в шаблоне не стоят —
+    // они приходят из датированного оверлея (AR-207).
+    if (view === "teacher" && date && dated.status === "ready") {
+      for (const d of dated.data) {
+        if (d.date !== date || d.teacherId !== curTeacher || d.detached || covered.has(d.lessonId)) continue;
+        const cells = map.get(d.slotNo) ?? [];
+        const original = d.substitution?.originalTeacherName;
+        cells.push({
+          key: `dated·${d.lessonId}`,
+          title: d.subjectName + (d.groupNo ? ` · гр. ${d.groupNo}` : ""),
+          sub: `${d.classLabel} класс${original ? ` · за ${teacherShort(original)}` : ""}`,
+          status: statusOf(d),
+          actions: actionsFor(d, dayNo),
+          lessonId: d.lessonId,
+        });
+        map.set(d.slotNo, cells);
+      }
+    }
     return map;
   };
-  const rowsFor = (dayNo: number) =>
-    buildDayRows({ skeleton: preview.skeleton, grid: preview.grid, dayNo, cellsByLesson: cellsFor(dayNo) });
+  // Обед класса (AR-200) — только в виде класса; неделя преподавателя строк обеда не несёт.
+  const lunchOf = (cid: string): number | null =>
+    preview.classLunch?.find((e) => e.classId === cid)?.lunchAfterLessonNo ?? null;
+  const rowsFor = (dayNo: number, date: string | null) =>
+    buildDayRows({
+      skeleton: preview.skeleton,
+      grid: preview.grid,
+      dayNo,
+      cellsByLesson: cellsFor(dayNo, date),
+      lunchAfterLessonNo: view === "class" ? lunchOf(current) : null,
+    });
 
   const filterBar = (
-    <div className="sch-stack" style={{ gap: "var(--sp-8)" }}>
+    <div className="sch-sched-filters">
       <div className="sch-chips" data-testid="S-40.view">
         <Button kind="chip" aria-pressed={view === "class"} onClick={() => setView("class")}>
           Класс
@@ -247,7 +576,7 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
         </Button>
       </div>
       {view === "class" ? (
-        <div className="sch-field" style={mobile ? undefined : { maxWidth: 240 }} data-testid="S-40.select.class">
+        <div className="sch-field" data-testid="S-40.select.class">
           <span className="sch-field-label">Класс</span>
           <select className="sch-input" value={current} onChange={(e) => setClassId(e.target.value)}>
             {classes.map(([id, label]) => (
@@ -258,7 +587,7 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
           </select>
         </div>
       ) : (
-        <div className="sch-field" style={mobile ? undefined : { maxWidth: 240 }} data-testid="S-40.select.teacher">
+        <div className="sch-field" data-testid="S-40.select.teacher">
           <span className="sch-field-label">Преподаватель</span>
           <select className="sch-input" value={curTeacher} onChange={(e) => setTeacherId(e.target.value)}>
             {teachers.map(([id, name]) => (
@@ -269,16 +598,45 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
           </select>
         </div>
       )}
+      {/* «Мои предпочтения» (AR-206): в панели фильтров; на телефоне — во всю ширину под ней (§6). */}
+      {onPreferences ? (
+        <Button kind="secondary" testId="S-40.btn.preferences" onClick={onPreferences}>
+          Мои предпочтения
+        </Button>
+      ) : null}
     </div>
+  );
+  // Оверлей не прочитался — шаблон виден, причина названа словами (§0), не молчание.
+  const overlayNote =
+    dated.status === "error" ? (
+      <p className="sch-warning-text sch-sched-overlay-error" role="status">
+        Отмены и замены недели не прочитались: {dated.message}
+      </p>
+    ) : null;
+  const layers = (
+    <>
+      {cancelling ? (
+        <CancelLessonModal
+          lesson={cancelling.lesson}
+          when={cancelling.when}
+          onClose={(done) => {
+            setCancelling(null);
+            if (done) reloadOverlay();
+          }}
+        />
+      ) : null}
+      {toast ? <Toast text={toast} /> : null}
+    </>
   );
 
   // пустота дня зависит только от дня недели: шаблон повторяется еженедельно
-  const dayEmpty = [0, 1, 2, 3, 4, 5, 6].map((d) => rowsFor(d).length === 0);
+  const dayEmpty = [0, 1, 2, 3, 4, 5, 6].map((d) => rowsFor(d, null).length === 0);
 
   if (mobile) {
     return (
       <div className="sch-stack">
         {filterBar}
+        {overlayNote}
         <DayPicker
           testId="S-40.daystrip"
           days={days.map((d) => ({ ...d, muted: dayEmpty[d.dayNo] }))}
@@ -288,10 +646,13 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
         {/* key: смена дня перезапускает раскрытие сверху вниз (`sch-unfold`) */}
         <DayLessonList
           key={`${view}-${view === "class" ? current : curTeacher}-${openDay}`}
-          rows={rowsFor(dayNoOf(openDay))}
+          rows={rowsFor(dayNoOf(openDay), openDay)}
           testId="S-40.grid.week"
           pairedTestId="S-40.cell.paired"
+          cancelledTestId="S-40.cell.cancelled"
+          substitutedTestId="S-40.cell.substituted"
         />
+        {layers}
       </div>
     );
   }
@@ -299,6 +660,7 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
   return (
     <div className="sch-stack">
       {filterBar}
+      {overlayNote}
       <WeekStrip testId="S-40.weeks" weeks={weeks} open={openWeek} onOpen={setWeek} />
       <Days33
         testId="S-40.grid.week"
@@ -306,10 +668,224 @@ function ScheduleWeekView({ preview }: { preview: SchedulePreviewDto }) {
         header={(d) => `${DAY_NAMES[d]} · ${dayMonth(addDays(openWeek, d))}`}
         render={(d) => (
           // день вне четвертей (31 августа, каникулы) уроков не несёт
-          <DayLessonList rows={inTerms(addDays(openWeek, d), termList) ? rowsFor(d) : []} pairedTestId="S-40.cell.paired" />
+          <DayLessonList
+            rows={inTerms(addDays(openWeek, d), termList) ? rowsFor(d, addDays(openWeek, d)) : []}
+            pairedTestId="S-40.cell.paired"
+            cancelledTestId="S-40.cell.cancelled"
+            substitutedTestId="S-40.cell.substituted"
+          />
         )}
       />
+      {layers}
     </div>
+  );
+}
+
+/**
+ * `M-30` «Мои предпочтения» (AR-206): рабочие дни педагог задаёт сам, без
+ * утверждения (уточнение AR-135). Чипы ПН…СБ по учебным дням школы, ни одного
+ * выбранного — любой день; заметка строителю необязательна. Сохранение —
+ * событие `schedule.preference.set.v1`, подтверждённая сетка уходит в `stale`.
+ */
+function PreferencesModal({ days, onClose, onSaved }: { days: number; onClose: () => void; onSaved: () => void }) {
+  const [workDays, setWorkDays] = useState<number[]>([]);
+  const [note, setNote] = useState("");
+  const [ready, setReady] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .myPreference()
+      .then((p) => {
+        if (!alive) return;
+        setWorkDays(p.workDays);
+        setNote(p.note ?? "");
+      })
+      .catch((e) => alive && setError(e instanceof SchoolApiError ? e.message : "Не удалось прочитать предпочтения"))
+      .finally(() => alive && setReady(true));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const toggle = (d: number) =>
+    setWorkDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort((a, b) => a - b)));
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setMyPreference({ workDays, note: note.trim() || null });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof SchoolApiError ? e.message : "Не получилось");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Мои предпочтения"
+      width={480}
+      onClose={onClose}
+      testId="M-30"
+      mobile="sheet"
+      footer={
+        <div className="sch-actions">
+          <Button kind="primary" testId="M-30.btn.save" disabled={!ready} loading={busy} onClick={save}>
+            Сохранить
+          </Button>
+        </div>
+      }
+    >
+      <p className="sch-muted">
+        Дни, в которые вы можете вести уроки: генератор ставит ваши часы только в них. Ни одного выбранного — любой день.
+      </p>
+      {!ready ? (
+        <Skeletons count={2} kind="row" />
+      ) : (
+        <>
+          <div className="sch-chips" role="group" aria-label="Рабочие дни">
+            {Array.from({ length: days }, (_, d) => (
+              <Button
+                key={d}
+                kind="chip"
+                testId="M-30.chip.day"
+                data-day={d}
+                aria-pressed={workDays.includes(d)}
+                onClick={() => toggle(d)}
+              >
+                {DAY_NAMES[d].toUpperCase()}
+              </Button>
+            ))}
+          </div>
+          <Field
+            label="Заметка строителю"
+            hint="необязательно"
+            testId="M-30.input.note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </>
+      )}
+      {error ? (
+        <p className="sch-danger-text" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </Modal>
+  );
+}
+
+/**
+ * `M-31` «Отмена урока» (AR-207): причина из словаря без сведений о здоровье,
+ * пояснение — штатным ролям с правом; замену подбирает СЕРВЕР, итог — в той
+ * же модалке («Замена: Иванова М. И.» / «Замены нет — сообщено завучу»).
+ * Отказ (`NOT_YOUR_LESSON`, `LESSON_ALREADY_HELD`, `LESSON_CANCELLED`,
+ * `LESSON_DETACHED`) — текстом §9, форма остаётся открытой с причиной.
+ */
+function CancelLessonModal({
+  lesson,
+  when,
+  onClose,
+}: {
+  lesson: DatedLessonDto;
+  /** «15 сентября, 3-й урок, 10:00» — что именно отменяется. */
+  when: string;
+  /** `done` — отмена состоялась, экран перечитывает оверлей. */
+  onClose: (done: boolean) => void;
+}) {
+  const reasonId = useId();
+  const [reason, setReason] = useState<LessonCancelReason>("absence");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SubstitutionResultDto | null>(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setResult(await api.cancelLesson(lesson.lessonId, { reason, reasonText: text.trim() || undefined }));
+    } catch (e) {
+      setError(e instanceof SchoolApiError ? e.message : "Не получилось");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Отмена урока"
+      width={480}
+      onClose={() => onClose(result !== null)}
+      testId="M-31"
+      mobile="sheet"
+      footer={
+        <div className="sch-actions">
+          {result ? (
+            <Button kind="primary" onClick={() => onClose(true)}>
+              Закрыть
+            </Button>
+          ) : (
+            <Button kind="primary" testId="M-31.btn.submit" loading={busy} onClick={submit}>
+              Отменить урок
+            </Button>
+          )}
+        </div>
+      }
+    >
+      <p className="sch-m31-lesson">
+        {lesson.subjectName} · {lesson.classLabel} класс{lesson.groupNo ? `, группа ${lesson.groupNo}` : ""} · {when}
+      </p>
+      {result ? (
+        <div className="sch-m31-result" data-testid="M-31.result" data-status={result.status} role="status">
+          {result.status === "substituted"
+            ? `Замена: ${teacherInitials(result.substituteTeacherName)}`
+            : "Замены нет — сообщено завучу"}
+        </div>
+      ) : (
+        <>
+          <div className="sch-field">
+            <label className="sch-field-label" htmlFor={reasonId}>
+              Причина
+            </label>
+            <select
+              id={reasonId}
+              className="sch-input"
+              data-testid="M-31.select.reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value as LessonCancelReason)}
+            >
+              {LESSON_CANCEL_REASONS.map((r) => (
+                <option key={r} value={r}>
+                  {LESSON_CANCEL_REASON_LABELS[r]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Field
+            label="Пояснение"
+            hint="видят завуч и модератор"
+            testId="M-31.input.reasonText"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <p className="sch-muted">
+            Замену подберёт программа: педагог того же предмета, свободный в этот час и работающий в этот день. Если
+            такого нет — урок отменяется, а завуч увидит его в «Уроках без замены».
+          </p>
+        </>
+      )}
+      {error ? (
+        <p className="sch-danger-text" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </Modal>
   );
 }
 
@@ -540,6 +1116,7 @@ const SECTION_BY_CODE: Record<string, string> = {
   GROUP_HOURS_UNEQUAL: "load",
   SUBJECT_UNCOVERED: "load",
   GROUPS_UNASSIGNED: "load",
+  TEACHER_DAYS_SHORT: "load",
   LOAD_EXCEEDS_GRID: "day",
   TEACHER_OVERBOOKED: "day",
   DAY_EXCEEDS_SANPIN: "day",
@@ -660,6 +1237,12 @@ function SettingsForm({
   const [skelDays, setSkelDays] = useState<Map<number, SkelRow[]>>(new Map());
   const [skelDay, setSkelDay] = useState(0);
   const [skelTouched, setSkelTouched] = useState(false);
+  // Рабочие дни педагогов (AR-206) — строителю в сводке нагрузки, только чтение.
+  const [prefs, setPrefs] = useState<TeacherPreferenceDto[]>([]);
+  // Обед по классам (AR-200): `null` — как у школы; пишется `PUT /schedule/lunch`.
+  const [classes, setClasses] = useState<ClassDto[]>([]);
+  const [lunch, setLunch] = useState<Map<string, number | null>>(new Map());
+  const [lunchTouched, setLunchTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [refusal, setRefusal] = useState<{ code: string; message: string } | null>(null);
@@ -679,10 +1262,12 @@ function SettingsForm({
   useEffect(() => {
     let alive = true;
     void (async () => {
-      const [t, l, sk] = await Promise.all([
+      const [t, l, sk, pr, cl] = await Promise.all([
         api.terms().catch(() => [] as TermDto[]),
         api.load().catch(() => null),
         api.skeleton().catch(() => null),
+        api.teacherPreferences().catch(() => [] as TeacherPreferenceDto[]),
+        api.classes().catch(() => null),
       ]);
       if (!alive) return;
       setTerms(t.length ? byTermNo(t) : recommendedTerms(new Date().toISOString().slice(0, 10)));
@@ -690,6 +1275,15 @@ function SettingsForm({
       if (sk) {
         setGridKind(sk.gridKind);
         if (sk.positions.length) setSkelDays(rowsFromPositions(sk.positions));
+      }
+      setPrefs(pr);
+      if (cl) {
+        setClasses(cl.classes);
+        // источник — колонка класса; `classLunch` скелета тот же факт с той же версией
+        const m = new Map<string, number | null>();
+        for (const c of cl.classes) m.set(c.id, c.lunchAfterLessonNo ?? null);
+        for (const e of sk?.classLunch ?? []) m.set(e.classId, e.lunchAfterLessonNo);
+        setLunch(m);
       }
       setReady(true);
     })();
@@ -703,7 +1297,7 @@ function SettingsForm({
   // предзаполнением параметры дня не пусты с порога, и выход без правок не
   // должен спрашивать подтверждение (сценарий «открыл-посмотрел-закрыл»).
   const [day0] = useState(() => JSON.stringify(day));
-  const dirty = JSON.stringify(day) !== day0 || prioTouched || skelTouched || touched;
+  const dirty = JSON.stringify(day) !== day0 || prioTouched || skelTouched || lunchTouched || touched;
   useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
 
   const termsValid = terms.every((t) => t.dateFrom && t.dateTo);
@@ -741,6 +1335,15 @@ function SettingsForm({
         const sk = await api.skeleton();
         await api.setSkeleton({ gridKind, positions: buildPositions(skelDays, gridKind), version: sk.version });
       }
+      if (lunchTouched) {
+        // Обед по классам (AR-200): после скелета, до параметров дня; версия —
+        // свежая, скелет только что мог её поднять (AR-109).
+        const sk = await api.skeleton();
+        await api.setLunch({
+          version: sk.version,
+          entries: classes.map((c) => ({ classId: c.id, lunchAfterLessonNo: lunch.get(c.id) ?? null })),
+        });
+      }
       const l2 = await api.load();
       await api.setDayParams({
         slotsPerDay: Number(day.slotsPerDay),
@@ -765,6 +1368,10 @@ function SettingsForm({
   if (!ready) return <Skeletons count={4} kind="row" />;
 
   const skelRows = skelDays.get(skelDay) ?? [];
+  // Верхняя граница обеда класса (AR-200): урочных позиций дня − 1 — по скелету,
+  // без скелета — по «уроков в день» фолбэка.
+  const skelLessonMax = Math.max(0, ...[...skelDays.values()].map((rows) => rows.filter((r) => r.kind === "lesson").length));
+  const lunchMax = (skelLessonMax > 0 ? skelLessonMax : Number(day.slotsPerDay) || 0) - 1;
   const setSkelRows = (rows: SkelRow[]) => {
     setSkelTouched(true);
     setSkelDays((cur) => {
@@ -826,21 +1433,36 @@ function SettingsForm({
           {!load || load.entries.length === 0 ? (
             <p className="sch-muted">Привязок педагогов пока нет — привяжите их в «Предметах»</p>
           ) : (
-            load.entries.map((e) => (
-              <div className="sch-row sch-row--between" key={e.bindingId}>
-                <span>
-                  {e.subjectName} · {e.classLabel} класс
-                  {e.scope === "group" ? `, группа ${e.groupNos.join(", ")}` : ""} — {e.teacherName}
-                </span>
-                {e.hoursPerWeek > 0 ? (
-                  <span className="sch-muted">
-                    {e.hoursPerYear} ч/год · {e.hoursPerWeek} ч/нед
-                  </span>
-                ) : (
-                  <span className="sch-warning-text">норма не задана</span>
-                )}
-              </div>
-            ))
+            [...new Map(load.entries.map((e) => [e.teacherId, e.teacherName])).entries()].map(([tid, tname]) => {
+              // рабочие дни педагога (AR-206): пусто — любой день; генератор чтит их жёстко
+              const wd = prefs.find((x) => x.teacherId === tid)?.workDays ?? [];
+              const daysLabel = wd.length ? [...wd].sort((a, b) => a - b).map((d) => DAY_NAMES[d].toUpperCase()).join(", ") : "любой день";
+              return (
+                <div className="sch-stack sch-s41-teacher" key={tid} data-teacher-id={tid}>
+                  <div className="sch-row sch-row--between">
+                    <strong>{tname}</strong>
+                    <span className="sch-muted sch-s41-teacher-days">дни: {daysLabel}</span>
+                  </div>
+                  {load.entries
+                    .filter((e) => e.teacherId === tid)
+                    .map((e) => (
+                      <div className="sch-row sch-row--between" key={e.bindingId}>
+                        <span>
+                          {e.subjectName} · {e.classLabel} класс
+                          {e.scope === "group" ? `, группа ${e.groupNos.join(", ")}` : ""}
+                        </span>
+                        {e.hoursPerWeek > 0 ? (
+                          <span className="sch-muted">
+                            {e.hoursPerYear} ч/год · {e.hoursPerWeek} ч/нед
+                          </span>
+                        ) : (
+                          <span className="sch-warning-text">норма не задана</span>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              );
+            })
           )}
           <p className="sch-muted">
             Годовые нормы часов задаёт завуч — кнопка «Нормы часов» на экране расписания. Недельные часы для
@@ -882,35 +1504,36 @@ function SettingsForm({
         </Button>
       </section>
 
-      {/* ── Параметры дня. «Уроков в день» — верхняя граница (AR-114). ── */}
+      {/* ── Параметры дня. Длину дня и число уроков задаёт школа: нормативных
+             потолков нет (AR-199 вытесняет AR-103/AR-114), подсказок СанПиН нет.
+             «Уроков в день» — одно число на школу, вместимость дня всех
+             параллелей в бесскелетном фолбэке. ── */}
       <section data-section="day" className="sch-stack">
         <h3 className="sch-section-title">Параметры дня</h3>
         <NumberField
           label="Уроков в день"
-          hint="верхняя граница: каждый класс получит не больше потолка своей параллели"
+          hint="одно число на школу — вместимость дня для всех параллелей"
           testId="S-41.input.slotsPerDay"
           min={1}
-          max={8}
+          max={12}
           value={day.slotsPerDay}
           onValue={(v) => setDay({ ...day, slotsPerDay: v })}
         />
         <NumberField
           label="Длина урока, минут"
           testId="S-41.input.lessonMin"
-          min={30}
-          max={45}
+          min={20}
+          max={90}
           value={day.lessonMin}
           onValue={(v) => setDay({ ...day, lessonMin: v })}
-          error={Number(day.lessonMin) > 45 ? "Не более 45 минут — СанПиН 1.2.3685-21" : null}
         />
         <NumberField
           label="Длина перемены, минут"
           testId="S-41.input.breakMin"
-          min={10}
-          max={30}
+          min={5}
+          max={60}
           value={day.breakMin}
           onValue={(v) => setDay({ ...day, breakMin: v })}
-          error={Number(day.breakMin) < 10 ? "Не менее 10 минут — СанПиН 1.2.3685-21" : null}
         />
         <div className="sch-field">
           <span className="sch-field-label">Начало первого урока</span>
@@ -947,19 +1570,14 @@ function SettingsForm({
         <NumberField
           label="Длительность большой перемены, минут"
           testId="S-41.input.bigBreakMin"
-          min={20}
-          max={30}
+          min={5}
+          max={90}
           value={day.bigBreakMin}
           onValue={(v) => setDay({ ...day, bigBreakMin: v })}
-          error={
-            Number(day.bigBreakMin) < 20 || Number(day.bigBreakMin) > 30
-              ? "От 20 до 30 минут — СанПиН 1.2.3685-21"
-              : null
-          }
         />
-        {/* Потребитель четырёх временных параметров: без него они мёртвый ввод (AR-103). */}
+        {/* Потребитель четырёх временных параметров — справка без потолка (AR-199). */}
         <p className="sch-muted" data-testid="S-41.calc.dayLength">
-          Учебный день: {dayLength()} минут из {DAY_MINUTES_CAP}
+          Учебный день: {dayLength()} минут
         </p>
       </section>
 
@@ -1070,6 +1688,51 @@ function SettingsForm({
             </Button>
           ) : null}
         </div>
+
+        {/* ── Обед по классам (AR-200): строка на класс, «как у школы» = общий meal
+               скелета; у класса с обедом после N-го урочная позиция N+1 без урока.
+               Сохраняется в общем потоке «Сгенерировать» после скелета. ── */}
+        {classes.length > 0 ? (
+          <div className="sch-s41-lunch" data-testid="S-41.lunch">
+            <strong>Обед по классам</strong>
+            <p className="sch-muted">
+              После какого урока обедает класс. У класса со своим обедом следующая позиция дня остаётся без урока, общий
+              обед школы ему не показывается; «как у школы» — обед из скелета дня.
+            </p>
+            {classes.map((c) => {
+              const v = lunch.get(c.id) ?? null;
+              const opts = Array.from({ length: Math.max(0, lunchMax) }, (_, i) => i + 1);
+              if (v !== null && !opts.includes(v)) opts.push(v);
+              return (
+                <div className="sch-s41-lunch-row" key={c.id} data-testid="S-41.lunch.row">
+                  <strong>{c.label}</strong>
+                  <select
+                    className="sch-input"
+                    data-testid="S-41.lunch.select"
+                    aria-label={`Обед: ${c.label}`}
+                    value={v === null ? "" : String(v)}
+                    onChange={(e) => {
+                      setLunchTouched(true);
+                      const next = e.target.value === "" ? null : Number(e.target.value);
+                      setLunch((cur) => {
+                        const m = new Map(cur);
+                        m.set(c.id, next);
+                        return m;
+                      });
+                    }}
+                  >
+                    <option value="">как у школы</option>
+                    {opts.map((n) => (
+                      <option key={n} value={n}>
+                        после {n}-го урока
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
       </section>
 
       {error ? (
