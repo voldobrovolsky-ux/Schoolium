@@ -1,14 +1,17 @@
 /**
  * Предметы: `S-20` — ДВА вида одного реестра (правка владельца 2026-08-31):
- * «По дисциплинам» — карточка дисциплины со строчками классов («Английский
- * язык: 3 класс — учитель 1…»), «По классам» — карточка класса со строчками
- * предметов; сбоку алфавитный указатель. `M-03` создание, `S-21` карточка
+ * «По дисциплинам» — карточка дисциплины со строчками классов («5А — Петрова
+ * А. И.»), «По классам» — карточка класса со строчками предметов; при «По
+ * классам» справа от фильтра раскрывается ряд чипов классов — мультивыбор,
+ * карточки только у отмеченных (AR-208); сбоку алфавитный указатель. `M-03`
+ * создание (дубль по ключу имени — `SUBJECT_EXISTS`, AR-201), `S-21` карточка
  * предмета (`M-04`), `S-22` QR привязки (`M-05`), `M-25` «Управление
- * компетенцией» (AR-179): личный QR педагога → галочки позиций → сохранение
- * с заменой занятых через подтверждение (`M-26`).
+ * компетенцией» (AR-179, AR-202): личный QR педагога → галочки позиций, в том
+ * числе групповых → сохранение с заменой занятых через подтверждение (`M-26`).
  *
  * Карточка заводится на ПАРУ «предмет × класс». «Весь класс» и групповые
- * привязки взаимоисключаемы (Д6). Ожидание скана — поллинг 2 с (AR-87).
+ * привязки взаимоисключаемы (Д6). Незаполненная позиция — фон `state.stale-bg`
+ * и слово «нет педагога» (AR-208, AR-80). Ожидание скана — поллинг 2 с (AR-87).
  */
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
@@ -16,6 +19,7 @@ import {
   ACCESS_PARAMS,
   type ClassDto,
   type CompetenceConflictDto,
+  type SaveCompetenceDto,
   type SubjectDto,
 } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
@@ -25,12 +29,37 @@ import { Avatar, Button, EmptyState, ErrorState, Field, Modal, Skeletons, Toast,
 import { useSession } from "../session";
 import { navigate } from "../router";
 import { parseQr, QrCamera, CameraDenied } from "../qr";
+import "./subjects.css";
 
-/** Педагоги строки: «учитель 1 / учитель 2 (гр. 1)» — как в примере владельца. */
-const teachersOf = (s: SubjectDto): string =>
-  s.bindings
-    .map((b) => (b.scope === "group" ? `${b.teacherName} (гр. ${b.groupNos.join(", ")})` : b.teacherName))
-    .join(" / ");
+/** «Фамилия И.» (AR-208): `displayName` хранится как «Фамилия Имя [Отчество]». */
+const teacherShort = (name: string): string => {
+  const [last = "", first] = name.trim().split(/\s+/);
+  return first ? `${last} ${first[0]}.` : last;
+};
+/** «Фамилия И. О.» — классовая строка позиции (реестр `S-20`). */
+const teacherInitials = (name: string): string => {
+  const [last = "", ...rest] = name.trim().split(/\s+/);
+  return rest.length ? `${last} ${rest.map((w) => `${w[0]}.`).join(" ")}` : last;
+};
+/** Подпись класса: «5А» либо «5 класс» — голая цифра без литеры не читается. */
+const classTitle = (label: string): string => (/^\d+$/.test(label) ? `${label} класс` : label);
+/** Номера групп класса 1..N. */
+const groupsOf = (n: number): number[] => Array.from({ length: n }, (_, i) => i + 1);
+
+/**
+ * Педагоги строки позиции (AR-208): классовая — «— Петрова А. И.»; групповая —
+ * «· 1 группа — Петрова А., 2 группа — Хохлова Б.» (в карточке класса
+ * разделитель «—»). Непокрытые группы называет бейдж, а не строка.
+ */
+const positionText = (s: SubjectDto, groupSep: string): string | null => {
+  const cls = s.bindings.filter((b) => b.scope === "class");
+  if (cls.length) return `— ${cls.map((b) => teacherInitials(b.teacherName)).join(", ")}`;
+  const byGroup = new Map<number, string>();
+  for (const b of s.bindings) if (b.scope === "group") for (const g of b.groupNos) byGroup.set(g, teacherShort(b.teacherName));
+  if (byGroup.size === 0) return null;
+  const parts = [...byGroup.entries()].sort(([a], [b]) => a - b).map(([g, t]) => `${g} группа — ${t}`);
+  return `${groupSep} ${parts.join(", ")}`;
+};
 
 const letterOf = (name: string): string => (name[0] ?? "•").toUpperCase();
 /** Числовой порядок меток классов: «2» раньше «10», буквы литер — следом. */
@@ -71,24 +100,30 @@ function AlphaIndex({
   );
 }
 
-/** Строка позиции «предмет × класс» — вход в карточку `S-21`. */
-function SubjectRow({ subject, label }: { subject: SubjectDto; label: string }) {
+/**
+ * Строка позиции «предмет × класс» — вход в карточку `S-21`. Незаполненная
+ * (без привязок либо с неполным покрытием) — `data-unfilled` и фон
+ * `state.stale-bg`; слово «нет педагога» остаётся (AR-208, AR-80).
+ */
+function SubjectRow({ subject, label, groupSep }: { subject: SubjectDto; label: string; groupSep: "·" | "—" }) {
+  const unfilled = subject.bindings.length === 0 || !subject.coverageComplete;
+  const text = positionText(subject, groupSep);
   return (
     <button
       type="button"
       className="sch-subject-row"
       data-testid="S-20.card.subject"
       data-subject-id={subject.id}
+      data-unfilled={unfilled ? "true" : undefined}
       onClick={() => navigate(`/subjects/${subject.id}`)}
     >
       <span className="sch-subject-row-label">{label}</span>
-      {subject.bindings.length > 0 ? (
-        <span className="sch-muted">{teachersOf(subject)}</span>
-      ) : (
+      {text ? <span className="sch-muted">{text}</span> : null}
+      {subject.bindings.length === 0 ? (
         <span className="sch-warning-text" data-testid="S-20.card.subject.badge">
           нет педагога
         </span>
-      )}
+      ) : null}
       {subject.bindings.length > 0 && !subject.coverageComplete ? (
         <span className="sch-warning-text" data-testid="S-20.card.subject.badge">
           группа {subject.uncoveredGroups.join(", ")} — нет педагога
@@ -100,21 +135,54 @@ function SubjectRow({ subject, label }: { subject: SubjectDto; label: string }) 
 
 export function SubjectsScreen({ openId, competenceId }: { openId?: string; competenceId?: string | null }) {
   const { can } = useSession();
-  const [state, reload] = useAsync(async () => {
+  const [state, reload, patch] = useAsync(async () => {
     const [subjects, classes] = await Promise.all([api.subjects(), api.classes()]);
-    return { subjects, classes: classes.classes };
+    return { subjects, classes: classes.classes, contingentVersion: classes.version };
   });
+  // Тихое перечитывание под открытой `M-25` (AR-202): после деления класса
+  // нужны новые `groupCount` и версия контингента, а скелетоны `reload`
+  // размонтировали бы модалку вместе с невысланными галочками.
+  const refresh = async () => {
+    const [subjects, classes] = await Promise.all([api.subjects(), api.classes()]);
+    patch({ subjects, classes: classes.classes, contingentVersion: classes.version });
+  };
   const [creating, setCreating] = useState(false);
   // false — закрыто; null — открыто без педагога (скан/выбор); строка — педагог из личного QR
   const [competence, setCompetence] = useState<string | null | false>(competenceId ?? false);
   const [view, setView] = useState<"subject" | "class">("subject");
+  // Фильтр классов (AR-208): хранятся СНЯТЫЕ — по умолчанию отмечены все, и
+  // класс, появившийся после перечитывания, отмечен тоже.
+  const [deselected, setDeselected] = useState<Set<string>>(new Set());
+  // Ряд чипов классов монтируется свёрнутым и раскрывается следующим кадром —
+  // иначе переходу max-width/opacity нечего анимировать; сворачивание ждёт
+  // конца перехода (150 мс) и только потом убирает ряд из DOM.
+  const [chipsMounted, setChipsMounted] = useState(false);
+  const [chipsOpen, setChipsOpen] = useState(false);
+  const ribbonRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (view === "class") {
+      setChipsMounted(true);
+      return;
+    }
+    setChipsOpen(false);
+    const t = setTimeout(() => setChipsMounted(false), 160);
+    return () => clearTimeout(t);
+  }, [view]);
+  useEffect(() => {
+    if (!chipsMounted || view !== "class") return;
+    // Свёрнутое состояние обязано попасть в расчёт стилей ДО раскрытия —
+    // чтение геометрии форсирует его; затем кадр — и переход идёт.
+    void ribbonRef.current?.getBoundingClientRect();
+    const raf = requestAnimationFrame(() => setChipsOpen(true));
+    return () => cancelAnimationFrame(raf);
+  }, [chipsMounted, view]);
   const { toast, showToast } = useToast();
   const mayWrite = can("subject.write");
 
   if (state.status === "loading") return <Skeletons count={6} />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
 
-  const { subjects, classes } = state.data;
+  const { subjects, classes, contingentVersion } = state.data;
   const open = openId ? subjects.find((s) => s.id === openId) ?? null : null;
 
   // ── группировки двух видов ──
@@ -123,6 +191,14 @@ export function SubjectsScreen({ openId, competenceId }: { openId?: string; comp
   const classList = classes
     .filter((c) => subjects.some((s) => s.classId === c.id))
     .sort((a, b) => byLabel(a.label, b.label));
+  const selectedClasses = classList.filter((c) => !deselected.has(c.id));
+  const toggleClass = (id: string) =>
+    setDeselected((d) => {
+      const next = new Set(d);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const byClass = (id: string) => subjects.filter((s) => s.classId === id).sort((a, b) => a.name.localeCompare(b.name, "ru"));
   const letters = [...new Set(names.map(letterOf))];
 
@@ -182,13 +258,40 @@ export function SubjectsScreen({ openId, competenceId }: { openId?: string; comp
         <>
           {/* Фильтр вида (правка владельца 2026-08-31): дисциплина со строчками
               классов ЛИБО класс со строчками предметов — не плоский список. */}
-          <div className="sch-chips" data-testid="S-20.view" style={{ marginBottom: "var(--sp-16)" }}>
-            <Button kind="chip" aria-pressed={view === "subject"} onClick={() => setView("subject")}>
-              По дисциплинам
-            </Button>
-            <Button kind="chip" aria-pressed={view === "class"} onClick={() => setView("class")}>
-              По классам
-            </Button>
+          <div className="sch-s20-head">
+            <div className="sch-chips" data-testid="S-20.view">
+              <Button kind="chip" aria-pressed={view === "subject"} onClick={() => setView("subject")}>
+                По дисциплинам
+              </Button>
+              <Button kind="chip" aria-pressed={view === "class"} onClick={() => setView("class")}>
+                По классам
+              </Button>
+            </div>
+            {/* Ряд чипов классов (AR-208): раскрывается справа при «По классам»,
+                сворачивается при «По дисциплинам»; мультивыбор, по умолчанию все. */}
+            {chipsMounted ? (
+              <div
+                ref={ribbonRef}
+                className="sch-chips sch-s20-classes sch-unfold-x"
+                data-testid="S-20.chips.classes"
+                data-open={chipsOpen ? "true" : "false"}
+                role="group"
+                aria-label="Классы"
+              >
+                {classList.map((c) => (
+                  <Button
+                    key={c.id}
+                    kind="chip"
+                    testId="S-20.chip.class"
+                    aria-pressed={!deselected.has(c.id)}
+                    data-class-id={c.id}
+                    onClick={() => toggleClass(c.id)}
+                  >
+                    {classTitle(c.label)}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {view === "subject" ? (
@@ -205,7 +308,7 @@ export function SubjectsScreen({ openId, competenceId }: { openId?: string; comp
                     <h3 className="sch-card-title">{n}</h3>
                     <div className="sch-list">
                       {byName(n).map((s) => (
-                        <SubjectRow key={s.id} subject={s} label={`${s.classLabel} класс`} />
+                        <SubjectRow key={s.id} subject={s} label={classTitle(s.classLabel)} groupSep="·" />
                       ))}
                     </div>
                   </section>
@@ -215,16 +318,20 @@ export function SubjectsScreen({ openId, competenceId }: { openId?: string; comp
             </>
           ) : (
             <div className="sch-stack" data-testid="S-20.grid.subjects">
-              {classList.map((c) => (
+              {/* Карточка класса — только у отмеченных в ряду чипов (AR-208). */}
+              {selectedClasses.map((c) => (
                 <section key={c.id} className="sch-card sch-stack" style={{ gap: "var(--sp-8)" }} data-testid="S-20.group.class">
-                  <h3 className="sch-card-title">{c.letter ? c.label : `${c.label} класс`}</h3>
+                  <h3 className="sch-card-title">{classTitle(c.label)}</h3>
                   <div className="sch-list">
                     {byClass(c.id).map((s) => (
-                      <SubjectRow key={s.id} subject={s} label={s.name} />
+                      <SubjectRow key={s.id} subject={s} label={s.name} groupSep="—" />
                     ))}
                   </div>
                 </section>
               ))}
+              {selectedClasses.length === 0 ? (
+                <p className="sch-muted">Все классы сняты в фильтре — отметьте хотя бы один, и его предметы появятся здесь</p>
+              ) : null}
             </div>
           )}
         </>
@@ -244,7 +351,9 @@ export function SubjectsScreen({ openId, competenceId }: { openId?: string; comp
       {competence !== false ? (
         <CompetenceModal
           subjects={subjects}
+          contingentVersion={contingentVersion}
           preselect={competence}
+          onRefresh={refresh}
           onClose={() => {
             setCompetence(false);
             if (competenceId) navigate("/subjects");
@@ -266,6 +375,9 @@ function CreateSubject({ classes, onClose, onDone }: { classes: ClassDto[]; onCl
   const [classId, setClassId] = useState(classes[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Дубль по ключу имени (AR-201) — под полем имени, а не общим текстом:
+  // человек правит именно это поле.
+  const [nameError, setNameError] = useState<string | null>(null);
 
   return (
     <Modal
@@ -290,7 +402,8 @@ function CreateSubject({ classes, onClose, onDone }: { classes: ClassDto[]; onCl
                 await api.createSubject({ name: name.trim(), classId });
                 onDone();
               } catch (e) {
-                setError(e instanceof SchoolApiError ? e.message : "Не удалось создать");
+                if (e instanceof SchoolApiError && e.code === "SUBJECT_EXISTS") setNameError(e.message);
+                else setError(e instanceof SchoolApiError ? e.message : "Не удалось создать");
                 setBusy(false);
               }
             }}
@@ -300,7 +413,16 @@ function CreateSubject({ classes, onClose, onDone }: { classes: ClassDto[]; onCl
         </div>
       }
     >
-      <Field label="Название" testId="M-03.input.name" value={name} onChange={(e) => setName(e.target.value)} />
+      <Field
+        label="Название"
+        testId="M-03.input.name"
+        value={name}
+        error={nameError}
+        onChange={(e) => {
+          setName(e.target.value);
+          setNameError(null);
+        }}
+      />
       <div className="sch-field">
         <span className="sch-field-label">Класс</span>
         <select className="sch-input" data-testid="M-03.select.class" value={classId} onChange={(e) => setClassId(e.target.value)}>
@@ -311,7 +433,10 @@ function CreateSubject({ classes, onClose, onDone }: { classes: ClassDto[]; onCl
           ))}
         </select>
       </div>
-      <p className="sch-muted">Карточка заводится на пару «предмет × класс»: математика-5 и математика-6 — две карточки.</p>
+      <p className="sch-muted">
+        Карточка заводится на пару «предмет × класс»: математика-5 и математика-6 — две карточки. Имя сравнивается
+        без учёта регистра: «алгебра» и «Алгебра» — одна карточка.
+      </p>
       {error ? (
         <p className="sch-danger-text" role="alert">
           {error}
@@ -716,29 +841,58 @@ function BindQr({ subject, onClose, onBound }: { subject: SubjectDto; onClose: (
   );
 }
 
-// ─────────────── M-25 · управление компетенцией (AR-179) ───────────────
+// ─────────────── M-25 · управление компетенцией (AR-179, AR-202) ───────────────
+
+/** Строка `M-25` по карточке ДО сохранения: вид позиции, «весь класс», группы. */
+interface RowState {
+  mode: "class" | "group";
+  cls: boolean;
+  groups: number[];
+}
+
+/**
+ * Стартовое состояние строки — из привязок выбранного педагога: своя групповая
+ * привязка (или чужая при отсутствии своей классовой) открывает строку в виде
+ * групп — класс и группы на одной карточке взаимоисключены (Д6).
+ */
+function rowFromBindings(s: SubjectDto, teacherId: string): RowState {
+  const own = s.bindings.filter((b) => b.teacherId === teacherId);
+  const cls = own.some((b) => b.scope === "class");
+  const groups = [...new Set(own.filter((b) => b.scope === "group").flatMap((b) => b.groupNos))].sort((a, b) => a - b);
+  const anyGroup = s.bindings.some((b) => b.scope === "group");
+  return { mode: groups.length > 0 || (anyGroup && !cls) ? "group" : "class", cls, groups };
+}
 
 /**
  * Один заход вместо QR на каждую карточку: педагог выбирается сканом его
  * ЛИЧНОГО QR («Мой QR» в меню профиля) либо из списка персонала; дисциплины —
  * списком по названиям с указателем, раскрытие даёт строчки классов с
  * галочками. Галочка ставит «весь класс», снятая — открепляет; занятая другим
- * позиция уходит в подтверждение замены (`M-26`). Позиции с групповыми
- * привязками отсюда не трогаются (Д6) — группы назначаются из карточки
- * предмета.
+ * позиция уходит в подтверждение замены (`M-26`). Группы назначаются здесь же
+ * (AR-202): чип «по группам» переводит строку на галочки групп, класс без
+ * групп делится селектом сразу (`PUT /classes/:id/groups`, `contingent.write`).
+ * Класс и группы на одной карточке взаимоисключены (Д6) — держит сервер.
  */
 function CompetenceModal({
   subjects,
+  contingentVersion,
   preselect,
   onClose,
   onChanged,
+  onRefresh,
 }: {
   subjects: SubjectDto[];
+  /** Версия контингента для `PUT /classes/:id/groups` (CONCURRENT_EDIT, AR-109). */
+  contingentVersion: number;
   preselect: string | null;
   onClose: () => void;
   onChanged: () => void;
+  /** Тихое перечитывание карточек и версии — без размонтирования модалки. */
+  onRefresh: () => Promise<void>;
 }) {
   const mobile = useIsMobile();
+  const { can } = useSession();
+  const maySplit = can("contingent.write");
   const [staff] = useAsync(() => api.staff());
   const teachers =
     staff.status === "ready"
@@ -748,24 +902,47 @@ function CompetenceModal({
   const cur = teachers.some((t) => t.userId === teacherId) ? teacherId : "";
   const [scanning, setScanning] = useState(false);
   const [denied, setDenied] = useState(false);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [rows, setRows] = useState<Map<string, RowState>>(new Map());
   const [busy, setBusy] = useState(false);
+  /** Класс, деление которого сейчас летит на сервер. */
+  const [splitting, setSplitting] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<CompetenceConflictDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { toast, showToast } = useToast();
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // Выбранный педагог предзаполняет галочки СВОИМИ классными позициями:
-  // экран показывает текущую компетенцию, а не пустоту.
+  // Выбранный педагог предзаполняет строки СВОИМИ позициями: экран показывает
+  // текущую компетенцию, а не пустоту. Зависимость — только педагог: карточки,
+  // перечитанные после деления класса, не должны стирать невысланные галочки.
   useEffect(() => {
-    setChecked(
-      new Set(
-        cur
-          ? subjects.filter((s) => s.bindings.some((b) => b.teacherId === cur && b.scope === "class")).map((s) => s.id)
-          : [],
-      ),
-    );
-  }, [cur, subjects]);
+    setRows(new Map(cur ? subjects.map((s) => [s.id, rowFromBindings(s, cur)]) : []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cur]);
+
+  const rowOf = (s: SubjectDto): RowState => rows.get(s.id) ?? rowFromBindings(s, cur);
+  const update = (s: SubjectDto, f: (r: RowState) => RowState) =>
+    setRows((m) => {
+      const next = new Map(m);
+      next.set(s.id, f(m.get(s.id) ?? rowFromBindings(s, cur)));
+      return next;
+    });
+
+  /**
+   * Непокрытое в строке С УЧЁТОМ невысланных галочек: `null` — заполнена;
+   * `[]` — класс без педагога; `[2]` — группы без педагога. Фон и слово (AR-208).
+   */
+  const missingOf = (s: SubjectDto, r: RowState): number[] | null => {
+    const othersClass = s.bindings.some((b) => b.teacherId !== cur && b.scope === "class");
+    if (othersClass || (r.mode === "class" && r.cls)) return null;
+    if (s.groupCount === 0) return [];
+    const covered = new Set(s.bindings.filter((b) => b.teacherId !== cur && b.scope === "group").flatMap((b) => b.groupNos));
+    if (r.mode === "group") for (const g of r.groups) covered.add(g);
+    const missing = groupsOf(s.groupCount).filter((g) => !covered.has(g));
+    return missing.length ? missing : null;
+  };
+  /** Чужая привязка, занимающая группу: групповая по номеру либо классовая целиком. */
+  const holderOf = (s: SubjectDto, g: number) =>
+    s.bindings.find((b) => b.teacherId !== cur && (b.scope === "class" || b.groupNos.includes(g)));
 
   const names = [...new Set(subjects.map((s) => s.name))].sort((a, b) => a.localeCompare(b, "ru"));
   const byName = (n: string) =>
@@ -776,9 +953,23 @@ function CompetenceModal({
     setBusy(true);
     setError(null);
     try {
-      const r = await api.saveCompetence({ teacherId: cur, subjectIds: [...checked], replace });
-      if (!r.ok && r.conflicts) {
-        setConflicts(r.conflicts);
+      // Позиции (AR-202): классовая — без `groupNos`, групповая — с номерами;
+      // строка без галочек в позиции не попадает — сервер открепляет педагога.
+      const positions: NonNullable<SaveCompetenceDto["positions"]> = [];
+      for (const s of subjects) {
+        const r = rowOf(s);
+        if (r.mode === "group") {
+          if (r.groups.length) positions.push({ subjectId: s.id, groupNos: r.groups });
+        } else if (r.cls) positions.push({ subjectId: s.id });
+      }
+      const res = await api.saveCompetence({
+        teacherId: cur,
+        subjectIds: positions.filter((p) => !p.groupNos).map((p) => p.subjectId),
+        positions,
+        replace,
+      });
+      if (!res.ok && res.conflicts) {
+        setConflicts(res.conflicts);
       } else {
         setConflicts(null);
         showToast("Компетенции сохранены");
@@ -789,6 +980,21 @@ function CompetenceModal({
       setError(e instanceof SchoolApiError ? e.message : "Не получилось");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** Деление класса на группы — сразу (AR-202): тост, перечитать карточки. */
+  const split = async (s: SubjectDto, groupCount: number) => {
+    setSplitting(s.classId);
+    setError(null);
+    try {
+      await api.setClassGroups(s.classId, { groupCount, version: contingentVersion });
+      showToast(`${classTitle(s.classLabel)} разделён на ${groupCount} группы — ученики распределены`);
+      await onRefresh();
+    } catch (e) {
+      showToast(e instanceof SchoolApiError ? e.message : "Не получилось");
+    } finally {
+      setSplitting(null);
     }
   };
 
@@ -882,33 +1088,107 @@ function CompetenceModal({
                       <summary>{n}</summary>
                       <div className="sch-stack" style={{ gap: "var(--sp-4)" }}>
                         {byName(n).map((s) => {
-                          const groupBound = s.bindings.some((b) => b.scope === "group");
-                          const others = s.bindings
+                          const r = rowOf(s);
+                          const inGroups = r.mode === "group";
+                          const missing = missingOf(s, r);
+                          const othersClass = s.bindings
                             .filter((b) => b.scope === "class" && b.teacherId !== cur)
                             .map((b) => b.teacherName);
                           return (
-                            <label className="sch-check-row" key={s.id}>
-                              <input
-                                type="checkbox"
-                                data-testid="M-25.check.position"
-                                disabled={groupBound}
-                                checked={checked.has(s.id)}
-                                onChange={() =>
-                                  setChecked((c) => {
-                                    const next = new Set(c);
-                                    if (next.has(s.id)) next.delete(s.id);
-                                    else next.add(s.id);
-                                    return next;
-                                  })
-                                }
-                              />
-                              <span>{s.classLabel} класс</span>
-                              {groupBound ? (
-                                <span className="sch-muted">группы — из карточки предмета</span>
-                              ) : others.length ? (
-                                <span className="sch-muted">ведёт {others.join(", ")}</span>
+                            <div className="sch-m25-row" key={s.id} data-unfilled={missing ? "true" : undefined}>
+                              <div className="sch-m25-row-main">
+                                <label className="sch-check-row">
+                                  <input
+                                    type="checkbox"
+                                    data-testid="M-25.check.position"
+                                    disabled={inGroups}
+                                    checked={!inGroups && r.cls}
+                                    onChange={() => update(s, (x) => ({ ...x, cls: !x.cls }))}
+                                  />
+                                  <span>{classTitle(s.classLabel)}</span>
+                                  {!inGroups && othersClass.length ? (
+                                    <span className="sch-muted">ведёт {othersClass.join(", ")}</span>
+                                  ) : null}
+                                  {/* Слово рядом с фоном — цвет не единственный носитель смысла (AR-80). */}
+                                  {missing ? (
+                                    <span className="sch-warning-text">
+                                      {missing.length > 0 && missing.length < s.groupCount
+                                        ? `группа ${missing.join(", ")} — нет педагога`
+                                        : "нет педагога"}
+                                    </span>
+                                  ) : null}
+                                </label>
+                                {/* Чип «по группам» (AR-202): строка переходит с «весь класс»
+                                    на групповые позиции и обратно. */}
+                                <Button
+                                  kind="chip"
+                                  testId="M-25.toggle.groups"
+                                  aria-pressed={inGroups}
+                                  onClick={() => update(s, (x) => ({ ...x, mode: x.mode === "group" ? "class" : "group" }))}
+                                >
+                                  по группам
+                                </Button>
+                              </div>
+                              {inGroups ? (
+                                s.groupCount > 0 ? (
+                                  <div className="sch-m25-sub">
+                                    {groupsOf(s.groupCount).map((g) => {
+                                      const holder = holderOf(s, g);
+                                      const mine = r.groups.includes(g);
+                                      return (
+                                        <label className="sch-check-row" key={g}>
+                                          <input
+                                            type="checkbox"
+                                            data-testid="M-25.check.group"
+                                            checked={mine}
+                                            onChange={() =>
+                                              update(s, (x) => ({
+                                                ...x,
+                                                groups: x.groups.includes(g)
+                                                  ? x.groups.filter((v) => v !== g)
+                                                  : [...x.groups, g].sort((a, b) => a - b),
+                                              }))
+                                            }
+                                          />
+                                          <span>{g} группа</span>
+                                          {holder ? (
+                                            <span className="sch-muted">
+                                              — ведёт {teacherShort(holder.teacherName)}
+                                              {holder.scope === "class" ? " (весь класс)" : ""}
+                                            </span>
+                                          ) : !mine ? (
+                                            <span className="sch-muted">— свободна</span>
+                                          ) : null}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                ) : maySplit ? (
+                                  <div className="sch-m25-sub">
+                                    {/* Класс без групп: деление — сразу, `PUT /classes/:id/groups`
+                                        (AR-202); ученики раздаются дефолтным разбиением (AR-75). */}
+                                    <select
+                                      className="sch-input sch-m25-split"
+                                      data-testid="M-25.select.groupCount"
+                                      aria-label={`Разделить ${classTitle(s.classLabel)} на группы`}
+                                      value=""
+                                      disabled={splitting === s.classId}
+                                      onChange={(e) => {
+                                        const n = Number(e.target.value);
+                                        if (n) void split(s, n);
+                                      }}
+                                    >
+                                      <option value="">разделить на…</option>
+                                      <option value="2">2 группы</option>
+                                      <option value="3">3 группы</option>
+                                      <option value="4">4 группы</option>
+                                    </select>
+                                  </div>
+                                ) : (
+                                  <p className="sch-muted sch-m25-sub">Класс не разделён на группы — деление доступно модератору</p>
+                                )
                               ) : null}
-                            </label>
+                            </div>
                           );
                         })}
                       </div>
@@ -929,7 +1209,8 @@ function CompetenceModal({
         </div>
       </Modal>
 
-      {/* M-26 — подтверждение замены: занятые позиции называются пофамильно. */}
+      {/* M-26 — подтверждение замены: занятые позиции называются пофамильно,
+          групповой конфликт — с номером группы (AR-202). */}
       {conflicts ? (
         <Modal
           title="Заменить педагога?"
@@ -952,8 +1233,8 @@ function CompetenceModal({
           <div className="sch-stack" data-testid="M-26.list.conflicts">
             {conflicts.map((c, i) => (
               <p key={i}>
-                {c.subjectName} в {c.classLabels.length > 1 ? "классах" : "классе"} {c.classLabels.join(", ")} уже ведёт{" "}
-                {c.teacherNames.join(", ")}
+                {c.subjectName} в {c.classLabels.length > 1 ? "классах" : "классе"} {c.classLabels.join(", ")}
+                {c.groupNo ? ` (группа ${c.groupNo})` : ""} уже ведёт {c.teacherNames.join(", ")}
               </p>
             ))}
             <p>Заменить всех?</p>

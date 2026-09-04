@@ -1236,6 +1236,7 @@ select.sch-input { padding-right: var(--sp-8); }
   .sch-overlay, .sch-modal, .sch-modal[data-shape='fullscreen'], .sch-modal[data-shape='sheet'],
   .sch-skeleton, .sch-shake, .sch-unfold, .sch-toast, .sch-tooltip { animation: none; }
   .sch-btn, .sch-card, .sch-code-cell, .sch-input, .sch-nav-item, .sch-linkrow, .sch-subnav-item { transition: none; }
+  .sch-unfold-x { transition: none; } /* раскрытие ряда чипов классов `S-20` (AR-208, screens/subjects.css) */
 }
 
 /* ─── УТЦ v1.4 фаза IV (AR-175): результат вкладками, скелет-редактор, ручная правка ─── */

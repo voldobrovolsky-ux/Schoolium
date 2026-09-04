@@ -154,6 +154,11 @@ export const api = {
   deactivateStudent: (id: string) => call<{ ok: boolean }>("POST", `${V1}/students/${id}/deactivate`),
   reactivateStudent: (id: string) => call<{ ok: boolean }>("POST", `${V1}/students/${id}/reactivate`),
   deleteClass: (id: string) => call<{ ok: boolean; studentsDeleted: number }>("DELETE", `${V1}/classes/${id}`),
+  // Число групп класса с экрана (AR-202, §11 строка 50): 0 | 2 | 3 | 4, версия
+  // контингента (CONCURRENT_EDIT), уменьшение при живых привязках — GROUPS_BOUND.
+  // Тип DTO — inline-import: список импортов файла общий для нескольких зон.
+  setClassGroups: (id: string, dto: import("@edustore/shared").SetClassGroupsDto) =>
+    call<ClassDto>("PUT", `${V1}/classes/${id}/groups`, dto),
 
   // ─── предметы ───
   subjects: () => call<SubjectDto[]>("GET", `${V1}/subjects`),
