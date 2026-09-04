@@ -221,7 +221,7 @@ export class ContingentService {
    * назначения генератор ответит `GROUPS_UNASSIGNED`). Снять группу, которую
    * ведёт педагог (`TeacherBinding` scope group с её номером), нельзя —
    * `GROUPS_BOUND` с классом и номерами: сначала открепить. Версия —
-   * контингента (AR-109); событие `contingent.class.groups.changed.v1` роняет
+   * контингента (AR-109); событие `contingent.class.regrouped.v1` роняет
    * подтверждённую сетку в `stale` — число групп меняет укладку.
    */
   async setGroups(classId: string, dto: SetClassGroupsDto, actor: SchoolActor): Promise<ClassDto> {

@@ -1121,6 +1121,8 @@ export interface JournalColumnDto {
   future: boolean;
   /** Урок вне расписания после регенерации (AR-85). */
   detached: boolean;
+  /** Урок отменён без замены (AR-207): отметка отклоняется `LESSON_CANCELLED`. */
+  cancelled: boolean;
 }
 
 export interface JournalRowDto {

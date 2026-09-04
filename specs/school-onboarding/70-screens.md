@@ -396,7 +396,7 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 - Группы остаются свойством класса (AR-75): селект меняет `groupCount` класса
   (0→N — группы 1..N и дефолтное разбиение учеников; N→M<N — лишние группы
   снимаются, ученики остаются без группы) и издаёт
-  `contingent.class.groups.changed.v1` — подтверждённая сетка уходит в `stale`.
+  `contingent.class.regrouped.v1` — подтверждённая сетка уходит в `stale`.
 
 ## S-30 · Персонал
 
@@ -1212,7 +1212,7 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | 47 | PUT `/api/v1/admin/assets/:id` | S-62 (`M-27`) | `school.admin` | `school.registry.changed.v1` | — |
 | 48 | DELETE `/api/v1/admin/assets/:id` | S-62 | `school.admin` | `school.registry.changed.v1` | — |
 | 49 | PUT `/api/v1/schedule/lunch` | S-41.4 | `schedule.build` | — (версия агрегата) | `SKELETON_INVALID`, `CONCURRENT_EDIT` — обед по классам (AR-200) |
-| 50 | PUT `/api/v1/classes/:id/groups` | M-25, S-12 | `contingent.write` | `contingent.class.groups.changed.v1` | `GROUPS_BOUND`, `CONCURRENT_EDIT` — число групп класса 0/2/3/4 (AR-202) |
+| 50 | PUT `/api/v1/classes/:id/groups` | M-25, S-12 | `contingent.write` | `contingent.class.regrouped.v1` | `GROUPS_BOUND`, `CONCURRENT_EDIT` — число групп класса 0/2/3/4 (AR-202) |
 | 51 | PUT `/api/v1/staff/:id/account` | S-31 | `staff.manage` | `staff.account.updated.v1` | `USERNAME_TAKEN`, `USERNAME_INVALID` (AR-203) |
 | 52 | POST `/api/v1/staff/:id/password` | S-31 (`M-32`) | `staff.manage` | `staff.password.set.v1` | `PASSWORD_TOO_SHORT` (AR-203) |
 | 53 | PUT `/api/v1/schedule/preferences/me` | S-40 (`M-30`) | `schedule.preference.self` | `schedule.preference.set.v1` | — (AR-206) |

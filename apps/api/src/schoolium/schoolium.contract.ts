@@ -52,7 +52,7 @@ export const SCHOOL_EVENTS = {
   preferenceSet: 'schedule.preference.set.v1',
   accountUpdated: 'staff.account.updated.v1',
   passwordSet: 'staff.password.set.v1',
-  classGroupsChanged: 'contingent.class.groups.changed.v1',
+  classGroupsChanged: 'contingent.class.regrouped.v1',
 } as const;
 
 export type SchoolEventType = (typeof SCHOOL_EVENTS)[keyof typeof SCHOOL_EVENTS];

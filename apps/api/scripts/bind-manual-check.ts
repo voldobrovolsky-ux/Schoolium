@@ -24,7 +24,7 @@
  *   привязка меняет вид (класс ↔ группа) без конфликта;
  *   13. число групп класса `PUT /classes/:id/groups` (AR-202, §11 строка 50):
  *   `CONCURRENT_EDIT` по версии контингента; 0→N — группы и дефолтное
- *   разбиение учеников (AR-75), событие `contingent.class.groups.changed.v1`;
+ *   разбиение учеников (AR-75), событие `contingent.class.regrouped.v1`;
  *   N→M добавляет пустые группы, состав не пересчитывает; уменьшение при
  *   педагоге на снимаемой группе — `GROUPS_BOUND` с классом и номерами;
  *   после открепления группы снимаются, ученики остаются без группы.
@@ -275,7 +275,7 @@ async function main(): Promise<never> {
       }),
     );
     const gp = (grpEvt?.payload ?? {}) as { classId?: string; groupCount?: number };
-    check(gp.classId === c7.id && gp.groupCount === 2, 'событие contingent.class.groups.changed.v1 в outbox с classId и groupCount');
+    check(gp.classId === c7.id && gp.groupCount === 2, 'событие contingent.class.regrouped.v1 в outbox с classId и groupCount');
 
     const dto3 = await contingent.setGroups(c7.id, { groupCount: 3, version: v1 }, school.moderator);
     const g3 = await prisma.studentGroup.findMany({ where: { classId: c7.id }, include: { members: true }, orderBy: { groupNo: 'asc' } });

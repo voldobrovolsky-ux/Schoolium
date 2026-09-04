@@ -148,6 +148,7 @@ export class JournalService {
       topic: c.lessonTopic?.topic ?? null,
       future: isoDay(c.date) > t,
       detached: c.detachedAt !== null,
+      cancelled: c.cancelledAt !== null,
     }));
 
     // ── отметки: видимые за неделю, средний и четвертная — за четверть ──

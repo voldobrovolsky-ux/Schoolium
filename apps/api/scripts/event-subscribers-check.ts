@@ -1,7 +1,7 @@
 /**
  * G-50 (AR-108, AR-24, AR-45) — **события полны по подписчику.**
  *
- * У каждого из 25 событий версии (22 базовых + три кабинета администратора
+ * У каждого из 32 событий версии (22 базовых + три кабинета администратора + семь пакета 1.5.0 —
  * 1.3.0, AR-186…AR-189) названы издатель, подписчик и реакция. «Нет
  * подписчика (только аудит)» — законное значение; ПУСТАЯ КЛЕТКА — падение.
  * Сверка идёт в обе стороны: реестр в коде против таблицы `30-spec.md`, и
@@ -41,8 +41,8 @@ async function main(): Promise<void> {
   console.log('G-50 · у каждого события назван подписчик и реакция (AR-108)\n');
 
   const spec = specTable();
-  check(spec.length === 25, `в таблице контрактов ${spec.length} событий (версия обещает 25)`);
-  check(EVENT_CONTRACT.length === 25, `в исполняемом реестре ${EVENT_CONTRACT.length} событий`);
+  check(spec.length === 32, `в таблице контрактов ${spec.length} событий (версия обещает 32)`);
+  check(EVENT_CONTRACT.length === 32, `в исполняемом реестре ${EVENT_CONTRACT.length} событий`);
 
   // ─── ни одной пустой клетки ───
   const emptyCells = spec.filter((r) => !r.publisher || !r.subscriber || !r.reaction);
@@ -97,8 +97,8 @@ async function main(): Promise<void> {
     check((registered.get(t) ?? new Set()).has('schedule'),
       `расписание подписано на ${t} — таблица «что делает сетку устаревшей» требует этой связи`);
   }
-  check(STALE_ON_EVENTS.length === 8,
-    `событий, роняющих сетку в stale, восемь: ${STALE_ON_EVENTS.length} — перечислением, а не догадкой`);
+  check(STALE_ON_EVENTS.length === 10,
+    `событий, роняющих сетку в stale, десять (AR-202, AR-206): ${STALE_ON_EVENTS.length} — перечислением, а не догадкой`);
 
   // ─── каждый подписчик проходит через inbox (AR-24) ───
   const busSrc = readFileSync(join(__dirname, '../src/common/events/in-process-event-bus.ts'), 'utf8');

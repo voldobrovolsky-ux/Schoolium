@@ -35,7 +35,8 @@ export class DeputyCabinetService {
         this.prisma.schoolSubject.findMany(),
         this.prisma.teacherBinding.findMany(),
         this.prisma.term.count(),
-        this.prisma.skeletonPosition.count(),
+        // AR-171/AR-200: скелет — на школу; SkeletonPosition вне tenant-guard, фильтр явный
+        this.prisma.skeletonPosition.count({ where: { workspaceId: ws } }),
         this.prisma.scheduleTemplate.findMany({ orderBy: { generatedAt: 'desc' }, take: 1 }),
         this.prisma.schoolLesson.count({ where: { date: today, detachedAt: null } }),
         this.prisma.mark.count({ where: { postedAt: { gte: since } } }),
