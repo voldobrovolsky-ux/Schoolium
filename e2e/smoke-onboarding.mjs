@@ -687,6 +687,11 @@ async function main() {
     await teacherCards.last().click();
     await page.waitForSelector('[data-testid="M-06"]', { timeout: 20_000 });
     await modalOpen(page, 'M-06');
+    // AR-203: M-06 полноэкранная на ОБЕИХ раскладках — форма читается атрибутом
+    // слоя (`modalOpen` печатает её на мобайле; здесь она утверждается и на десктопе).
+    const m06Shape = await page.locator('[data-testid="M-06"]').first().getAttribute('data-shape');
+    if (m06Shape === 'fullscreen') console.log(`    ✅ M-06 · data-shape=fullscreen на ${MOBILE ? 'мобайле' : 'десктопе'} (AR-203)`);
+    else { console.error(`    ❌ M-06 · data-shape=${m06Shape}, ждали fullscreen на обеих раскладках (AR-203)`); failures++; }
     // Учётка заведена, входа не было: именной QR — над кодом ФИО (AR-161).
     await hasAll(page, ['S-31.qr.fullName', 'S-31.qr', 'S-31.status', 'S-31.btn.close']);
     const qrName = (await page.locator('[data-testid="S-31.qr.fullName"]').innerText()).trim();
@@ -732,10 +737,51 @@ async function main() {
     if (del + deact === 1) console.log(`    ✅ ровно одна кнопка из пары «удалить/деактивировать» (${del ? 'удалить' : 'деактивировать'})`);
     else { console.error(`    ❌ кнопок пары «удалить/деактивировать» на экране ${del + deact}, должна быть одна`); failures++; }
     await shot(page, 'S-31-activated');
-    // Код входа на случай «телефона нет под рукой» (`S-05`) — шесть цифр.
+
+    // Плашки учётки (AR-203): ФИО, логин, маска пароля; ФИО и логин правятся
+    // инлайн — отчество добавляется и возвращается в плашке из ответа сервера.
+    await hasAll(page, ['S-31.plaque.name', 'S-31.plaque.username', 'S-31.plaque.password', 'S-31.btn.editAccount']);
+    await click(page, 'S-31.btn.editAccount');
+    await page.waitForSelector('[data-testid="S-31.input.middleName"]', { timeout: 20_000 });
+    await hasAll(page, ['S-31.input.lastName', 'S-31.input.firstName', 'S-31.input.username', 'S-31.btn.saveAccount', 'S-31.btn.cancelAccount']);
+    await fill(page, 'S-31.input.middleName', 'Петрович');
+    await shot(page, 'S-31-edit-account');
+    await click(page, 'S-31.btn.saveAccount');
+    await page.waitForSelector('[data-testid="S-31.plaque.name"]', { timeout: 20_000 });
+    const plaqueName = (await page.locator('[data-testid="S-31.plaque.name"]').innerText()).replace(/\s+/g, ' ');
+    if (plaqueName.includes('Петрович')) console.log(`    ✅ ФИО обновлено инлайн (PUT /staff/:id/account): «${plaqueName.trim()}»`);
+    else { console.error(`    ❌ плашка ФИО после сохранения: «${plaqueName}», ждали отчество «Петрович»`); failures++; }
+
+    // M-32 «Задать пароль» (AR-203): поповер у кнопки / нижний лист; пустое поле —
+    // сервер генерирует; пароль показывается один раз (AR-156).
+    await click(page, 'S-31.btn.setPassword');
+    await page.waitForSelector('[data-testid="M-32"]', { timeout: 20_000 });
+    await modalOpen(page, 'M-32');
+    await hasAll(page, ['M-32.input.password', 'M-32.btn.save']);
+    if (MOBILE) await tapTargets(page, 'M-32 · задать пароль');
+    await shot(page, 'M-32-set-password');
+    await click(page, 'M-32.btn.save');
+    await page.waitForSelector('[data-testid="credentials.password"]', { timeout: 20_000 });
+    await has(page, 'credentials.password', 'сгенерированный пароль показан один раз (AR-156)');
+    await modalClosed(page, 'M-32');
+
+    // Ссылка входа с параметрами (AR-204): 24 часа, одно открытие — панель
+    // называет счётчик «использований 0 из 1»; выдаёт `staff.manage`.
+    await hasAll(page, ['S-31.select.linkTtl', 'S-31.select.linkUses', 'S-31.btn.loginLink']);
+    await page.locator('[data-testid="S-31.select.linkTtl"]').selectOption('24');
+    await page.locator('[data-testid="S-31.select.linkUses"]').selectOption('1');
+    await click(page, 'S-31.btn.loginLink');
+    await page.waitForSelector('[data-testid="S-31.loginLink"]', { timeout: 20_000 });
+    const linkText = (await page.locator('[data-testid="S-31.loginLink"]').innerText()).replace(/\s+/g, ' ');
+    if (linkText.includes('из 1')) console.log('    ✅ ссылка входа с лимитом открытий: панель считает «из 1» (AR-204)');
+    else { console.error(`    ❌ панель ссылки входа без счётчика «из 1»: «${linkText}»`); failures++; }
+    await shot(page, 'S-31-login-link');
+
+    // Код входа на случай «телефона нет под рукой» (`S-05`) — шесть цифр и таймер.
     await click(page, 'S-31.btn.loginCode');
     await page.waitForSelector('[data-testid="S-31.loginCode"]', { timeout: 20_000 });
     await has(page, 'S-31.loginCode', 'код показывается модератору, а не отправляется SMS (AR-94)');
+    await has(page, 'S-31.timer.loginCode', 'таймер «мм:сс» до истечения кода (AR-203)');
     await shot(page, 'S-31-login-code');
     // M-07 — добавление роли: поповер у кнопки на десктопе, нижний лист на
     // мобайле (§3). Роль не выдаём — открыть и закрыть достаточно, а лишняя
@@ -1456,7 +1502,15 @@ async function main() {
     // на стендовом телефоне, а она нужна проверке оболочки ниже.
     await page.goto(`${WEB}/admin/policy`);
     await page.waitForSelector('[data-testid="S-62.policy.limits"]', { timeout: 20_000 });
-    await hasAll(page, ['S-62.policy.limits', 'S-62.policy.btn.save', 'S-62.policy.incident']);
+    await hasAll(page, ['S-62.policy.limits', 'S-62.policy.roleLimits', 'S-62.policy.btn.save', 'S-62.policy.incident']);
+    // Лимит носителей роли (AR-205): второму завучу (УР) политика даёт место;
+    // одна кнопка шлёт оба словаря, «Сохранено» — ответ сервера, форма — из него.
+    await page.locator('#role-limit-deputy_academic').selectOption('2');
+    await click(page, 'S-62.policy.btn.save');
+    await page.locator('.sch-adm-saved', { hasText: 'Сохранено' }).waitFor({ timeout: 20_000 });
+    const deputyLimit = await page.locator('#role-limit-deputy_academic').inputValue();
+    if (deputyLimit === '2') console.log('    ✅ лимит носителей роли завуча (УР) сохранён: 2 (AR-205)');
+    else { console.error(`    ❌ лимит носителей deputy_academic после сохранения: «${deputyLimit}», ждали «2»`); failures++; }
     await click(page, 'S-62.policy.btn.incident');
     await page.waitForSelector('[data-testid="M-28"]', { timeout: 20_000 });
     await modalOpen(page, 'M-28');
