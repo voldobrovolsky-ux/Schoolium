@@ -173,7 +173,10 @@ export const day = (offset: number): string => {
 };
 
 export interface ReadySchool extends School {
+  /** Первый класс школы — тот, у которого предмет, педагог и уроки. */
   classId: string;
+  /** Все классы школы в порядке параллелей (при `parallels > 1` — остальные без предметов). */
+  classIds: string[];
   subjectId: string;
   teacher: { userId: string; cardId: string };
   studentIds: string[];
@@ -185,8 +188,12 @@ export interface ReadySchool extends School {
  * классов → профили → предметы → персонал → привязки → четверти → нагрузка →
  * приоритеты → параметры дня → генерация → подтверждение. Никаких прямых вставок
  * в таблицы: сценарии проверок должны опираться на то же поведение, что и прод.
+ *
+ * `opts.parallels` — сколько параллелей заводит мастер (по умолчанию одна);
+ * предмет, педагог и нагрузка достаются только первому классу — остальные
+ * сценарий дополняет сам (G-86: второй класс без своего обеда).
  */
-export async function readySchool(b: Bench, name = 'Школа приёмки'): Promise<ReadySchool> {
+export async function readySchool(b: Bench, name = 'Школа приёмки', opts: { parallels?: number } = {}): Promise<ReadySchool> {
   const contingent = b.get(ContingentService);
   const subjects = b.get(SubjectsService);
   const calendar = b.get(CalendarService);
@@ -199,11 +206,12 @@ export async function readySchool(b: Bench, name = 'Школа приёмки'):
 
   return inSchool(school.workspaceId, async () => {
     await contingent.createClasses(
-      { parallels: 1, letters: null, studentsPerClass: 3, groups: null, sexKind: 'boys', sexCount: 2, version: 0 },
+      { parallels: opts.parallels ?? 1, letters: null, studentsPerClass: 3, groups: null, sexKind: 'boys', sexCount: 2, version: 0 },
       school.moderator,
     );
     await drain();
-    const cls = (await contingent.listClasses())[0];
+    const allClasses = await contingent.listClasses();
+    const cls = allClasses[0];
     const roster = await contingent.listStudents(cls.id);
     const fio = [['Абалкин', 'Юрий'], ['Егоров', 'Пётр'], ['Ёлкина', 'Анна']];
     for (let i = 0; i < roster.length; i += 1) {
@@ -250,6 +258,7 @@ export async function readySchool(b: Bench, name = 'Школа приёмки'):
     return {
       ...school,
       classId: cls.id,
+      classIds: allClasses.map((c) => c.id),
       subjectId: subject.id,
       teacher,
       studentIds: students.map((s) => s.id),
