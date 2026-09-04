@@ -189,6 +189,10 @@ const tapTargets = async (page, where) => {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;            // не отрисован
       if (getComputedStyle(el).visibility === 'hidden') continue;
+      // Невидимые помощники доступности (VisuallyHidden 1×1: фокус-прокси
+      // области тостов Radix, aria-hidden) — не мишени: их не видно и не нажать.
+      if (r.width <= 1 && r.height <= 1) continue;
+      if (el.getAttribute('aria-hidden') === 'true') continue;
       // Ячейка журнала — не кнопка: она tabindex-навигация по таблице, её
       // мишень задаётся высотой строки, и реестр её размер не называет.
       if (el.closest('.sch-journal')) continue;
