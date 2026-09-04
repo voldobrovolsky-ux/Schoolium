@@ -84,6 +84,8 @@ async function main(): Promise<void> {
       `время урока 3 по скелету: ${t?.start}—${t?.end} (после перемены 10 минут)`);
     const meal = got.positions.find((p) => p.kind === 'meal');
     check(meal?.title === 'Обед/прогулка', 'обед стоит в общей нумерации дня со своим временем');
+    check(got.classLunch.length === 1 && got.classLunch[0].lunchAfterLessonNo === null,
+      'скелет отдаёт обед по классам (AR-200): один класс, обед как у школы');
 
     // ─── минутный гейт: до начала урока отказ, после — отметка и стирание ───
     const col = await prisma.journalColumn.findFirst({

@@ -1,14 +1,16 @@
 /**
- * G-46 (AR-103, AR-107) — **дневная сетка и бюджет перебора перечислением.**
+ * G-46 (AR-103, AR-107, AR-199) — **дневная сетка и бюджет перебора перечислением.**
  *
  * Доказывается ровно то, что было названо решением:
  *   · «уроков в день» — ОБЯЗАТЕЛЬНЫЙ вход: без него `LOAD_EXCEEDS_GRID` и
  *     `TEACHER_OVERBOOKED` не считаются вовсе, потому что оба про «слоты недели»
  *     = дни × слоты;
- *   · превышение дневного потолка параллели → `DAY_EXCEEDS_SANPIN` ДО перебора;
- *   · длина дня выше 420 минут → `DAY_TOO_LONG`, и текст не ссылается на СанПиН:
- *     потолок продуктовый, а не нормативный;
- *   · штатный день 7×45 с переменами 10 и большой 30 проходит;
+ *   · «уроков в день» применяется ко всем параллелям одинаково (AR-199): школа
+ *     с первым и восьмым классом собирается без потолка параллели, день
+ *     первоклассника не режется числом 4;
+ *   · `DAY_EXCEEDS_SANPIN` и `DAY_TOO_LONG` не бросаются никогда — ни при 12
+ *     уроках в день, ни при дне длиннее 420 минут (AR-199): длина дня —
+ *     справка `S-41.calc.dayLength`, а не судья;
  *   · каждый из четырёх временных параметров экрана 4 назван потребителем —
  *     мёртвого ввода на экране нет;
  *   · исчерпание бюджета (20 с либо 200 000 попыток) отвечает честным
@@ -18,7 +20,7 @@
  *
  * Запуск: npm --workspace apps/api run daygrid:check
  */
-import { DAY_MINUTES_CAP, DAY_SLOTS_CAP, GENERATOR_BUDGET, classDayCap, schoolDayCap } from '@edustore/shared';
+import { GENERATOR_BUDGET } from '@edustore/shared';
 import { arithmeticRefusal, dayLength, generate, type GenInput } from '../src/schoolium/schedule/generator';
 import { check, report } from './schoolium/harness';
 
@@ -37,26 +39,25 @@ const base = (over: Partial<GenInput> = {}): GenInput => ({
   ...over,
 });
 
-console.log('G-46 · дневная сетка и бюджет перебора (AR-103, AR-107)\n');
+console.log('G-46 · дневная сетка и бюджет перебора (AR-103, AR-107, AR-199)\n');
 
-// ─── 1. дневной потолок задан по параллелям ───
-check(DAY_SLOTS_CAP[1] === 4 && DAY_SLOTS_CAP[5] === 6 && DAY_SLOTS_CAP[11] === 7,
-  `дневной потолок по параллелям: 1 кл — ${DAY_SLOTS_CAP[1]}, 5 кл — ${DAY_SLOTS_CAP[5]}, 11 кл — ${DAY_SLOTS_CAP[11]} (СанПиН 1.2.3685-21 табл. 6.6)`);
+// ─── 1. «уроков в день» применяется ко всем параллелям (AR-199) ───
+const twelve = arithmeticRefusal(base({ classes: [cls('c1', 1)], params: { days: 5, slotsPerDay: 12, lessonMin: 45, breakMin: 10, bigBreakAfter: 2, bigBreakMin: 30 } }));
+check(twelve === null, '12 уроков в день в 1 классе — отказа нет: DAY_EXCEEDS_SANPIN не бросается (AR-199)');
+const twelveMixed = arithmeticRefusal(base({ classes: [cls('c1', 1), cls('c8', 8)], pairs: [], params: { days: 5, slotsPerDay: 12, lessonMin: 45, breakMin: 10, bigBreakAfter: 2, bigBreakMin: 30 } }));
+check(twelveMixed === null, '12 уроков в день в школе с первым и восьмым классом — отказа нет: потолка старшей параллели нет');
 
-const over = arithmeticRefusal(base({ params: { days: 5, slotsPerDay: 9, lessonMin: 45, breakMin: 10, bigBreakAfter: 2, bigBreakMin: 30 } }));
-check(over?.code === 'DAY_EXCEEDS_SANPIN',
-  `9 уроков в 5 классе → ${over?.code} (потолок ${over?.details.cap}) — отказ ДО перебора`);
-
-// ─── 2. длина дня: четыре временных параметра потребляются ───
+// ─── 2. длина дня: четыре временных параметра потребляются, но день не судят ───
 const sane = { days: 5, slotsPerDay: 7, lessonMin: 45, breakMin: 10, bigBreakAfter: 2, bigBreakMin: 30 };
 check(dayLength(sane) === 7 * 45 + 5 * 10 + 30,
-  `штатный день: ${dayLength(sane)} мин = 7×45 + перемены 5×10 + большая 30`);
-const longDay = arithmeticRefusal(base({ classes: [cls('c11', 11)], params: { ...sane, breakMin: 90 } }));
-check(longDay?.code === 'DAY_TOO_LONG',
-  `перемена 90 мин → ${longDay?.code} (${longDay?.details.minutes} мин при потолке ${longDay?.details.cap})`);
-check(String(longDay?.details.breakdown ?? '').includes('перемены'),
-  `текст DAY_TOO_LONG разбирает сумму: «${longDay?.details.breakdown}»`);
-check(DAY_MINUTES_CAP === 420, 'потолок длины дня — 420 минут, продуктовый дефолт владельца, а не норма');
+  `штатный день: ${dayLength(sane)} мин = 7×45 + перемены 5×10 + большая 30 — справка S-41.calc.dayLength`);
+const longParams = { ...sane, breakMin: 90 };
+const longDay = arithmeticRefusal(base({ classes: [cls('c11', 11)], params: longParams }));
+check(longDay === null && dayLength(longParams) > 420,
+  `перемена 90 мин даёт день ${dayLength(longParams)} мин — DAY_TOO_LONG не бросается, потолка 420 нет (AR-199)`);
+const longest = { days: 5, slotsPerDay: 12, lessonMin: 45, breakMin: 90, bigBreakAfter: 2, bigBreakMin: 30 };
+check(arithmeticRefusal(base({ classes: [cls('c1', 1)], pairs: [], params: longest })) === null,
+  `12 уроков и день ${dayLength(longest)} мин в 1 классе — ни DAY_EXCEEDS_SANPIN, ни DAY_TOO_LONG`);
 
 for (const p of ['lessonMin', 'breakMin', 'bigBreakAfter', 'bigBreakMin'] as const) {
   const a = dayLength(sane);
@@ -78,6 +79,8 @@ const gridRefusal = arithmeticRefusal(
 );
 check(gridRefusal?.code === 'LOAD_EXCEEDS_GRID',
   `28 часов при 5×5 = 25 слотах → ${gridRefusal?.code} (${gridRefusal?.details.total} ч при ${gridRefusal?.details.grid} слотах)`);
+check(gridRefusal?.details.breakdown === '5 уроков в день × 5 дней',
+  `разбор без скелета — «${gridRefusal?.details.breakdown}» (AR-199: без потолка параллели)`);
 
 const sameLoadBiggerGrid = arithmeticRefusal(
   base({
@@ -104,21 +107,17 @@ const overbooked = arithmeticRefusal(
 check(overbooked?.code === 'TEACHER_OVERBOOKED',
   `один педагог на 40 часов при 30 слотах → ${overbooked?.code} (${overbooked?.details.hours} ч при ${overbooked?.details.grid}) — арифметикой, без перебора`);
 
-// ─── 3а. поклассный потолок: школа с первым и восьмым классом собирается (AR-114) ───
+// ─── 3а. школа с первым и восьмым классом: одно число на школу, потолка параллели нет (AR-199) ───
 const mixedSchool = base({
   classes: [cls('c1', 1), cls('c8', 8)],
   pairs: [
-    { subjectId: 'a', subjectName: 'математика', classId: 'c1', teacherId: 't1', teacherName: 'Мария И.', scope: 'class', groupNos: [], hours: 18, priority: false },
+    { subjectId: 'a', subjectName: 'математика', classId: 'c1', teacherId: 't1', teacherName: 'Мария И.', scope: 'class', groupNos: [], hours: 30, priority: false },
     { subjectId: 'b', subjectName: 'математика', classId: 'c8', teacherId: 't2', teacherName: 'Ольга П.', scope: 'class', groupNos: [], hours: 33, priority: false },
   ],
   params: { days: 5, slotsPerDay: 7, lessonMin: 45, breakMin: 10, bigBreakAfter: 2, bigBreakMin: 30 },
 });
-check(schoolDayCap([1, 2, 5, 8]) === 7,
-  `потолок школы — потолок самой старшей параллели: ${schoolDayCap([1, 2, 5, 8])} (AR-114)`);
-check(classDayCap(1, 7) === 4 && classDayCap(8, 7) === 7,
-  `день класса — min(число, потолок параллели): 1 класс — ${classDayCap(1, 7)}, 8 класс — ${classDayCap(8, 7)}`);
 check(arithmeticRefusal(mixedSchool) === null,
-  '7 уроков в день в школе с первым и восьмым классом проходят: первоклассник получит 4, восьмиклассник 7');
+  '30 часов первоклассника и 33 часа восьмиклассника при 7 уроках в день проходят: вместимость обоих — 35 слотов');
 const senior = generate(mixedSchool);
 if (senior.ok) {
   const perDay = new Map<string, number>();
@@ -128,18 +127,11 @@ if (senior.ok) {
   }
   const c1Max = Math.max(...[...perDay].filter(([k]) => k.startsWith('c1:')).map(([, v]) => v));
   const c8Max = Math.max(...[...perDay].filter(([k]) => k.startsWith('c8:')).map(([, v]) => v));
-  check(c1Max <= 4, `в собранной сетке день первого класса не длиннее ${c1Max} уроков (потолок 4)`);
-  check(c8Max <= 7 && c8Max > 4, `день восьмого класса — ${c8Max} уроков: он не ограничен потолком первоклассника`);
+  check(c1Max > 4 && c1Max <= 7, `день первого класса — до ${c1Max} уроков: число школы применяется к нему, а не потолок 4 (AR-199)`);
+  check(c8Max <= 7, `день восьмого класса — до ${c8Max} уроков: не длиннее «уроков в день» школы`);
 } else {
   check(false, `сетка смешанной школы не собрана: ${senior.code}`);
 }
-const tooManyForSchool = arithmeticRefusal(base({
-  classes: [cls('c1', 1), cls('c8', 8)],
-  params: { days: 5, slotsPerDay: 8, lessonMin: 45, breakMin: 10, bigBreakAfter: 2, bigBreakMin: 30 },
-  pairs: [],
-}));
-check(tooManyForSchool?.code === 'DAY_EXCEEDS_SANPIN',
-  `8 уроков в день выше потолка старшей параллели (${tooManyForSchool?.details.cap}) → ${tooManyForSchool?.code}`);
 
 // ─── 4. бюджет перебора назван числом и исчерпывается честным NO_SOLUTION ───
 check(GENERATOR_BUDGET.seconds === 20 && GENERATOR_BUDGET.attempts === 200_000,

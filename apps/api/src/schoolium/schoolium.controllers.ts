@@ -14,8 +14,10 @@ import type {
   FillStaffCardDto,
   MarkValue,
   SchoolRole,
+  SetClassLunchDto,
   SetLoadDto,
   SetPrioritiesDto,
+  SetTeacherPreferenceDto,
   SetTermsDto,
   SwapSlotsDto,
   UpsertStudentDto,
@@ -657,6 +659,34 @@ export class ScheduleController {
   @Put('skeleton')
   setSkeleton(@Req() req: Req0, @Body() body: SetSkeletonDto) {
     return this.svc.setSkeleton(body, actorOf(req));
+  }
+
+  /** §11 строка 49 · `S-41.lunch` (AR-200): обед по классам; версия агрегата (AR-109), отказ `SKELETON_INVALID`. */
+  @RequirePermission('schedule.build')
+  @Put('lunch')
+  setLunch(@Req() req: Req0, @Body() body: SetClassLunchDto) {
+    return this.svc.setLunch(body, actorOf(req));
+  }
+
+  /** `M-30` (AR-206): рабочие дни того, кто спрашивает. */
+  @RequirePermission('schedule.preference.self')
+  @Get('preferences/me')
+  myPreference(@Req() req: Req0) {
+    return this.svc.myPreference(actorOf(req));
+  }
+
+  /** §11 строка 53 · `M-30.btn.save` (AR-206): педагог задаёт рабочие дни сам → `schedule.preference.set.v1`. */
+  @RequirePermission('schedule.preference.self')
+  @Put('preferences/me')
+  setMyPreference(@Req() req: Req0, @Body() body: SetTeacherPreferenceDto) {
+    return this.svc.setMyPreference(body, actorOf(req));
+  }
+
+  /** `S-41.load.summary` (AR-206): рабочие дни всех педагогов — строителю. */
+  @RequirePermission('schedule.read')
+  @Get('preferences')
+  listPreferences() {
+    return this.svc.listPreferences();
   }
 
   /** §11 строка 24б · `S-43`: перестановка в черновике; материализует только confirm (AR-18). */

@@ -1,20 +1,21 @@
 import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
-  DAY_MINUTES_CAP,
-  DAY_SLOTS_CAP,
-  schoolDayCap,
+  type ClassLunchEntryDto,
   type ConfirmScheduleDto,
   type DayParamsDto,
   type DaySkeletonDto,
   type GridKind,
   type SchedulePreviewDto,
+  type SetClassLunchDto,
   type SetSkeletonDto,
+  type SetTeacherPreferenceDto,
   type SkeletonKind,
   type SkeletonPositionDto,
   type SetLoadDto,
   type SetPrioritiesDto,
   type SwapSlotsDto,
+  type TeacherPreferenceDto,
   type TemplateSlotDto,
   weeklyOfYear,
 } from '@edustore/shared';
@@ -28,6 +29,7 @@ import {
   STALE_ON_EVENTS,
   type LessonDetachedV1,
   type LessonMaterializedV1,
+  type PreferenceSetV1,
   type TemplateConfirmedV1,
 } from '../schoolium.contract';
 import { SchoolError } from '../schoolium.errors';
@@ -41,7 +43,6 @@ import {
   HORIZON_WEEKS,
   arithmeticRefusal,
   dayLength,
-  dayLengthBreakdown,
   generate,
   plannedLessons,
   type GenInput,
@@ -57,8 +58,9 @@ const lessonKey = (dow: number, slotNo: number, classId: string, groupNo: number
   `${dow}:${slotNo}:${classId}:${groupNo}:${subjectId}`;
 
 /**
- * Расписание: нагрузка, приоритеты, параметры дня, генерация, подтверждение и
- * жизненный цикл сетки (AR-73, AR-84, AR-85, AR-101, AR-103, AR-107).
+ * Расписание: нагрузка, приоритеты, параметры дня, скелет, обед по классам,
+ * предпочтения педагогов, генерация, подтверждение и жизненный цикл сетки
+ * (AR-73, AR-84, AR-85, AR-101, AR-103, AR-107, AR-199, AR-200, AR-206).
  *
  * Сетка — ПРЕДЛОЖЕНИЕ до нажатия «Подтвердить» (AR-18, красная линия 1):
  * автоприменение по таймеру или «раз всё зелёное» запрещено.
@@ -153,9 +155,10 @@ export class ScheduleService implements OnModuleInit {
 
   /**
    * Отказы экрана 2 вычисляются арифметикой СРАЗУ при вводе, до генерации
-   * (стенд P5). Все четыре — `LOAD_EXCEEDS_SANPIN`, `LOAD_EXCEEDS_GRID`,
-   * `GROUP_HOURS_UNEQUAL`, `TEACHER_OVERBOOKED` — считаются на том же наборе
-   * правил, что и в генераторе: одна арифметика, две точки применения.
+   * (стенд P5). Все три — `LOAD_EXCEEDS_GRID`, `GROUP_HOURS_UNEQUAL`,
+   * `TEACHER_OVERBOOKED` — считаются на том же наборе правил, что и в
+   * генераторе: одна арифметика, две точки применения. Потолка недельной
+   * нагрузки класса нет: `LOAD_EXCEEDS_SANPIN` выведен из употребления (AR-199).
    */
   async setLoad(dto: SetLoadDto, actor: SchoolActor) {
     await this.state.checkVersion('schedule', dto.version);
@@ -171,11 +174,12 @@ export class ScheduleService implements OnModuleInit {
     }
     const input = await this.buildInput(0);
     const refusal = arithmeticRefusal(input);
-    // Экрану 2 принадлежат четыре отказа из девяти. Отказы экрана 4
-    // (`DAY_EXCEEDS_SANPIN`, `DAY_TOO_LONG`) и отказы генерации
-    // (`SUBJECT_UNCOVERED`, `GROUPS_UNASSIGNED`) сюда не относятся — у каждого
-    // свой экран и своя кнопка возврата.
-    const notHere = ['DAY_EXCEEDS_SANPIN', 'DAY_TOO_LONG', 'SUBJECT_UNCOVERED', 'GROUPS_UNASSIGNED'];
+    // Экрану 2 принадлежат три отказа из семи. Отказы генерации
+    // (`SUBJECT_UNCOVERED`, `GROUPS_UNASSIGNED`) и рабочих дней педагога
+    // (`TEACHER_DAYS_SHORT` — «при генерации», §S-41.2, AR-206) сюда не
+    // относятся — у каждого свой экран и своя кнопка возврата; завуч рабочими
+    // днями педагога не распоряжается.
+    const notHere = ['SUBJECT_UNCOVERED', 'GROUPS_UNASSIGNED', 'TEACHER_DAYS_SHORT'];
     // «Слоты недели» = дни × уроков в день, а «уроков в день» собирается ЭКРАНОМ 4
     // (AR-103) — то есть ПОСЛЕ этого экрана в порядке мастера. Пока параметры дня
     // не заданы, второго множителя не существует, и два отказа из четырёх
@@ -225,25 +229,11 @@ export class ScheduleService implements OnModuleInit {
   async setDayParams(dto: DayParamsDto, actor: SchoolActor) {
     await this.state.checkVersion('schedule', dto.version);
     const ws = TenantContext.require();
-    const classes = await this.contingent.classes();
-    // AR-178 (школа полного дня): у школы со скелетом день судит сам скелет —
-    // его времена уже проверены при сохранении (`SKELETON_INVALID`), а параметры
-    // дня остаются фолбэком и потолками не судятся.
-    const hasSkeleton = (await this.prisma.skeletonPosition.count({ where: { workspaceId: ws } })) > 0;
+    // AR-199 (школа полного дня): длину дня и число уроков задаёт школа —
+    // `DAY_EXCEEDS_SANPIN` и `DAY_TOO_LONG` выведены из употребления и не
+    // бросаются ни со скелетом, ни без. Длина дня считается для справки
+    // `S-41.calc.dayLength` («Учебный день: N минут»).
     const minutes = dayLength(dto);
-    if (!hasSkeleton) {
-      // AR-114: число — верхняя граница школьного дня; отказ только когда оно
-      // выше потолка самой старшей параллели. День каждого класса генератор
-      // ограничит потолком его собственной параллели.
-      const cap = schoolDayCap(classes.map((c) => c.parallel));
-      if (classes.length > 0 && dto.slotsPerDay > cap) {
-        const senior = classes.reduce((a, c) => (DAY_SLOTS_CAP[c.parallel] > DAY_SLOTS_CAP[a.parallel] ? c : a), classes[0]);
-        throw new SchoolError('DAY_EXCEEDS_SANPIN', { classLabel: senior.label, slotsPerDay: dto.slotsPerDay, cap });
-      }
-      if (minutes > DAY_MINUTES_CAP) {
-        throw new SchoolError('DAY_TOO_LONG', { minutes, cap: DAY_MINUTES_CAP, breakdown: dayLengthBreakdown(dto) });
-      }
-    }
     await this.prisma.$transaction(async (tx) => {
       await tx.schoolState.upsert({
         where: { workspaceId: ws },
@@ -253,7 +243,7 @@ export class ScheduleService implements OnModuleInit {
       await this.state.bump(tx, 'schedule', { id: actor.userId, name: actor.name }, ws);
     });
     await this.staleSelf();
-    return { ok: true, dayLengthMinutes: minutes, cap: DAY_MINUTES_CAP };
+    return { ok: true, dayLengthMinutes: minutes };
   }
 
   // ─────────────── генерация (§11 строки 21, 34) ───────────────
@@ -314,6 +304,19 @@ export class ScheduleService implements OnModuleInit {
         }
       : null;
 
+    // Обед по классам (AR-200): позиция обеда = `lunchAfterLessonNo + 1`; класс
+    // без своего обеда в карту не попадает — обедает в позиции `meal` школы.
+    const classLunch: Record<string, number> = {};
+    for (const e of skel.classLunch) {
+      if (e.lunchAfterLessonNo !== null) classLunch[e.classId] = e.lunchAfterLessonNo + 1;
+    }
+
+    // Рабочие дни педагогов (AR-206): пустой список = любой день — в карту не идёт.
+    const teacherDays: Record<string, number[]> = {};
+    for (const p of await this.listPreferences()) {
+      if (p.workDays.length) teacherDays[p.teacherId] = p.workDays;
+    }
+
     return {
       classes,
       pairs,
@@ -330,6 +333,8 @@ export class ScheduleService implements OnModuleInit {
       classesWithUnassignedGroups: unassigned,
       uncovered,
       skeleton,
+      classLunch,
+      teacherDays,
     };
   }
 
@@ -501,6 +506,8 @@ export class ScheduleService implements OnModuleInit {
       },
       skeleton: skel.positions.length ? skel.positions : null,
       gridKind: skel.gridKind,
+      // AR-200: `S-40` вставляет строку «Обед» после урока N в дне класса
+      classLunch: skel.classLunch,
       slots,
       priorityWarnings,
       willDetach,
@@ -513,9 +520,10 @@ export class ScheduleService implements OnModuleInit {
   /** `GET /v1/schedule/skeleton` — скелет школы; пустой список = фолбэк на grid. */
   async skeleton(): Promise<DaySkeletonDto> {
     const ws = TenantContext.require();
-    const [rows, reg] = await Promise.all([
+    const [rows, reg, classLunch] = await Promise.all([
       this.prisma.skeletonPosition.findMany({ where: { workspaceId: ws }, orderBy: [{ dayNo: 'asc' }, { posNo: 'asc' }] }),
       this.state.register(),
+      this.classLunch(),
     ]);
     const st = await this.prisma.schoolState.findUnique({ where: { workspaceId: ws }, select: { gridKind: true } });
     return {
@@ -530,10 +538,135 @@ export class ScheduleService implements OnModuleInit {
         lessonNo: r.lessonNo,
         pairNo: r.pairNo,
       })),
-      // AR-200: обед по классам — читает schedule-api (A) из SchoolClass.lunchAfterLessonNo; пока пусто
-      classLunch: [],
+      classLunch,
       version: reg.scheduleVersion,
     };
+  }
+
+  // ─────────────── обед по классам (AR-200, §11 строка 49) ───────────────
+
+  /**
+   * Обед каждого класса школы: `null` — как у школы (позиция `meal` скелета).
+   * Колонка живёт на классе (`SchoolClass.lunchAfterLessonNo`), но задаётся и
+   * читается расписанием: это параметр укладки, а не контингента — контракт
+   * контингента её не отдаёт, поэтому чтение здесь прямое и только этой колонки.
+   */
+  private async classLunch(): Promise<ClassLunchEntryDto[]> {
+    const ws = TenantContext.require();
+    const rows = await this.prisma.schoolClass.findMany({
+      where: { workspaceId: ws },
+      select: { id: true, lunchAfterLessonNo: true },
+      orderBy: [{ parallel: 'asc' }, { letter: 'asc' }],
+    });
+    return rows.map((r) => ({ classId: r.id, lunchAfterLessonNo: r.lunchAfterLessonNo }));
+  }
+
+  /**
+   * Сколько урочных позиций в дне: по скелету — старший `lessonNo` урочной
+   * позиции, без скелета — «уроков в день» школы. 0 — день ещё не описан
+   * (ни скелета, ни параметров): верхнюю границу обеда судить нечем.
+   */
+  private async maxLessonPositions(): Promise<number> {
+    const ws = TenantContext.require();
+    const top = await this.prisma.skeletonPosition.aggregate({
+      where: { workspaceId: ws, kind: 'lesson' },
+      _max: { lessonNo: true },
+    });
+    if (top._max.lessonNo) return top._max.lessonNo;
+    return (await this.state.register()).slotsPerDay;
+  }
+
+  /**
+   * `PUT /v1/schedule/lunch` (AR-200): обед после урока N у класса — класс не
+   * имеет урока в позиции N+1. Диапазон 1 ≤ N ≤ (позиций − 1) — иначе
+   * `SKELETON_INVALID` с причиной словами: «класс 5А: обед после 9-го урока, а
+   * уроков в дне 7». Смена обеда меняет укладку — подтверждённая сетка → stale.
+   */
+  async setLunch(dto: SetClassLunchDto, actor: SchoolActor) {
+    await this.state.checkVersion('schedule', dto.version);
+    const ws = TenantContext.require();
+    const classes = await this.contingent.classes();
+    const max = await this.maxLessonPositions();
+    for (const e of dto.entries) {
+      const cls = classes.find((c) => c.id === e.classId);
+      if (!cls) throw new NotFoundException(`класс ${e.classId} не найден`);
+      const n = e.lunchAfterLessonNo;
+      if (n === null) continue;
+      if (!Number.isInteger(n) || n < 1) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `класс ${cls.label}: обед после ${n}-го урока — номер урока от 1` });
+      }
+      // Пока день не описан (ни скелета, ни «уроков в день»), верхней границы
+      // нет: поток `S-41.btn.generate` сохраняет обед ДО параметров дня.
+      if (max > 0 && n > max - 1) {
+        throw new SchoolError('SKELETON_INVALID', { reason: `класс ${cls.label}: обед после ${n}-го урока, а уроков в дне ${max}` });
+      }
+    }
+    await this.prisma.$transaction(async (tx) => {
+      for (const e of dto.entries) {
+        await tx.schoolClass.updateMany({
+          where: { id: e.classId, workspaceId: ws },
+          data: { lunchAfterLessonNo: e.lunchAfterLessonNo },
+        });
+      }
+      // Версия агрегата (AR-109): обед — параметр укладки, правится в `M-08`.
+      await this.state.bump(tx, 'schedule', { id: actor.userId, name: actor.name }, ws);
+    });
+    // Позиция обеда меняет, куда лягут уроки класса — сетка устарела (AR-85, AR-200).
+    await this.staleSelf();
+    return { ok: true, classLunch: await this.classLunch() };
+  }
+
+  // ─────────────── предпочтения педагога (AR-206, §11 строка 53) ───────────────
+
+  /** `GET /v1/schedule/preferences/me` — рабочие дни того, кто спрашивает; записи нет = любой день. */
+  async myPreference(actor: SchoolActor): Promise<TeacherPreferenceDto> {
+    const ws = TenantContext.require();
+    const row = await this.prisma.teacherPreference.findUnique({
+      where: { workspaceId_teacherId: { workspaceId: ws, teacherId: actor.userId } },
+    });
+    return { teacherId: actor.userId, workDays: row?.workDays ?? [], note: row?.note ?? null };
+  }
+
+  /**
+   * `PUT /v1/schedule/preferences/me` — педагог задаёт рабочие дни САМ, без
+   * утверждения (AR-206 уточняет AR-135). Версии агрегата нет: запись одна на
+   * педагога, правит её только он. Сохранение издаёт `schedule.preference.set.v1`
+   * (подписчик — само расписание: сетка → stale; аудит) и роняет подтверждённую
+   * сетку сразу, не дожидаясь доставки outbox — строитель видит честный сигнал.
+   */
+  async setMyPreference(dto: SetTeacherPreferenceDto, actor: SchoolActor): Promise<TeacherPreferenceDto> {
+    const ws = TenantContext.require();
+    const reg = await this.state.register();
+    if (!Array.isArray(dto.workDays) || dto.workDays.some((d) => !Number.isInteger(d) || d < 0 || d > 5)) {
+      throw new BadRequestException('Рабочие дни — номера дней недели от ПН (0) до СБ (5)');
+    }
+    const workDays = [...new Set(dto.workDays)].filter((d) => d < reg.days).sort((a, b) => a - b);
+    const note = dto.note?.trim() ? dto.note.trim().slice(0, 500) : null;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.teacherPreference.upsert({
+        where: { workspaceId_teacherId: { workspaceId: ws, teacherId: actor.userId } },
+        update: { workDays, note },
+        create: { workspaceId: ws, teacherId: actor.userId, workDays, note },
+      });
+      await this.outbox.enqueue(
+        tx,
+        newEvent<PreferenceSetV1>({
+          type: SCHOOL_EVENTS.preferenceSet,
+          workspaceId: ws,
+          actor: actor.userId,
+          payload: { teacherId: actor.userId, workDays },
+        }),
+      );
+    });
+    await this.staleSelf();
+    return { teacherId: actor.userId, workDays, note };
+  }
+
+  /** `GET /v1/schedule/preferences` — строителю: строка «дни: ПН, ВТ, ЧТ» в `S-41.load.summary`. */
+  async listPreferences(): Promise<TeacherPreferenceDto[]> {
+    const ws = TenantContext.require();
+    const rows = await this.prisma.teacherPreference.findMany({ where: { workspaceId: ws }, orderBy: { teacherId: 'asc' } });
+    return rows.map((r) => ({ teacherId: r.teacherId, workDays: r.workDays, note: r.note }));
   }
 
   /**
@@ -644,6 +777,11 @@ export class ScheduleService implements OnModuleInit {
    *   нет, отметки есть     → ОТВЯЗЫВАЕТСЯ (`detachedAt` + `schedule.lesson.detached.v1`),
    *                           остаётся колонкой журнала с пометкой «вне расписания».
    * Отметка не удаляется пересборкой расписания никогда (красная линия 10).
+   *
+   * Замены (AR-207): ключ урока не содержит педагога, поэтому урок с записью
+   * `LessonSubstitution`, найденный в новом шаблоне, остаётся как есть — с
+   * ТЕКУЩИМ `teacherId` (заместителем); урок без отметок, исчезающий вместе со
+   * старым шаблоном, забирает свою запись замены с собой.
    */
   async confirm(dto: ConfirmScheduleDto, actor: SchoolActor) {
     await this.state.checkVersion('schedule', dto.version);
@@ -673,6 +811,8 @@ export class ScheduleService implements OnModuleInit {
             }),
           );
         } else {
+          // ссылка по значению (AR-207): запись замены уходит вместе с уроком
+          await tx.lessonSubstitution.deleteMany({ where: { workspaceId: ws, lessonId: l.id } });
           await tx.schoolLesson.delete({ where: { id: l.id } });
         }
       }

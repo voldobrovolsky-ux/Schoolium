@@ -1,13 +1,4 @@
-import {
-  ARITHMETIC_REFUSALS,
-  DAY_MINUTES_CAP,
-  DAY_SLOTS_CAP,
-  GENERATOR_BUDGET,
-  WEEK_HOURS_CAP,
-  classDayCap,
-  schoolDayCap,
-  type GeneratorRefusal,
-} from '@edustore/shared';
+import { ARITHMETIC_REFUSALS, GENERATOR_BUDGET, type GeneratorRefusal } from '@edustore/shared';
 
 /**
  * Генератор шаблона недели (AR-73, AR-84). Чистая функция: ни БД, ни сети —
@@ -19,8 +10,10 @@ import {
  *    предмета в одном слоте, каждая со своим педагогом (AR-75, стенд P5).
  *    Планирование групп независимыми единицами не сходится в принципе и
  *    оставляет полуокно: одна группа учится, вторая свободна в середине дня.
- * 2. **Восемь арифметических отказов считаются ДО перебора** (AR-103): иначе
- *    модератор ждёт перебор ради неинформативного `NO_SOLUTION`.
+ * 2. **Шесть арифметических отказов считаются ДО перебора** (AR-107, AR-199,
+ *    AR-206): иначе модератор ждёт перебор ради неинформативного `NO_SOLUTION`.
+ *    Нормативных потолков (СанПиН, длина дня) генератор не считает — школа
+ *    полного дня задаёт день сама (AR-199).
  * 3. **У перебора есть названный бюджет** — 20 секунд либо 200 000 попыток
  *    размещения, что раньше (AR-107). Исчерпание отвечает тем же `NO_SOLUTION`
  *    и тем же маршрутом восстановления: отдельный код завёл бы человека в
@@ -80,6 +73,17 @@ export interface GenInput {
   uncovered: { subjectId: string; subjectName: string; classId: string; groups: number[] }[];
   /** Скелет дня; null/отсутствует — прежняя укладка по параметрам дня. */
   skeleton?: GenSkeleton | null;
+  /**
+   * Обед по классам (AR-200): `classId → lessonNo` урочной позиции, которую
+   * занимает обед класса (= `lunchAfterLessonNo + 1`). Класса нет в карте —
+   * обед как у школы (позиция `meal` скелета, генератору не видна).
+   */
+  classLunch?: Record<string, number>;
+  /**
+   * Рабочие дни педагогов (AR-206): `teacherId → dayNo[]` (0 = ПН). Педагога
+   * нет в карте либо список пуст — любой день.
+   */
+  teacherDays?: Record<string, number[]>;
   /** Бюджет перебора; по умолчанию — значения AR-107. */
   budget?: { seconds: number; attempts: number };
 }
@@ -97,7 +101,7 @@ export type GenResult =
   | { ok: true; slots: GenSlot[]; attempts: number; durationMs: number; priorityWarnings: string[] }
   | { ok: false; code: GeneratorRefusal; details: Record<string, unknown>; attempts: number; durationMs: number };
 
-/** Длина учебного дня: `слоты × урок + перемены + большая перемена` (AR-103). */
+/** Длина учебного дня: `слоты × урок + перемены + большая перемена` — справка `S-41.calc.dayLength` (AR-103, AR-199). */
 export function dayLength(p: GenDayParams): number {
   const breaks = Math.max(0, p.slotsPerDay - 1);
   const big = p.bigBreakAfter > 0 && p.bigBreakAfter < p.slotsPerDay ? 1 : 0;
@@ -109,6 +113,13 @@ export function dayLengthBreakdown(p: GenDayParams): string {
   const big = p.bigBreakAfter > 0 && p.bigBreakAfter < p.slotsPerDay ? 1 : 0;
   return `${p.slotsPerDay} уроков × ${p.lessonMin} + перемены ${breaks - big} × ${p.breakMin} + большая ${big ? p.bigBreakMin : 0}`;
 }
+
+/** Короткие имена дней для текстов отказов (`TEACHER_DAYS_SHORT`, §9). */
+export const DAY_SHORT = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'] as const;
+
+/** «ПН, СР, ПТ» — рабочие дни педагога словами, в порядке недели. */
+export const dayNames = (days: number[]): string =>
+  [...new Set(days)].sort((a, b) => a - b).map((d) => DAY_SHORT[d] ?? String(d)).join(', ');
 
 /** Детерминированный ГПСЧ: при фиксированном зерне сетка одна и та же (AR-97, `GEN_SEED`). */
 function lcg(seed: number): () => number {
@@ -149,19 +160,45 @@ export function classWeekHours(classId: string, pairs: GenPair[]): number {
   return classHours + groupHours;
 }
 
+type Position = { lessonNo: number; pairNo: number | null };
+
 /**
- * Восемь арифметических отказов ДО перебора. Порядок — из `30-spec.md`; первый
+ * Урочные позиции дня ШКОЛЫ: по скелету — позиции этого дня в порядке `posNo`
+ * (дня нет в скелете — пустой список: занятий туда генератор не кладёт); без
+ * скелета — `1..slotsPerDay` (AR-199: одно число на школу, потолков параллели нет).
+ */
+function schoolDayPositions(input: GenInput, dayNo: number): Position[] {
+  if (input.skeleton) return input.skeleton.days.find((d) => d.dayNo === dayNo)?.lessons ?? [];
+  return Array.from({ length: Math.max(0, input.params.slotsPerDay) }, (_, i) => ({ lessonNo: i + 1, pairNo: null }));
+}
+
+/**
+ * Урочные позиции дня КЛАССА (AR-200): позиции школы без позиции обеда класса.
+ * Именно этот список перебирается «подряд с первого» — поэтому обед не окно:
+ * урок после обеда стоит в списке сразу за уроком до него.
+ */
+export function dayLessons(input: GenInput, dayNo: number, classId: string): Position[] {
+  const all = schoolDayPositions(input, dayNo);
+  const lunch = input.classLunch?.[classId];
+  return lunch === undefined ? all : all.filter((p) => p.lessonNo !== lunch);
+}
+
+/** Педагог работает в этот день (AR-206): нет записи либо пустой список — любой день. */
+function worksOn(input: GenInput, teacherId: string, dayNo: number): boolean {
+  const days = input.teacherDays?.[teacherId];
+  return !days || days.length === 0 || days.includes(dayNo);
+}
+
+/**
+ * Шесть арифметических отказов ДО перебора. Порядок — из `30-spec.md`; первый
  * сработавший и есть ответ: человеку показывают одну причину с цифрами, а не
  * список гипотез.
  */
 export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; details: Record<string, unknown> } | null {
   const { classes, pairs, params } = input;
-  // Слоты дня: по скелету — число урочных позиций ЭТОГО дня (день без позиций
-  // не вмещает ничего); без скелета — школьное число с экрана параметров.
-  const daySlots = (d: number): number => {
-    const lessons = dayLessons(input.skeleton, d);
-    return lessons ? lessons.length : params.slotsPerDay;
-  };
+  // Слоты дня школы: по скелету — число урочных позиций ЭТОГО дня (день без
+  // позиций не вмещает ничего); без скелета — школьное число с экрана параметров.
+  const daySlots = (d: number): number => schoolDayPositions(input, d).length;
   const weekDays = Array.from({ length: params.days }, (_, d) => d);
   const grid = weekDays.reduce((a, d) => a + daySlots(d), 0);
 
@@ -170,15 +207,14 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
 
     // AR-199 (пакет 04.09, школа полного дня): недельные и дневные потолки
     // СанПиН не судят ни школу со скелетом, ни фолбэк — `LOAD_EXCEEDS_SANPIN`,
-    // `DAY_EXCEEDS_SANPIN` и `DAY_TOO_LONG` выведены из употребления.
-    // «уроков в день» — второй множитель «слотов недели» (AR-103); без скелета
-    // считается ПОКЛАССНО: день класса ограничен потолком ЕГО параллели
-    // (AR-114), а не школьным числом — иначе первоклассник тянул бы вниз всю
-    // школу. Со скелетом вместимость недели — сумма его урочных позиций (AR-178).
-    const classGrid = input.skeleton
-      ? grid
-      : weekDays.reduce((a, d) => a + Math.min(classDayCap(c.parallel, params.slotsPerDay), daySlots(d)), 0);
+    // `DAY_EXCEEDS_SANPIN` и `DAY_TOO_LONG` выведены из употребления; потолка
+    // параллели (AR-114) нет: «уроков в день» — одно число на школу.
+    // «уроков в день» — второй множитель «слотов недели» (AR-103); со скелетом
+    // вместимость недели — сумма его урочных позиций (AR-178). У класса со своим
+    // обедом (AR-200) позиция обеда из вместимости каждого дня вычтена.
+    const classGrid = weekDays.reduce((a, d) => a + dayLessons(input, d, c.id).length, 0);
     if (total > classGrid) {
+      const lunch = input.classLunch?.[c.id];
       return {
         code: 'LOAD_EXCEEDS_GRID',
         // Текст §9 объясняет, ОТКУДА взялось число слотов. Без разбора модератор
@@ -188,8 +224,10 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
           total,
           grid: classGrid,
           breakdown: input.skeleton
-            ? `урочные позиции скелета за ${params.days} дней`
-            : `${classDayCap(c.parallel, params.slotsPerDay)} уроков в день × ${params.days} дней — потолок параллели`,
+            ? `урочные позиции скелета за ${params.days} дней${lunch !== undefined ? ` без позиции обеда ${lunch}` : ''}`
+            : lunch !== undefined
+              ? `${params.slotsPerDay} уроков в день × ${params.days} дней минус позиция обеда ${lunch} в каждом дне`
+              : `${params.slotsPerDay} уроков в день × ${params.days} дней`,
         },
       };
     }
@@ -242,6 +280,19 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
     }
   }
 
+  // AR-206: рабочие дни педагога — жёсткое ограничение, и у него есть своя
+  // арифметика (лемма непустоты, AR-132): часов больше, чем урочных позиций в
+  // его рабочие дни — перебор не нужен, ответ известен до него, с адресом и
+  // действием («расширьте дни или снимите часы»).
+  for (const [teacherId, t] of byTeacher) {
+    const days = (input.teacherDays?.[teacherId] ?? []).filter((d) => d >= 0 && d < params.days);
+    if (!days.length) continue; // пусто = любой день — судит TEACHER_OVERBOOKED выше
+    const slots = [...new Set(days)].reduce((a, d) => a + daySlots(d), 0);
+    if (t.hours > slots) {
+      return { code: 'TEACHER_DAYS_SHORT', details: { teacher: t.name, hours: t.hours, slots, days: dayNames(days) } };
+    }
+  }
+
   // AR-199: длину дня и число уроков в день задаёт школа; нормативных
   // потолков (AR-103, AR-114) генератор больше не считает.
   return null;
@@ -286,26 +337,21 @@ function buildUnits(input: GenInput): Unit[] {
 }
 
 /**
- * Урочные позиции дня по скелету, в порядке `posNo`. Дня нет в скелете —
- * пустой список: занятий туда генератор не кладёт.
- */
-function dayLessons(skeleton: GenSkeleton | null | undefined, dayNo: number): { lessonNo: number; pairNo: number | null }[] | null {
-  if (!skeleton) return null;
-  return skeleton.days.find((d) => d.dayNo === dayNo)?.lessons ?? [];
-}
-
-/**
  * Перебор. Ограничения (все жёсткие, кроме приоритетов):
  *   1. нагрузка выполняется полностью — каждой паре ровно её часы;
  *   2. педагог не занимает два слота одновременно;
  *   3. класс/группа не занимает два слота одновременно;
  *   4. полуокно запрещено — спаренная единица ставится целиком;
- *   5. без окон у класса: уроки дня идут подряд с первого слота;
+ *   5. без окон у класса: уроки дня идут подряд с первого слота; позиция
+ *      обеда класса (AR-200) окном не считается — её в списке позиций нет;
  *   6. приоритетные предметы — в первой половине дня (МЯГКОЕ: помечается);
- *   7. дневной максимум класса — проверен арифметикой до перебора;
+ *   7. день вмещает ровно свои урочные позиции: по скелету — его позиции
+ *      (AR-178), без скелета — «уроков в день» школы (AR-199), минус обед класса;
  *   8. при скелете `paired` (AR-171): пара предмета (span 2) занимает обе
  *      половины ОДНОГО `pairNo` смежно; слоты недели = урочные позиции
- *      скелета, номер слота = его `lessonNo`.
+ *      скелета, номер слота = его `lessonNo`;
+ *   9. рабочие дни педагога (AR-206): единица не ставится в день, когда хоть
+ *      один её педагог не работает — группы атомарны (AR-75), день общий.
  */
 export function generate(input: GenInput): GenResult {
   const started = Date.now();
@@ -317,8 +363,6 @@ export function generate(input: GenInput): GenResult {
 
   const units = buildUnits(input);
   const { days, slotsPerDay } = input.params;
-  // Дневной потолок КАЖДОГО класса: min(школьное число, потолок его параллели).
-  const classCaps = new Map(input.classes.map((c) => [c.id, classDayCap(c.parallel, slotsPerDay)]));
 
   for (let restart = 0; ; restart += 1) {
     if (Date.now() - started > budget.seconds * 1000 || attempts >= budget.attempts) {
@@ -333,27 +377,26 @@ export function generate(input: GenInput): GenResult {
       .map((x) => units[x.i]);
 
     const busyTeacher = new Set<string>(); // `${day}:${lessonNo}:${teacherId}`
-    const dayLen = new Map<string, number>(); // `${classId}:${day}` → занято слотов подряд
+    const dayLen = new Map<string, number>(); // `${classId}:${day}` → занято позиций подряд
     const placed: GenSlot[] = [];
     let failed = false;
 
     for (const u of order) {
-      const cap = classCaps.get(u.classId) ?? slotsPerDay;
       const options: [number, number][] = [];
       for (let d = 0; d < days; d += 1) {
+        // AR-206: день отбрасывается, если хоть один педагог единицы в него не работает
+        if (u.parts.some((p) => !worksOn(input, p.teacherId, d))) continue;
         const s = dayLen.get(`${u.classId}:${d}`) ?? 0; // без окон: следующий подряд
-        const lessons = dayLessons(input.skeleton, d);
-        // со скелетом день вмещает ровно его урочные позиции — полный день сам
-        // и есть решение школы (AR-178); без скелета — потолок ЕГО параллели (AR-114)
-        const dCap = lessons ? lessons.length : cap;
-        if (s + u.span > dCap) continue;
+        // позиции дня КЛАССА: скелет либо `slotsPerDay`, без позиции обеда (AR-200)
+        const lessons = dayLessons(input, d, u.classId);
+        if (s + u.span > lessons.length) continue;
         // пара — на обе половины ОДНОГО pairNo, смежно и без перемены (AR-171)
-        if (u.span === 2 && lessons) {
+        if (u.span === 2) {
           const a = lessons[s];
           const b = lessons[s + 1];
-          if (!a || !b || a.pairNo == null || a.pairNo !== b.pairNo) continue;
+          if (a.pairNo == null || a.pairNo !== b.pairNo) continue;
         }
-        const nos = lessons ? lessons.slice(s, s + u.span).map((l) => l.lessonNo) : [s + 1];
+        const nos = lessons.slice(s, s + u.span).map((l) => l.lessonNo);
         if (u.parts.some((p) => nos.some((no) => busyTeacher.has(`${d}:${no}:${p.teacherId}`)))) continue;
         options.push([d, s]);
       }
@@ -363,9 +406,9 @@ export function generate(input: GenInput): GenResult {
       }
       if (!options.length) { failed = true; break; }
       const [d, s] = options[Math.floor(rand() * options.length)];
-      const lessons = dayLessons(input.skeleton, d);
+      const lessons = dayLessons(input, d, u.classId);
       for (let k = 0; k < u.span; k += 1) {
-        const no = lessons ? lessons[s + k].lessonNo : s + 1 + k;
+        const no = lessons[s + k].lessonNo;
         for (const p of u.parts) {
           busyTeacher.add(`${d}:${no}:${p.teacherId}`);
           placed.push({ dayNo: d, slotNo: no, classId: u.classId, groupNo: p.groupNo, subjectId: u.subjectId, teacherId: p.teacherId });

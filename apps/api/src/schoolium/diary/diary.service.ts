@@ -135,6 +135,8 @@ export class DiaryService {
       classLabel: s.class.label,
       monday: mon,
       grid: tpl ?? null,
+      // AR-200: обед класса ученика — строка «Обед» после урока N вместо общей позиции `meal`
+      lunchAfterLessonNo: s.class.lunchAfterLessonNo,
       skeleton: skeletonRows.length
         ? skeletonRows.map((r) => ({
             dayNo: r.dayNo,
