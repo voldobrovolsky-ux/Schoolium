@@ -131,9 +131,19 @@
 /* ─── аудит ─── */
 .sch-adm-audit tbody tr { cursor: default; }
 
-/* ─── политики доступа (AR-188) ─── */
-.sch-adm-limits { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: var(--sp-8) var(--sp-16); align-items: center; }
+/* ─── политики доступа (AR-188, AR-205) ───
+   Сетка в три колонки: роль · сессий на человека · носителей роли в школе.
+   Заголовки колонок — первая строка сетки; на телефоне они скрыты, а смысл
+   селекта несёт подпись `.sch-adm-limits-cap` над ним. */
+.sch-adm-limits { display: grid; grid-template-columns: minmax(0, 1fr) 180px 240px; gap: var(--sp-8) var(--sp-16); align-items: center; }
 .sch-adm-limits label { font-size: var(--fs-sm); }
+.sch-adm-limits-head { font-size: var(--fs-xs); color: var(--c-ink-secondary); align-self: end; }
+.sch-adm-limits-cap { display: none; font-size: var(--fs-xs); color: var(--c-ink-secondary); }
+.sch-adm-limit-cell { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+/* Носители роли: селект и «занято N» в одну строку; у ролей без лимита — прочерк словами. */
+.sch-adm-rolelimit { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.sch-adm-rolelimit .sch-input { width: 150px; flex: 0 0 auto; }
+.sch-adm-rolelimit-taken { font-size: var(--fs-sm); color: var(--c-ink-secondary); white-space: nowrap; }
 .sch-adm-saved { color: var(--c-state-success); font-size: var(--fs-sm); }
 /* Инцидент-режим — один акцент раздела: левая кромка опасности, не заливка. */
 .sch-adm-incident { border-left: 4px solid var(--c-state-danger); }
@@ -151,6 +161,12 @@
   .sch-adm-item { flex-wrap: wrap; }
   .sch-adm-item-actions { width: 100%; }
   .sch-adm-item-actions .sch-btn { flex: 1 1 auto; }
+  /* Лимиты — одна колонка (75-adaptive §6 S-62): роль, под ней селект сессий,
+     под ним селект носителей; заголовки колонок скрыты, подписи над селектами видны. */
   .sch-adm-limits { grid-template-columns: minmax(0, 1fr); }
   .sch-adm-limits label { margin-top: var(--sp-8); }
+  .sch-adm-limits-head { display: none; }
+  .sch-adm-limits-cap { display: block; }
+  .sch-adm-rolelimit { flex-wrap: wrap; }
+  .sch-adm-rolelimit .sch-input { width: 100%; flex: 1 1 auto; }
 }

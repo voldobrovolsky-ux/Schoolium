@@ -1,6 +1,6 @@
 /**
- * G-43 (AR-89, AR-90, AR-78, AR-102, AR-182) — **обратимость операций и каскад
- * удаления.**
+ * G-43 (AR-89, AR-90, AR-78, AR-102, AR-182, AR-205) — **обратимость операций и
+ * каскад удаления.**
  *
  *   · у КАЖДОЙ операции реестра есть обратная либо записанная причина её
  *     отсутствия; необратимых пять, и каждая необратима по построению;
@@ -10,7 +10,11 @@
  *     отметки ОСТАЛИСЬ — `postedBy` историческая ссылка, а не живая связь;
  *   · последний активный модератор не удаляется и не деактивируется
  *     (`LAST_MODERATOR`), последняя роль не снимается (`LAST_ROLE`);
- *   · роль модератора выдаётся и снимается той же кнопкой (AR-102).
+ *   · роль модератора выдаётся и снимается той же кнопкой (AR-102);
+ *   · лимит носителей роли (AR-205): по умолчанию завуч один — второй отклонён
+ *     `ROLE_LIMIT_REACHED` и в `addCard`, и в `addRole`; лимит 2 из политики
+ *     пускает второго и отклоняет третьего; реактивация при занятом лимите
+ *     отклонена; пустой слот после удаления — тоже носитель.
  *
  * Запуск: npm --workspace apps/api run reversal:check
  */
@@ -21,6 +25,7 @@ import { JournalService } from '../src/schoolium/journal/journal.service';
 import { StaffService } from '../src/schoolium/staff/staff.service';
 import { SubjectsService } from '../src/schoolium/subjects/subjects.service';
 import { SchoolStateService } from '../src/schoolium/school-state.service';
+import { AdminCabinetService } from '../src/schoolium/cabinets/admin-cabinet.service';
 import { bench, check, ensurePastLesson, inSchool, makeStaff, readySchool, refuses, report } from './schoolium/harness';
 
 /** Реестр обратимости — эталон `reversals` в `model/states.mjs` (свойство P12). */
@@ -40,9 +45,10 @@ async function main(): Promise<void> {
   const subjects = b.get(SubjectsService);
   const journal = b.get(JournalService);
   const state = b.get(SchoolStateService);
+  const admin = b.get(AdminCabinetService);
   const drain = () => TenantContext.runAsSystem(() => b.outbox.drain());
 
-  console.log('G-43 · обратимость операций и каскад удаления (AR-89, AR-90)\n');
+  console.log('G-43 · обратимость операций и каскад удаления (AR-89, AR-90, AR-205)\n');
 
   // ─── реестр обратимости: пустых пар нет ───
   const reg = reversals();
@@ -125,42 +131,64 @@ async function main(): Promise<void> {
     await refuses(() => staff.removeRole(solo.cardId, 'teacher', s.moderator), 'LAST_ROLE',
       'последняя роль сотрудника не снимается — для закрытия доступа есть деактивация');
 
-    // ─── синглтоны: замы ЗАВОДЯТСЯ, пока роль свободна (AR-182) ───
+    // ─── лимит носителей роли (AR-205): по умолчанию завуч один — замы ЗАВОДЯТСЯ, пока лимит свободен (AR-182) ───
     const dep = await staff.addCard({ role: 'deputy_academic', lastName: 'Волкова', firstName: 'Ирина' });
     check(dep.card.section === 2 && dep.card.roles.includes('deputy_academic'),
       'завуч (УР) заведён кнопкой секции 2 — bootstrap слотов замов не создаёт (AR-182)');
     const dup = await staff
       .addCard({ role: 'deputy_academic', lastName: 'Дублёва', firstName: 'Анна' })
-      .then(() => null, (e: Error) => e);
-    check(dup !== null && /единственном экземпляре/.test(dup.message),
-      'второй завуч (УР) отклонён сервером — единственность держит addCard, а не отсутствие кнопки');
-    const dupRole = await staff
-      .addRole(s.teacher.cardId, 'deputy_academic', s.moderator)
-      .then(() => null, (e: Error) => e);
-    check(dupRole !== null && /единственном экземпляре/.test(dupRole.message),
-      'выдача занятой роли-синглтона через M-07 отклонена — единственность не декларация (П-4)');
+      .then(() => null, (e: { response?: { code?: string; message?: string } }) => e.response);
+    check(dup?.code === 'ROLE_LIMIT_REACHED' && dup?.message === 'Заместитель по учебной работе: в школе уже 1 из 1 носителей роли — лимит задаёт администратор в «Политиках»',
+      `второй завуч (УР) отклонён кодом ${dup?.code}: «${dup?.message}» — лимит держит addCard, роль словами и цифрами (AR-205)`);
+    await refuses(() => staff.addRole(s.teacher.cardId, 'deputy_academic', s.moderator), 'ROLE_LIMIT_REACHED',
+      'выдача роли с исчерпанным лимитом через M-07 отклонена — лимит не декларация (П-4)');
     const depUp = await staff.addCard({ role: 'deputy_upbringing', lastName: 'Соловьёва', firstName: 'Вера' });
     check(depUp.card.roles.includes('deputy_upbringing'),
-      'зам (ВР) — отдельный синглтон: занятость завуча (УР) его не блокирует');
+      'зам (ВР) — отдельный лимит: занятость завуча (УР) его не блокирует');
+
+    // ─── лимит задаёт администратор в «Политиках»: 2 — второй проходит, третий отклонён ───
+    const policy = await admin.setPolicy({ sessionLimits: {}, roleLimits: { deputy_academic: 2 } }, s.moderator);
+    check(policy.roleLimits.deputy_academic === 2 && policy.roleHolders.deputy_academic === 1,
+      `политика: лимит завучей ${policy.roleLimits.deputy_academic}, занято ${policy.roleHolders.deputy_academic} (AR-205)`);
+    const second = await staff.addCard({ role: 'deputy_academic', lastName: 'Вторая', firstName: 'Ольга' });
+    check(second.card.roles.includes('deputy_academic'), 'при лимите 2 второй завуч заводится');
+    check((await admin.policy()).roleHolders.deputy_academic === 2, 'носителей стало 2 — цифра «занято» та же, что в проверке');
+    const third = await staff
+      .addCard({ role: 'deputy_academic', lastName: 'Третья', firstName: 'Анна' })
+      .then(() => null, (e: { response?: { code?: string; details?: { count?: number; limit?: number } } }) => e.response);
+    check(third?.code === 'ROLE_LIMIT_REACHED' && third?.details?.count === 2 && third?.details?.limit === 2,
+      `третий завуч при лимите 2 отклонён: ${third?.details?.count} из ${third?.details?.limit}`);
+    // реактивация при занятом лимите: место второго занял третий — второй не воскресает
+    await staff.deactivate(second.card.id, s.moderator);
+    await drain();
+    const thirdOk = await staff.addCard({ role: 'deputy_academic', lastName: 'Третья', firstName: 'Анна' });
+    check(thirdOk.card.roles.includes('deputy_academic'), 'деактивация освобождает место в лимите — третий заведён');
+    await refuses(() => staff.reactivate(second.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
+      'реактивация при занятом лимите 2 отклонена — «деактивировать → завести → реактивировать» носителей сверх лимита не даёт');
+    // политика без ключа — дефолт 1: с одним живым завучем реактивация второго отклонена и при дефолте
+    await staff.deactivate(thirdOk.card.id, s.moderator);
+    await drain();
+    const reset = await admin.setPolicy({ sessionLimits: {}, roleLimits: {} }, s.moderator);
+    check(reset.roleLimits.deputy_academic === undefined && reset.roleHolders.deputy_academic === 1,
+      'лимит снят с политики — действует дефолт 1 (DEFAULT_ROLE_LIMITS), занято 1');
+    await refuses(() => staff.reactivate(second.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
+      'при дефолте 1 и живом завуче реактивация второго отклонена');
+
     await staff.remove(dep.card.id, s.moderator);
     await drain();
-    const slotDup = await staff
-      .addCard({ role: 'deputy_academic', lastName: 'Повторова', firstName: 'Дарья' })
-      .then(() => null, (e: Error) => e);
-    check(slotDup !== null && /единственном экземпляре/.test(slotDup.message),
+    await refuses(() => staff.addCard({ role: 'deputy_academic', lastName: 'Повторова', firstName: 'Дарья' }), 'ROLE_LIMIT_REACHED',
       'после удаления носителя карточка остаётся ПУСТЫМ СЛОТОМ — роль занята слотом, вторая карточка не заводится');
     const refill = await staff.fillCard(dep.card.id, { lastName: 'Соловьёва', firstName: 'Ирина' });
     check(refill.card.roles.includes('deputy_academic'),
-      'пустой слот зама заполняется заново через карточку (fillCard) — канал AR-60 живёт');
+      'пустой слот зама заполняется заново через карточку (fillCard) — канал AR-60 живёт, лимит слот не проверяет');
 
-    // ─── обратный переход: реактивация тоже перепроверяет синглтон (AR-182) ───
+    // ─── обратный переход: реактивация тоже перепроверяет лимит (AR-205) ───
     await staff.deactivate(dep.card.id, s.moderator);
     await drain();
     const depB = await staff.addCard({ role: 'deputy_academic', lastName: 'Пятницкая', firstName: 'Анна' });
     check(depB.card.roles.includes('deputy_academic'),
-      'деактивация освобождает синглтон — новый завуч заводится (AR-89, AR-182)');
-    const resurrect = await staff.reactivate(dep.card.id, s.moderator).then(() => null, (e: Error) => e);
-    check(resurrect !== null && /единственном экземпляре/.test(resurrect.message),
+      'деактивация освобождает лимит — новый завуч заводится (AR-89, AR-205)');
+    await refuses(() => staff.reactivate(dep.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
       'реактивация при занятой роли отклонена — путь «деактивировать → завести → реактивировать» двух завучей не даёт');
 
     // ─── сотрудник без истории удаляется ───

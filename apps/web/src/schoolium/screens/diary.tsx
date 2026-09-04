@@ -13,6 +13,8 @@ import { useIsMobile } from "../hooks";
 import { Icon } from "../icons";
 import { Badge, Button, EmptyState, ErrorState, Skeletons } from "../ui";
 import { navigate } from "../router";
+// Маркеры отмены/замены строки урока (AR-207) — общий вид с `S-40`, стили там же.
+import "./schedule.css";
 import {
   addDays,
   buildDayRows,
@@ -180,13 +182,33 @@ function WeekView({
     const map = new Map<number, DayCell[]>();
     for (const l of data.days.find((d) => d.date === date)?.lessons ?? []) {
       const cells = map.get(l.slotNo) ?? [];
-      cells.push({ key: l.lessonId, title: l.subjectName, sub: l.topic, mark: l.mark });
+      cells.push({
+        key: l.lessonId,
+        title: l.subjectName,
+        sub: l.topic,
+        mark: l.mark,
+        lessonId: l.lessonId,
+        // AR-207: ученику и родителю — только факт: «Урок отменён» / «Замена:
+        // Фамилия И.»; причина отмены сюда не приходит и не показывается.
+        status: l.cancelled
+          ? { kind: "cancelled", label: "Урок отменён" }
+          : l.substituteName
+            ? { kind: "substituted", label: `Замена: ${l.substituteName}` }
+            : null,
+      });
       map.set(l.slotNo, cells);
     }
     return map;
   };
   const rowsForDate = (date: string) =>
-    buildDayRows({ skeleton: data.skeleton, grid: data.grid, dayNo: dayNoOf(date), cellsByLesson: cellsForDate(date) });
+    buildDayRows({
+      skeleton: data.skeleton,
+      grid: data.grid,
+      dayNo: dayNoOf(date),
+      cellsByLesson: cellsForDate(date),
+      // обед класса ученика (AR-200): строка «Обед» после урока N вместо общего meal
+      lunchAfterLessonNo: data.lunchAfterLessonNo ?? null,
+    });
   const rowsFor = (dayNo: number) => rowsForDate(addDays(data.monday, dayNo));
 
   // Лента пикера — учебные дни всех недель журнала; пустоту знаем только у

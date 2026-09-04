@@ -148,6 +148,7 @@ export class JournalService {
       topic: c.lessonTopic?.topic ?? null,
       future: isoDay(c.date) > t,
       detached: c.detachedAt !== null,
+      cancelled: c.cancelledAt !== null,
     }));
 
     // ── отметки: видимые за неделю, средний и четвертная — за четверть ──
@@ -206,6 +207,9 @@ export class JournalService {
     // который ещё не прошёл. Один код на две причины оставил бы человека без
     // понимания, что произошло.
     if (col.detachedAt) throw new SchoolError('LESSON_DETACHED');
+    // Отменённый без замены урок (AR-207) закрыт ДО гейта даты: он не «ещё не
+    // прошёл» и не «вне расписания» — его не будет, и это третья причина.
+    if (col.cancelledAt) throw new SchoolError('LESSON_CANCELLED');
     if (isoDay(col.date) > today()) throw new SchoolError('LESSON_NOT_HELD');
     // Минутный гейт (AR-172, решение владельца 2026-08-30 №4): урок сегодняшнего
     // дня открывается со времени начала его позиции по скелету в поясе школы.

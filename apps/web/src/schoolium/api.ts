@@ -17,12 +17,15 @@ import type {
   AdminSessionDto,
   DeputyCabinetDto,
   IncidentResultDto,
+  IssueLoginLinkDto,
   LoginLinkDto,
   SchoolAssetDto,
   SchoolAuditEntryDto,
   SchoolNetworkDto,
   SetAccessPolicyDto,
+  SetStaffPasswordDto,
   StaffActivityDto,
+  UpdateStaffAccountDto,
   UpsertAssetDto,
   UpsertNetworkDto,
   CreateGuardianDto,
@@ -63,6 +66,17 @@ import type {
   TermDto,
   TokenStatus,
   UpsertStudentDto,
+} from "@edustore/shared";
+// Пакет 04.09, расписание: обед по классам (AR-200), предпочтения педагога
+// (AR-206), отмена урока и замена (AR-207).
+import type {
+  CancelLessonDto,
+  DatedLessonDto,
+  SetClassLunchDto,
+  SetSubstituteDto,
+  SetTeacherPreferenceDto,
+  SubstitutionResultDto,
+  TeacherPreferenceDto,
 } from "@edustore/shared";
 
 /** Отказ с кодом и текстом из реестра §9 — то, что экран показывает дословно. */
@@ -154,6 +168,11 @@ export const api = {
   deactivateStudent: (id: string) => call<{ ok: boolean }>("POST", `${V1}/students/${id}/deactivate`),
   reactivateStudent: (id: string) => call<{ ok: boolean }>("POST", `${V1}/students/${id}/reactivate`),
   deleteClass: (id: string) => call<{ ok: boolean; studentsDeleted: number }>("DELETE", `${V1}/classes/${id}`),
+  // Число групп класса с экрана (AR-202, §11 строка 50): 0 | 2 | 3 | 4, версия
+  // контингента (CONCURRENT_EDIT), уменьшение при живых привязках — GROUPS_BOUND.
+  // Тип DTO — inline-import: список импортов файла общий для нескольких зон.
+  setClassGroups: (id: string, dto: import("@edustore/shared").SetClassGroupsDto) =>
+    call<ClassDto>("PUT", `${V1}/classes/${id}/groups`, dto),
 
   // ─── предметы ───
   subjects: () => call<SubjectDto[]>("GET", `${V1}/subjects`),
@@ -187,6 +206,10 @@ export const api = {
   fillStaffCard: (id: string, dto: FillStaffCardDto) =>
     call<{ card: StaffCardDto; credentials: CredentialsDto }>("POST", `${V1}/staff/${id}/fill`, dto),
   staffCredentials: (id: string) => call<CredentialsDto>("POST", `${V1}/staff/${id}/credentials`),
+  // AR-203 (§11 строки 51–52): ФИО и логин правятся на карточке; пароль —
+  // задаётся (пусто — сервер генерирует) и показывается один раз.
+  updateStaffAccount: (id: string, dto: UpdateStaffAccountDto) => call<StaffCardDto>("PUT", `${V1}/staff/${id}/account`, dto),
+  setStaffPassword: (id: string, dto: SetStaffPasswordDto) => call<CredentialsDto>("POST", `${V1}/staff/${id}/password`, dto),
   revokeStaffActivation: (id: string) => call<StaffCardDto>("POST", `${V1}/staff/${id}/revoke-activation`),
   usernameFree: (u: string) => call<{ free: boolean }>("GET", `${V1}/staff/username-free?u=${encodeURIComponent(u)}`),
   activationToken: (id: string) => call<ActivationTokenDto>("POST", `${V1}/staff/${id}/activation-token`),
@@ -249,8 +272,9 @@ export const api = {
     call<{ entries: LoadEntry[]; version: number }>("GET", `${V1}/schedule/load`),
   setLoad: (dto: SetLoadDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/load`, dto),
   setPriorities: (dto: SetPrioritiesDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/priorities`, dto),
+  // Ответ без `cap` (AR-199): потолков дня нет, длина дня — справка.
   setDayParams: (dto: DayParamsDto) =>
-    call<{ ok: boolean; dayLengthMinutes: number; cap: number }>("PUT", `${V1}/schedule/day-params`, dto),
+    call<{ ok: boolean; dayLengthMinutes: number }>("PUT", `${V1}/schedule/day-params`, dto),
   generate: () => call<SchedulePreviewDto>("POST", `${V1}/schedule/generate`),
   cancelGeneration: () => call<{ ok: boolean }>("POST", `${V1}/schedule/generate/cancel`),
   skeleton: () => call<DaySkeletonDto>("GET", `${V1}/schedule/skeleton`),
@@ -259,6 +283,27 @@ export const api = {
   preview: () => call<SchedulePreviewDto>("GET", `${V1}/schedule/preview`),
   confirm: (dto: ConfirmScheduleDto) =>
     call<{ ok: boolean; detached: number; materialized: number }>("POST", `${V1}/schedule/confirm`, dto),
+  // Обед по классам (AR-200): пишется отдельно от скелета, версия агрегата (AR-109).
+  setLunch: (dto: SetClassLunchDto) => call<{ ok: boolean }>("PUT", `${V1}/schedule/lunch`, dto),
+  // Предпочтения педагога (AR-206): свои — педагог, все — строитель (`S-41.load.summary`).
+  teacherPreferences: () => call<TeacherPreferenceDto[]>("GET", `${V1}/schedule/preferences`),
+  myPreference: () => call<TeacherPreferenceDto>("GET", `${V1}/schedule/preferences/me`),
+  setMyPreference: (dto: SetTeacherPreferenceDto) =>
+    call<{ ok: boolean }>("PUT", `${V1}/schedule/preferences/me`, dto),
+  // Датированный оверлей недели (AR-207): отмены и замены поверх шаблона `S-40`.
+  datedLessons: (q: { from: string; to: string; classId?: string; teacherId?: string }) =>
+    call<DatedLessonDto[]>(
+      "GET",
+      `${V1}/schedule/lessons?from=${encodeURIComponent(q.from)}&to=${encodeURIComponent(q.to)}` +
+        (q.classId ? `&classId=${encodeURIComponent(q.classId)}` : "") +
+        (q.teacherId ? `&teacherId=${encodeURIComponent(q.teacherId)}` : ""),
+    ),
+  // Отмена своего урока, отзыв отмены, ручная замена (AR-207, §11 строки 54–56).
+  cancelLesson: (lessonId: string, dto: CancelLessonDto) =>
+    call<SubstitutionResultDto>("POST", `${V1}/lessons/${lessonId}/cancel`, dto),
+  withdrawCancel: (lessonId: string) => call<{ ok: boolean }>("DELETE", `${V1}/lessons/${lessonId}/cancel`),
+  setSubstitute: (lessonId: string, dto: SetSubstituteDto) =>
+    call<{ ok: boolean }>("POST", `${V1}/lessons/${lessonId}/substitute`, dto),
 
   // ─── журнал ───
   journal: (classId: string, subjectId: string, week?: string) =>
@@ -294,8 +339,10 @@ export const api = {
   createAsset: (dto: UpsertAssetDto) => call<SchoolAssetDto>("POST", `${V1}/admin/assets`, dto),
   updateAsset: (id: string, dto: UpsertAssetDto) => call<SchoolAssetDto>("PUT", `${V1}/admin/assets/${id}`, dto),
   deleteAsset: (id: string) => call<{ ok: boolean }>("DELETE", `${V1}/admin/assets/${id}`),
-  // карточка сотрудника: ссылка входа 48 ч (админ) и активность (AR-187, AR-189)
-  staffLoginLink: (id: string) => call<LoginLinkDto>("POST", `${V1}/staff/${id}/login-link`),
+  // карточка сотрудника: ссылка входа с параметрами срока и числа открытий
+  // (AR-204: право `staff.manage`; пустое тело — дефолты 48 ч, без лимита —
+  // так её выдаёт `S-62.devices.btn.grant`) и активность (AR-187)
+  staffLoginLink: (id: string, dto: IssueLoginLinkDto = {}) => call<LoginLinkDto>("POST", `${V1}/staff/${id}/login-link`, dto),
   staffActivity: (id: string) => call<StaffActivityDto>("GET", `${V1}/staff/${id}/activity`),
 
   // ─── кабинет завуча (S-61, AR-193) ───

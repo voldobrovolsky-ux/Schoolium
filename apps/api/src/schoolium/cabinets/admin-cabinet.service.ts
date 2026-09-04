@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import {
   ASSET_KINDS,
   NETWORK_AUDIENCES,
+  ROLE_LIMIT_MAX,
   SCHOOL_ROLES,
   STAFF_ROLES,
   type AccessPolicyDto,
@@ -13,12 +14,14 @@ import {
   type SchoolAssetDto,
   type SchoolAuditEntryDto,
   type SchoolNetworkDto,
+  type RoleLimits,
   type SchoolRole,
   type SessionLimits,
   type SetAccessPolicyDto,
   type UpsertAssetDto,
   type UpsertNetworkDto,
 } from '@edustore/shared';
+import { countRoleHolders } from '../staff/staff.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { OutboxService } from '../../common/outbox/outbox.service';
@@ -248,56 +251,69 @@ export class AdminCabinetService {
     return { ok: true, revoked: victims.length, users: users.length };
   }
 
-  // ─────────────── политика доступа (§11 строка 42; AR-188) ───────────────
+  // ─────────────── политика доступа (§11 строка 42; AR-188, AR-205) ───────────────
 
   /**
    * Чтение БЕЗ побочных эффектов: строки политики нет — школа живёт с
-   * дефолтами (лимитов нет, инцидента не было), и ответ собирается из них.
-   * Ленивое `create` здесь уже стреляло: `overview()` и `GET policy` читают
-   * политику параллельно, и второй `create` падал на уникальности
-   * `workspaceId` — 500 при первом открытии кабинета. Строку заводят только
-   * писатели (`setPolicy`, `revokeAll`) — через `upsert`.
+   * дефолтами (лимитов сессий нет, лимиты ролей — `DEFAULT_ROLE_LIMITS`,
+   * инцидента не было), и ответ собирается из них. Ленивое `create` здесь уже
+   * стреляло: `overview()` и `GET policy` читают политику параллельно, и второй
+   * `create` падал на уникальности `workspaceId` — 500 при первом открытии
+   * кабинета. Строку заводят только писатели (`setPolicy`, `revokeAll`) — через
+   * `upsert`. `roleHolders` («занято N» в `S-62.policy.roleLimits`) считается
+   * той же функцией, что и отказ `ROLE_LIMIT_REACHED` (AR-205): цифра одна.
    */
   async policy(): Promise<AccessPolicyDto> {
     const ws = TenantContext.require();
-    const row = await this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId: ws } });
-    if (!row) return { sessionLimits: {}, incidentAt: null, incidentByName: null, updatedAt: null };
+    const [row, roleHolders] = await Promise.all([
+      this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId: ws } }),
+      this.roleHolders(ws),
+    ]);
+    if (!row) return { sessionLimits: {}, roleLimits: {}, roleHolders, incidentAt: null, incidentByName: null, updatedAt: null };
     const by = row.incidentBy ? await this.usersOf([row.incidentBy]) : new Map<string, { name: string }>();
     return {
       sessionLimits: (row.sessionLimits ?? {}) as SessionLimits,
+      roleLimits: (row.roleLimits ?? {}) as RoleLimits,
+      roleHolders,
       incidentAt: row.incidentAt ? row.incidentAt.toISOString() : null,
       incidentByName: row.incidentBy ? (by.get(row.incidentBy)?.name ?? null) : null,
       updatedAt: row.updatedAt.toISOString(),
     };
   }
 
+  /** Носители каждой штатной роли: живые членства + пустые слоты (`countRoleHolders`, AR-205). */
+  private async roleHolders(ws: string): Promise<Partial<Record<SchoolRole, number>>> {
+    const out: Partial<Record<SchoolRole, number>> = {};
+    await TenantContext.runAsSystem(async () => {
+      const counts = await Promise.all(STAFF_ROLES.map((role) => countRoleHolders(this.prisma, ws, role)));
+      STAFF_ROLES.forEach((role, i) => {
+        out[role] = counts[i];
+      });
+    });
+    return out;
+  }
+
   /**
    * Лимиты по ролям: `null` — без лимита, иначе целое от 1 до 20. Неизвестная
    * роль или число вне диапазона — отказ целиком: политика либо принята, либо
-   * нет, «частично применённых» лимитов не бывает. Живые сессии не трогаются —
-   * лимит применяется следующей выдачей (`SchoolSessionService.issue`).
+   * нет, «частично применённых» лимитов не бывает. Лимит сессий (AR-188)
+   * задаётся любой роли и применяется следующей выдачей сессии
+   * (`SchoolSessionService.issue`), живые сессии не трогаются. Лимит носителей
+   * роли (AR-205) — только штатным ролям; `roleLimits` в теле нет — прежние
+   * значения сохраняются; проверяется при заведении, выдаче роли и
+   * реактивации (`StaffService.assertRoleFree`), живые носители не трогаются.
    */
   async setPolicy(dto: SetAccessPolicyDto, actor: SchoolActor): Promise<AccessPolicyDto> {
     const ws = TenantContext.require();
-    const src = dto?.sessionLimits;
-    if (!src || typeof src !== 'object' || Array.isArray(src)) throw new BadRequestException('sessionLimits: ожидается объект «роль → лимит»');
-    const limits: Record<string, number | null> = {};
-    for (const [role, raw] of Object.entries(src)) {
-      if (!(SCHOOL_ROLES as readonly string[]).includes(role)) throw new BadRequestException(`роль ${role} не существует`);
-      if (raw === null || raw === undefined) {
-        limits[role] = null;
-        continue;
-      }
-      if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > LIMIT_MAX) {
-        throw new BadRequestException(`лимит роли ${role}: целое число от 1 до ${LIMIT_MAX} либо пусто`);
-      }
-      limits[role] = raw;
-    }
+    const limits = parseLimits(dto?.sessionLimits, 'sessionLimits', SCHOOL_ROLES, LIMIT_MAX, 'лимит роли');
+    const roleLimits = dto?.roleLimits === undefined ? undefined : parseLimits(dto.roleLimits, 'roleLimits', STAFF_ROLES, ROLE_LIMIT_MAX, 'лимит носителей роли');
     await this.prisma.$transaction(async (tx) => {
+      const current = roleLimits === undefined ? await tx.schoolAccessPolicy.findUnique({ where: { workspaceId: ws } }) : null;
+      const storedRoleLimits = roleLimits ?? ((current?.roleLimits ?? {}) as Record<string, number | null>);
       await tx.schoolAccessPolicy.upsert({
         where: { workspaceId: ws },
-        update: { sessionLimits: limits },
-        create: { workspaceId: ws, sessionLimits: limits },
+        update: { sessionLimits: limits, ...(roleLimits === undefined ? {} : { roleLimits }) },
+        create: { workspaceId: ws, sessionLimits: limits, roleLimits: storedRoleLimits },
       });
       await this.outbox.enqueue(
         tx,
@@ -305,7 +321,7 @@ export class AdminCabinetService {
           type: SCHOOL_EVENTS.policySet,
           workspaceId: ws,
           actor: actor.userId,
-          payload: { sessionLimits: limits },
+          payload: { sessionLimits: limits, roleLimits: storedRoleLimits },
         }),
       );
     });
@@ -505,6 +521,38 @@ export class AdminCabinetService {
 }
 
 // ─────────────── валидация и проекции реестров ───────────────
+
+/**
+ * Словарь «роль → лимит» (AR-188 сессии, AR-205 носители ролей): роль только из
+ * `roles`, значение — целое 1..`max` либо `null`/пусто («без лимита»). Один
+ * разбор на оба словаря — тексты отказов различаются лишь подписью `what`.
+ */
+function parseLimits(
+  src: unknown,
+  field: string,
+  roles: readonly string[],
+  max: number,
+  what: string,
+): Record<string, number | null> {
+  if (!src || typeof src !== 'object' || Array.isArray(src)) throw new BadRequestException(`${field}: ожидается объект «роль → лимит»`);
+  const out: Record<string, number | null> = {};
+  for (const [role, raw] of Object.entries(src as Record<string, unknown>)) {
+    if (!roles.includes(role)) {
+      throw new BadRequestException(
+        (SCHOOL_ROLES as readonly string[]).includes(role) ? `${what} ${role}: только штатные роли` : `роль ${role} не существует`,
+      );
+    }
+    if (raw === null || raw === undefined) {
+      out[role] = null;
+      continue;
+    }
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 1 || raw > max) {
+      throw new BadRequestException(`${what} ${role}: целое число от 1 до ${max} либо пусто`);
+    }
+    out[role] = raw;
+  }
+  return out;
+}
 
 function optionalText(v: string | null | undefined, field: string): string | null {
   if (v === null || v === undefined) return null;

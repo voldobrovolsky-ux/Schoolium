@@ -26,7 +26,7 @@ on:
         required: true
         default: deploy
         type: choice
-        options: [deploy, bootstrap, provision, import, schedule-clear, status]
+        options: [deploy, bootstrap, provision, import, schedule-clear, subjects-merge, status]
       school:
         description: 'bootstrap: название школы'
         required: false
@@ -44,9 +44,14 @@ on:
         required: false
         default: 'false'
       workspace:
-        description: 'import/provision/schedule-clear: workspace id (печатает bootstrap; provision при единственной школе найдёт сам)'
+        description: 'import/provision/schedule-clear/subjects-merge: workspace id (печатает bootstrap; provision при единственной школе найдёт сам)'
         required: false
         default: ''
+      apply:
+        description: 'subjects-merge: true — исполнить слияние дублей предметов (по умолчанию dry-run: только план, ничего не пишется)'
+        required: false
+        default: false
+        type: boolean
       admin:
         description: 'provision: учётка администратора школы, "Фамилия Имя=username"'
         required: false
@@ -225,6 +230,19 @@ jobs:
           test -n "${{ inputs.workspace }}" || { echo 'нужен inputs.workspace'; exit 1; }
           $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
             npm run schedule:clear -- --workspace='${{ inputs.workspace }}'"
+
+      # Слияние регистровых дублей предметов (AR-201, дефект импорта 2026-09-03:
+      # «алгебра» и «Алгебра» как две карточки). По умолчанию dry-run — печатает
+      # пары и план (привязки, слоты, уроки, часы), ничего не пишет; apply=true
+      # исполняет транзакцией на пару. Требует workspace id; на сервере две
+      # школы — вслепую не бьёт. Порядок: сначала dry-run, прочитать план, потом
+      # apply. Событий не издаёт (как schedule-clear) — строка в PROD-STATUS.md.
+      - name: Слить дубли предметов школы (subjects-merge)
+        if: inputs.action == 'subjects-merge'
+        run: |
+          test -n "${{ inputs.workspace }}" || { echo 'нужен inputs.workspace'; exit 1; }
+          $SSH_CMD "cd ~/schoolium && docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api \
+            npm run subjects:merge -- --workspace='${{ inputs.workspace }}' ${{ (inputs.apply == true || inputs.apply == 'true') && '--apply' || '' }}"
 
       - name: Залить данные школы (import)
         if: inputs.action == 'import'

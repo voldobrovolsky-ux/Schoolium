@@ -1,6 +1,7 @@
 /**
  * Событийный контракт Schoolium 1.1.1 — двадцать два события версии, плюс три
- * события кабинета администратора 1.3.0 (AR-186, AR-188, AR-189): двадцать пять.
+ * события кабинета администратора 1.3.0 (AR-186, AR-188, AR-189), плюс семь
+ * событий пакета 04.09 1.5.0 (AR-202, AR-203, AR-206, AR-207): тридцать два.
  *
  * Канон имени (AR-23): `<домен>.<агрегат>.<глаголПрош>.v<N>`; публикация — только
  * через transactional outbox (AR-5), доставка каждому подписчику — через inbox
@@ -41,6 +42,17 @@ export const SCHOOL_EVENTS = {
   loginLinkIssued: 'staff.login_link.issued.v1',
   policySet: 'school.policy.set.v1',
   registryChanged: 'school.registry.changed.v1',
+  // 1.5.0 — пакет 04.09. Отмена урока и замена (AR-207): три события, которыми
+  // журнал узнаёт о новом педагоге колонки, отмене и её отзыве; предпочтения
+  // педагога (AR-206) и число групп класса (AR-202) роняют сетку в stale;
+  // учётка и пароль с карточки (AR-203) — «только аудит».
+  lessonCancelled: 'schedule.lesson.cancelled.v1',
+  lessonReassigned: 'schedule.lesson.reassigned.v1',
+  lessonRestored: 'schedule.lesson.restored.v1',
+  preferenceSet: 'schedule.preference.set.v1',
+  accountUpdated: 'staff.account.updated.v1',
+  passwordSet: 'staff.password.set.v1',
+  classGroupsChanged: 'contingent.class.regrouped.v1',
 } as const;
 
 export type SchoolEventType = (typeof SCHOOL_EVENTS)[keyof typeof SCHOOL_EVENTS];
@@ -114,10 +126,20 @@ export interface LessonDetachedV1 { lessonId: string; date: string; classId: str
 export interface MarkPostedV1 { lessonId: string; studentId: string; mark: string; postedBy: string }
 export interface MarkRemovedV1 { lessonId: string; studentId: string; removedBy: string }
 export interface TopicSetV1 { lessonId: string; topic: string; setBy: string }
-/** Одноразовая ссылка входа с карточки сотрудника, 48 часов (AR-189). */
-export interface LoginLinkIssuedV1 { userId: string; issuedBy: string; expiresAt: string }
-/** Лимиты одновременных сессий по ролям (AR-188): `null` — без лимита. */
-export interface PolicySetV1 { sessionLimits: Record<string, number | null> }
+/** Ссылка входа с карточки сотрудника (AR-189; AR-204: срок и лимит открытий выбирает выпускающий). */
+export interface LoginLinkIssuedV1 {
+  userId: string;
+  issuedBy: string;
+  expiresAt: string;
+  ttlHours: number;
+  /** `null` — без лимита открытий. */
+  maxUses: number | null;
+}
+/** Лимиты одновременных сессий (AR-188) и носителей ролей (AR-205): `null` — без лимита. */
+export interface PolicySetV1 {
+  sessionLimits: Record<string, number | null>;
+  roleLimits: Record<string, number | null>;
+}
 /** Реестр Wi-Fi сетей и корпоративных устройств школы (AR-186). */
 export interface RegistryChangedV1 {
   kind: 'network' | 'asset';
@@ -125,6 +147,36 @@ export interface RegistryChangedV1 {
   id: string;
   name: string;
 }
+// 1.5.0 — пакет 04.09
+/** Урок отменён БЕЗ замены (AR-207): журнал ставит `cancelledAt`, отметка отклоняется `LESSON_CANCELLED`. */
+export interface LessonCancelledV1 {
+  lessonId: string;
+  date: string;
+  slotNo: number;
+  classId: string;
+  groupNo: number | null;
+  subjectId: string;
+  teacherId: string;
+  reason: 'absence' | 'training' | 'official' | 'other';
+}
+/** Урок получил другого педагога (AR-207): автоподбор, ручная замена либо отзыв (`to` = исходный). */
+export interface LessonReassignedV1 {
+  lessonId: string;
+  date: string;
+  fromTeacherId: string;
+  toTeacherId: string;
+  reason: 'absence' | 'training' | 'official' | 'other' | 'withdrawn' | 'manual';
+}
+/** Отмена без замены отозвана (AR-207): пометка `cancelledAt` снимается. */
+export interface LessonRestoredV1 { lessonId: string; date: string }
+/** Педагог задал рабочие дни (AR-206): 0..5, пусто — любой день. */
+export interface PreferenceSetV1 { teacherId: string; workDays: number[] }
+/** Учётка сотрудника изменена с карточки (AR-203): какие поля. */
+export interface AccountUpdatedV1 { userId: string; updatedBy: string; fields: string[] }
+/** Пароль сотрудника задан с карточки (AR-203): `generated` — сгенерирован сервером. */
+export interface PasswordSetV1 { userId: string; setBy: string; generated: boolean }
+/** Число групп класса изменено (AR-202): сетка → stale. */
+export interface ClassGroupsChangedV1 { classId: string; groupCount: number }
 
 // ─────────────── реестр «издатель → подписчик → реакция» (AR-108) ───────────────
 
@@ -169,6 +221,14 @@ export const EVENT_CONTRACT: EventContractRow[] = [
   { type: SCHOOL_EVENTS.loginLinkIssued, publisher: 'access', subscribers: [], reaction: 'нет подписчика (только аудит): кто и кому выпустил одноразовую ссылку входа на 48 часов' },
   { type: SCHOOL_EVENTS.policySet, publisher: 'administration', subscribers: [], reaction: 'нет подписчика (только аудит): кто изменил лимиты сессий; лимит применяется при следующей выдаче сессии, живые не трогает' },
   { type: SCHOOL_EVENTS.registryChanged, publisher: 'administration', subscribers: [], reaction: 'нет подписчика (только аудит): изменение реестра Wi-Fi сетей и корпоративных устройств школы' },
+  // 1.5.0 — пакет 04.09 (AR-202, AR-203, AR-206, AR-207): семь событий
+  { type: SCHOOL_EVENTS.lessonCancelled, publisher: 'schedule', subscribers: ['journal'], reaction: 'колонка помечена отменённой (`cancelledAt`), отметка отклоняется `LESSON_CANCELLED`' },
+  { type: SCHOOL_EVENTS.lessonReassigned, publisher: 'schedule', subscribers: ['journal'], reaction: 'колонка получает нового педагога — заместитель ставит отметки, исходный нет' },
+  { type: SCHOOL_EVENTS.lessonRestored, publisher: 'schedule', subscribers: ['journal'], reaction: 'пометка отмены снята' },
+  { type: SCHOOL_EVENTS.preferenceSet, publisher: 'schedule', subscribers: ['schedule'], reaction: 'подтверждённая сетка → stale (AR-206)' },
+  { type: SCHOOL_EVENTS.accountUpdated, publisher: 'staff', subscribers: [], reaction: 'нет подписчика (только аудит): кто и какие поля учётки изменил с карточки (AR-203)' },
+  { type: SCHOOL_EVENTS.passwordSet, publisher: 'staff', subscribers: [], reaction: 'нет подписчика (только аудит): кто задал пароль и был ли он сгенерирован; сам пароль в событии не едет (AR-156)' },
+  { type: SCHOOL_EVENTS.classGroupsChanged, publisher: 'contingent', subscribers: ['schedule'], reaction: 'сетка → stale (число групп меняет укладку)' },
 ];
 
 /**
@@ -205,8 +265,16 @@ export const AUDIT_LABELS: Record<SchoolEventType, { action: string; object: str
   [SCHOOL_EVENTS.topicSet]: { action: 'записана тема урока', object: 'урок' },
   // 1.3.0: строки аудита кабинета администратора (`S-62.audit`)
   [SCHOOL_EVENTS.loginLinkIssued]: { action: 'выпущена ссылка входа', object: 'сотрудник' },
-  [SCHOOL_EVENTS.policySet]: { action: 'изменены лимиты сессий', object: 'политика доступа' },
+  [SCHOOL_EVENTS.policySet]: { action: 'изменены лимиты сессий и ролей', object: 'политика доступа' },
   [SCHOOL_EVENTS.registryChanged]: { action: 'изменён реестр сети и устройств', object: 'реестр' },
+  // 1.5.0 — пакет 04.09
+  [SCHOOL_EVENTS.lessonCancelled]: { action: 'урок отменён без замены', object: 'урок' },
+  [SCHOOL_EVENTS.lessonReassigned]: { action: 'урок передан другому педагогу', object: 'урок' },
+  [SCHOOL_EVENTS.lessonRestored]: { action: 'отмена урока отозвана', object: 'урок' },
+  [SCHOOL_EVENTS.preferenceSet]: { action: 'педагог задал рабочие дни', object: 'сотрудник' },
+  [SCHOOL_EVENTS.accountUpdated]: { action: 'изменена учётка сотрудника', object: 'сотрудник' },
+  [SCHOOL_EVENTS.passwordSet]: { action: 'задан пароль сотрудника', object: 'сотрудник' },
+  [SCHOOL_EVENTS.classGroupsChanged]: { action: 'изменено число групп класса', object: 'класс' },
 };
 
 /**
@@ -223,4 +291,7 @@ export const STALE_ON_EVENTS: SchoolEventType[] = [
   SCHOOL_EVENTS.staffDeactivated,
   SCHOOL_EVENTS.staffDeleted,
   SCHOOL_EVENTS.termSet,
+  // 1.5.0: рабочие дни педагога (AR-206) и число групп класса (AR-202) меняют укладку
+  SCHOOL_EVENTS.preferenceSet,
+  SCHOOL_EVENTS.classGroupsChanged,
 ];

@@ -11,7 +11,9 @@
  *     школу и роли сканирующего;
  *   · код входа одноразов (5 мин, шесть цифр);
  *   · деактивация отзывает ВСЕ сессии немедленно, адресное завершение — ровно одну;
- *   · bootstrap-ссылка одноразова и перевыпускается — школа не запирается.
+ *   · bootstrap-ссылка живёт 48 часов, открывается повторно до истечения и
+ *     перевыпускается — школа не запирается; ссылка с лимитом открытий (AR-204)
+ *     после исчерпания отвечает `LINK_EXHAUSTED`, счётчик растёт на каждом входе.
  *
  * Запуск: npm --workspace apps/api run login:check
  */
@@ -140,7 +142,32 @@ async function main(): Promise<void> {
   const bootAgain = await access.useBootstrapLink(bootstrapLink.token, 'ещё раз');
   await drain();
   check(bootAgain.session.token.length > 0 && bootAgain.session.token !== bootSession.session.token,
-    'повторное открытие ссылки в срок — вторая сессия, ссылка многоразовая (AR-195)');
+    'повторное открытие ссылки в срок — вторая сессия, ссылка без лимита открытий многоразовая (AR-195 → AR-204)');
+  const bootRow = await sys(() => b.prisma.bootstrapLink.findUnique({ where: { id: bootstrapLink.id } }));
+  check(bootRow?.useCount === 2 && bootRow?.maxUses === null, `счётчик открытий платформенной ссылки: ${bootRow?.useCount}, лимита нет`);
+  // AR-204: ссылка с лимитом открытий — исчерпание отвечает LINK_EXHAUSTED, а не второй сессией
+  const limited = await sys(() =>
+    b.prisma.bootstrapLink.create({
+      data: {
+        workspaceId: school.workspaceId,
+        userId: school.moderator.userId,
+        token: `once-${Math.random().toString(36).slice(2)}`,
+        purpose: 'login_link',
+        issuedBy: school.moderator.userId,
+        maxUses: 1,
+        expiresAt: new Date(Date.now() + 24 * 3600_000),
+      },
+    }),
+  );
+  const onceOk = await access.useBootstrapLink(limited.token, 'телефон');
+  check(onceOk.session.token.length > 0, 'ссылка с одним открытием: первое даёт сессию');
+  let exhausted = 'нет отказа';
+  try {
+    await access.useBootstrapLink(limited.token, 'ноутбук');
+  } catch (e) {
+    exhausted = (e as { response?: { code?: string } }).response?.code ?? 'ошибка';
+  }
+  check(exhausted === 'LINK_EXHAUSTED', `второе открытие → ${exhausted}: лимит открытий держит сервер (AR-204)`);
   const relink = await sys(() =>
     b.prisma.bootstrapLink.create({
       data: {

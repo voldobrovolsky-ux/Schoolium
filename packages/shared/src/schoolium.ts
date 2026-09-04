@@ -68,12 +68,38 @@ export const STAFF_SECTIONS = [
   { level: 3, title: 'Преподаватели', roles: ['teacher'] as SchoolRole[], addable: ['teacher'] as SchoolRole[] },
 ] as const;
 
-/** Роли, существующие в школе не более чем в одном экземпляре (AR-182). */
+/**
+ * Роли, существующие в школе не более чем в одном экземпляре (AR-182).
+ * @deprecated см. DEFAULT_ROLE_LIMITS (AR-205): единственность — частный случай
+ * лимита носителей роли `1`; экспорт оставлен для совместимости.
+ */
 export const SINGLETON_ROLES: SchoolRole[] = ['director', 'deputy_academic', 'deputy_upbringing'];
 
-// ─────────────────────────── права (13 кодов, AR-69, AR-88) ───────────────────────────
+// ─────────────────────────── лимиты носителей ролей (AR-205) ───────────────────────────
 
-/** Восемь мутационных прав версии. */
+/**
+ * Лимит носителей роли в школе (AR-205, уточняет AR-182): `null` — без лимита,
+ * отсутствие ключа — дефолт `DEFAULT_ROLE_LIMITS`. Хранится в
+ * `SchoolAccessPolicy.roleLimits`, задаёт администратор в `S-62` «Политики».
+ */
+export type RoleLimits = Partial<Record<SchoolRole, number | null>>;
+
+/** Дефолты владельца: директор и оба заместителя — по одному; остальные без лимита. */
+export const DEFAULT_ROLE_LIMITS: RoleLimits = { director: 1, deputy_academic: 1, deputy_upbringing: 1 };
+
+/** Верхняя граница лимита носителей роли — как у лимита сессий (AR-188). */
+export const ROLE_LIMIT_MAX = 20;
+
+/** Действующий лимит роли: `undefined` → дефолт, `null` → без лимита. */
+export function effectiveRoleLimit(limits: RoleLimits, role: SchoolRole): number | null {
+  const v = limits[role];
+  if (v === undefined) return DEFAULT_ROLE_LIMITS[role] ?? null;
+  return v;
+}
+
+// ─────────────────────────── права (19 кодов, AR-69, AR-88, AR-186, AR-206, AR-207) ───────────────────────────
+
+/** Двенадцать мутационных прав версии. */
 export const MUTATION_PERMISSIONS = [
   'school.manage',
   'contingent.write',
@@ -88,6 +114,10 @@ export const MUTATION_PERMISSIONS = [
   // 1.3.0 (AR-186): кабинет администратора — сеть, устройства, политики,
   // реестры, полный аудит школы. Держит ТОЛЬКО `admin`; модератор — нет.
   'school.admin',
+  // 1.5.0 (AR-206, AR-207): педагог сам задаёт рабочие дни и отменяет СВОЙ
+  // урок — два права с суффиксом `.self`: принадлежность проверяет сервис.
+  'schedule.preference.self',
+  'lesson.cancel.self',
 ] as const;
 
 /** Пять читающих прав штатных ролей. Шаблона «*.read» не существует. */
@@ -136,7 +166,8 @@ export const ROLE_PERMISSIONS: Record<SchoolRole, SchoolPermission[]> = {
   // …а завуч расставляет ТОЛЬКО годовые нормы часов: ни скелета, ни генерации,
   // ни календаря, ни привязок (решение владельца 2026-08-30, №9)
   deputy_academic: [...READ_PERMISSIONS, 'schedule.load.write', 'staff.self.write', 'school.oversee'],
-  teacher: [...READ_PERMISSIONS, 'journal.mark.post', 'journal.topic.set', 'staff.self.write'],
+  // AR-206, AR-207: педагог — пять мутаций: отметки, темы, аватар, предпочтения, отмена своего урока
+  teacher: [...READ_PERMISSIONS, 'journal.mark.post', 'journal.topic.set', 'staff.self.write', 'schedule.preference.self', 'lesson.cancel.self'],
   founder: [...READ_PERMISSIONS, 'staff.self.write'],
   director: [...READ_PERMISSIONS, 'staff.self.write'],
   deputy_upbringing: [...READ_PERMISSIONS, 'staff.self.write'],
@@ -163,7 +194,7 @@ export const MARK_TOKENS: Record<MarkValue, string> = {
   'б': 'mark.b',
 };
 
-// ─────────────────────────── коды ошибок (29, `70-screens.md` §9) ───────────────────────────
+// ─────────────────────────── коды ошибок (46, `70-screens.md` §9) ───────────────────────────
 
 export const ERROR_CODES = [
   'LINK_CODE_EXPIRED',
@@ -181,12 +212,15 @@ export const ERROR_CODES = [
   'CLASSES_ALREADY_EXIST',
   'TERM_OVERLAP',
   'TERM_REVERSED',
+  // выведен из употребления (AR-199): СанПиН школой не применяется по решению
+  // владельца; код не бросается, в контракте остаётся (прецедент PHONE_TAKEN_IN_SCHOOL)
   'LOAD_EXCEEDS_SANPIN',
   'LOAD_EXCEEDS_GRID',
   'GROUP_HOURS_UNEQUAL',
   'TEACHER_OVERBOOKED',
   'SUBJECT_UNCOVERED',
   'GROUPS_UNASSIGNED',
+  // оба выведены из употребления (AR-199), в контракте остаются
   'DAY_EXCEEDS_SANPIN',
   'DAY_TOO_LONG',
   'CONCURRENT_EDIT',
@@ -211,23 +245,42 @@ export const ERROR_CODES = [
   // открытием карточки и нажатием педагог мог поставить отметку.
   'STUDENT_HAS_MARKS',
   'STAFF_HAS_HISTORY',
+  // 1.5.0 — пакет 04.09 (AR-199…AR-207), девять кодов
+  // AR-201: карточка одна на пару «предмет × класс», дубль по ключу имени
+  'SUBJECT_EXISTS',
+  // AR-202: уменьшение числа групп при живых групповых привязках
+  'GROUPS_BOUND',
+  // AR-205: лимит носителей роли исчерпан (вместо «единственного экземпляра»)
+  'ROLE_LIMIT_REACHED',
+  // 1.5.0 (AR-211): учётной записью администратора школы управляет только
+  // администратор — иначе `staff.manage` в один клик выдаёт себе его доступ
+  'ADMIN_ACCOUNT_LOCKED',
+  // AR-204: ссылка входа с лимитом открытий использована
+  'LINK_EXHAUSTED',
+  // AR-206: часов педагога больше, чем урочных позиций в его рабочие дни
+  'TEACHER_DAYS_SHORT',
+  // AR-207: отмена урока и замена
+  'NOT_YOUR_LESSON',
+  'LESSON_ALREADY_HELD',
+  'LESSON_CANCELLED',
+  'SUBSTITUTE_BUSY',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 /**
- * Девять кодов отказа генератора. Восемь считаются **арифметикой до перебора**
- * (AR-103, AR-107); `NO_SOLUTION` — единственный отказ самого перебора, он же
- * отвечает на исчерпание бюджета.
+ * Семь кодов отказа генератора. Шесть считаются **арифметикой до перебора**
+ * (AR-107, AR-199, AR-206); `NO_SOLUTION` — единственный отказ самого перебора,
+ * он же отвечает на исчерпание бюджета. Три кода СанПиН (`LOAD_EXCEEDS_SANPIN`,
+ * `DAY_EXCEEDS_SANPIN`, `DAY_TOO_LONG`) сняты с AR-199 — школа норм не
+ * применяет; `TEACHER_DAYS_SHORT` добавлен с AR-206 (рабочие дни педагога).
  */
 export const ARITHMETIC_REFUSALS = [
-  'LOAD_EXCEEDS_SANPIN',
   'LOAD_EXCEEDS_GRID',
   'TEACHER_OVERBOOKED',
   'SUBJECT_UNCOVERED',
   'GROUPS_UNASSIGNED',
   'GROUP_HOURS_UNEQUAL',
-  'DAY_EXCEEDS_SANPIN',
-  'DAY_TOO_LONG',
+  'TEACHER_DAYS_SHORT',
 ] as const;
 export const GENERATOR_REFUSALS = [...ARITHMETIC_REFUSALS, 'NO_SOLUTION'] as const;
 export type GeneratorRefusal = (typeof GENERATOR_REFUSALS)[number];
@@ -260,6 +313,13 @@ export const ACCESS_PARAMS = {
    */
   bootstrapLinkTtlHours: 48,
   loginLinkTtlHours: 48,
+  /**
+   * AR-204: срок и число открытий ссылки входа выбирает выпускающий
+   * (`S-31.select.linkTtl`, `S-31.select.linkUses`); 48 часов остаётся дефолтом
+   * срока, `null` («без лимита») — дефолтом числа открытий.
+   */
+  loginLinkTtlOptions: [24, 48, 168],
+  loginLinkUsesOptions: [1, 3, 10, null],
   /** Порог «в сети»: последняя активность сессии не старше N минут (AR-187). */
   sessionOnlineMinutes: 15,
   /** Хранение завершённых сессий в журнале подключений (AR-187, AR-194). */
@@ -270,16 +330,21 @@ export const ACCESS_PARAMS = {
 /** Бюджет перебора генератора (AR-107): что раньше — секунды или попытки. */
 export const GENERATOR_BUDGET = { seconds: 20, attempts: 200_000 } as const;
 
-/** Потолок длины учебного дня — продуктовый дефолт владельца, не норма (AR-103). */
+// Потолки СанПиН и длины дня: в рантайме не используются с AR-199 (генератор и
+// сервис их не читают, коды не бросаются); читает только слой качества
+// `quality.ts` (G-56/57). Экспорты оставлены — контракт журнал, а не срез.
+
+/** Потолок длины учебного дня — продуктовый дефолт владельца, не норма (AR-103). В рантайме не используется с AR-199. */
 export const DAY_MINUTES_CAP = 420;
 
-/** Дневной потолок уроков по параллелям — СанПиН 1.2.3685-21 табл. 6.6 (базис #11). */
+/** Дневной потолок уроков по параллелям — СанПиН 1.2.3685-21 табл. 6.6 (базис #11). В рантайме не используется с AR-199; читает только `quality.ts`. */
 export const DAY_SLOTS_CAP: Record<number, number> = {
   1: 4, 2: 5, 3: 5, 4: 5, 5: 6, 6: 6, 7: 7, 8: 7, 9: 7, 10: 7, 11: 7,
 };
 
 /**
- * AR-114: «уроков в день» — ВЕРХНЯЯ ГРАНИЦА школьного дня, одна на школу, а
+ * AR-114 (вытеснено AR-199 — в рантайме не используется, читает только
+ * `quality.ts`): «уроков в день» — ВЕРХНЯЯ ГРАНИЦА школьного дня, одна на школу, а
  * потолок СанПиН нормирует параллель. День класса — `min(число, потолок его
  * параллели)`; отказ `DAY_EXCEEDS_SANPIN` — только когда число выше потолка
  * самой старшей параллели школы. Иначе школа с первым и восьмым классом обязана
@@ -291,7 +356,7 @@ export const classDayCap = (parallel: number, slotsPerDay: number): number =>
 export const schoolDayCap = (parallels: number[]): number =>
   Math.max(0, ...parallels.map((p) => DAY_SLOTS_CAP[p] ?? 0));
 
-/** Недельный потолок часов по параллелям — СанПиН, 5-дневка (базис #3). */
+/** Недельный потолок часов по параллелям — СанПиН, 5-дневка (базис #3). В рантайме не используется с AR-199; читает только `quality.ts`. */
 export const WEEK_HOURS_CAP: Record<number, number> = {
   1: 21, 2: 23, 3: 23, 4: 23, 5: 29, 6: 30, 7: 32, 8: 33, 9: 33, 10: 34, 11: 34,
 };
@@ -331,6 +396,33 @@ export interface ClassDto {
   totalProfiles: number;
   /** Сервер решает, какая кнопка показывается: удалить или ничего (AR-89). */
   hasMarks: boolean;
+  /**
+   * AR-200: после какого урока у класса обед; `null` — как у школы (позиция
+   * `meal` скелета). Класс с `N` не имеет урока в урочной позиции `N+1`.
+   */
+  lunchAfterLessonNo: number | null;
+}
+
+/** Обед одного класса (AR-200): `null` — как у школы. */
+export interface ClassLunchEntryDto {
+  classId: string;
+  lunchAfterLessonNo: number | null;
+}
+
+/** `PUT /schedule/lunch` (AR-200): обед по классам, версия агрегата расписания (AR-109). */
+export interface SetClassLunchDto {
+  version: number;
+  entries: ClassLunchEntryDto[];
+}
+
+/**
+ * `PUT /classes/:id/groups` (AR-202): число групп класса — 0 (без групп), 2, 3
+ * или 4; валидирует сервер. Уменьшение при живых групповых привязках →
+ * `GROUPS_BOUND`. Версия — контингента (AR-109).
+ */
+export interface SetClassGroupsDto {
+  groupCount: number;
+  version: number;
 }
 
 export interface StudentDto {
@@ -399,6 +491,8 @@ export interface SubjectDto {
   /** «Покрытие полное» либо перечень непокрытых групп. */
   coverageComplete: boolean;
   uncoveredGroups: number[];
+  /** AR-202: число групп класса карточки — `M-25` рисует по нему чекбоксы групп. */
+  groupCount: number;
 }
 
 export interface BindingDto {
@@ -413,7 +507,30 @@ export interface BindingDto {
   hoursPerYear: number;
 }
 
-// ─────────────────────────── компетенции педагога (AR-179) ───────────────────────────
+// ─────────────────────────── ключ имени предмета (AR-201) ───────────────────────────
+
+/**
+ * Ключ имени предмета (AR-201): trim, пробелы схлопнуты в один, нижний регистр,
+ * «ё» → «е». «Алгебра», « алгебра » и «АЛГЕБРА» — одна карточка в классе; хранится
+ * в `SchoolSubject.nameKey`, тем же правилом бэкфиллит миграция.
+ */
+export function subjectNameKey(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase().replace(/ё/g, 'е');
+}
+
+/**
+ * Каноническое имя предмета (AR-201): совпадение по ключу с пресетом — имя
+ * пресета; иначе trim, схлопнутые пробелы и первая буква заглавной.
+ */
+export function canonicalSubjectName(name: string, presetNames: string[]): string {
+  const key = subjectNameKey(name);
+  const preset = presetNames.find((p) => subjectNameKey(p) === key);
+  if (preset) return preset;
+  const clean = name.trim().replace(/\s+/g, ' ');
+  return clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : clean;
+}
+
+// ─────────────────────────── компетенции педагога (AR-179, AR-202) ───────────────────────────
 
 /**
  * Массовое назначение компетенций (AR-179): модератор сканирует ЛИЧНЫЙ QR
@@ -421,13 +538,19 @@ export interface BindingDto {
  * «предмет × класс» на весь класс. Снятая галочка ОТКРЕПЛЯЕТ педагога от
  * позиции; занятая другим позиция при `replace=false` возвращается конфликтом,
  * при `replace=true` прежние педагоги открепляются тем же событием
- * `subject.teacher.unbound.v1`. Позиции с групповыми привязками этим каналом
- * не трогаются — группы назначаются из карточки предмета (Д6).
+ * `subject.teacher.unbound.v1`. AR-202: групповые позиции назначаются этим же
+ * каналом через `positions[].groupNos`; класс↔группы на одной карточке
+ * взаимоисключены (Д6) — чужая привязка другого вида возвращается конфликтом.
  */
 export interface SaveCompetenceDto {
   teacherId: string;
   /** Позиции «предмет × класс», которые педагог ДОЛЖЕН вести классом. */
   subjectIds: string[];
+  /**
+   * AR-202: позиции с группами. При наличии — приоритет над `subjectIds`;
+   * пустой/отсутствующий `groupNos` = весь класс.
+   */
+  positions?: { subjectId: string; groupNos?: number[] }[];
   replace?: boolean;
 }
 
@@ -435,6 +558,8 @@ export interface CompetenceConflictDto {
   subjectName: string;
   classLabels: string[];
   teacherNames: string[];
+  /** AR-202: номер группы конфликта; отсутствует — конфликт по всему классу. */
+  groupNo?: number;
 }
 
 export interface SaveCompetenceResultDto {
@@ -508,6 +633,19 @@ export interface CreateStaffCardDto {
 
 /** Заполнение существующей пустой карточки (синглтоны из bootstrap). */
 export type FillStaffCardDto = Omit<CreateStaffCardDto, 'role'>;
+
+/** `PUT /staff/:id/account` (AR-203): ФИО и логин учётки правит `staff.manage`. */
+export interface UpdateStaffAccountDto {
+  lastName: string;
+  firstName: string;
+  middleName?: string | null;
+  username: string;
+}
+
+/** `POST /staff/:id/password` (AR-203): пусто — сгенерировать; иначе ≥ 8 знаков. */
+export interface SetStaffPasswordDto {
+  password?: string;
+}
 
 /** Креды, показанные модератору на карточке. Пароль — открытым текстом, один раз. */
 export interface CredentialsDto {
@@ -586,6 +724,10 @@ export interface DiaryLessonDto {
   subjectName: string;
   topic: string | null;
   mark: MarkValue | null;
+  /** AR-207: урок отменён без замены — строка «Урок отменён». */
+  cancelled: boolean;
+  /** AR-207: «Фамилия И.» заместителя; `null` — ведёт свой педагог. */
+  substituteName: string | null;
 }
 
 export interface DiaryDayDto {
@@ -602,6 +744,8 @@ export interface DiaryWeekDto {
   grid: DayGridDto | null;
   /** Скелет дня (AR-171); null — фолбэк на grid. */
   skeleton?: SkeletonPositionDto[] | null;
+  /** AR-200: обед класса ученика после урока N; `null`/отсутствует — как у школы. */
+  lunchAfterLessonNo?: number | null;
   days: DiaryDayDto[];
   /** Недели журнала для навигации — как календарь `S-50`. */
   weeks: { monday: string; hasLessons: boolean }[];
@@ -792,6 +936,8 @@ export interface SkeletonPositionDto {
 export interface DaySkeletonDto {
   gridKind: GridKind;
   positions: SkeletonPositionDto[];
+  /** AR-200: обед по классам — читается вместе со скелетом, пишется `PUT /schedule/lunch`. */
+  classLunch: ClassLunchEntryDto[];
   version: number;
 }
 
@@ -849,6 +995,8 @@ export interface SchedulePreviewDto {
   /** Скелет дня (AR-171); null/отсутствует — школа живёт на grid (фолбэк). */
   skeleton?: SkeletonPositionDto[] | null;
   gridKind?: GridKind;
+  /** AR-200: обед по классам — `S-40` вставляет строку «Обед» после урока N. */
+  classLunch?: ClassLunchEntryDto[];
   slots: TemplateSlotDto[];
   /** Мягкие предупреждения приоритетов — не блокируют (ограничение 6). */
   priorityWarnings: string[];
@@ -875,6 +1023,92 @@ export interface SwapSlotsDto {
   classId: string;
 }
 
+// ─────────────────────────── предпочтения педагога (AR-206) ───────────────────────────
+
+/**
+ * Рабочие дни педагога (AR-206, уточняет AR-135: задаёт сам, без утверждения).
+ * `workDays` — номера дней 0..5 (ПН…СБ); пустой список = любой день.
+ * Версии агрегата нет: сохранение — событие `schedule.preference.set.v1`,
+ * подтверждённая сетка → stale.
+ */
+export interface TeacherPreferenceDto {
+  teacherId: string;
+  workDays: number[];
+  note: string | null;
+}
+
+/** `PUT /schedule/preferences/me` (AR-206). */
+export interface SetTeacherPreferenceDto {
+  workDays: number[];
+  note?: string | null;
+}
+
+// ─────────────────────────── отмена урока и замена (AR-207) ───────────────────────────
+
+/** Причины отмены урока педагогом (AR-207). */
+export const LESSON_CANCEL_REASONS = ['absence', 'training', 'official', 'other'] as const;
+export type LessonCancelReason = (typeof LESSON_CANCEL_REASONS)[number];
+
+export const LESSON_CANCEL_REASON_LABELS: Record<LessonCancelReason, string> = {
+  absence: 'отсутствие педагога',
+  training: 'обучение, курсы',
+  official: 'служебная необходимость',
+  other: 'другое',
+};
+
+/** Состояние записи замены (AR-207): найден заместитель | замены нет | отзыв. */
+export const LESSON_SUBSTITUTION_STATUSES = ['substituted', 'no_substitute', 'withdrawn'] as const;
+export type LessonSubstitutionStatus = (typeof LESSON_SUBSTITUTION_STATUSES)[number];
+
+/**
+ * Запись замены датированного урока (AR-207). `reasonText` виден только
+ * `staff.manage` / `schedule.build` / `school.oversee`; остальным — `null`.
+ */
+export interface LessonSubstitutionDto {
+  status: LessonSubstitutionStatus;
+  originalTeacherId: string;
+  originalTeacherName: string;
+  substituteTeacherId: string | null;
+  substituteTeacherName: string | null;
+  reason: LessonCancelReason;
+  reasonText: string | null;
+}
+
+/** `GET /schedule/lessons?from&to[&classId][&teacherId]` (AR-207): датированный оверлей недели `S-40`. */
+export interface DatedLessonDto {
+  lessonId: string;
+  date: string; // YYYY-MM-DD
+  slotNo: number;
+  classId: string;
+  classLabel: string;
+  groupNo: number | null;
+  subjectId: string;
+  subjectName: string;
+  /** Текущий педагог урока — заместитель, если замена состоялась. */
+  teacherId: string;
+  teacherName: string;
+  detached: boolean;
+  substitution: LessonSubstitutionDto | null;
+}
+
+/** `POST /lessons/:id/cancel` (AR-207): свой будущий урок. */
+export interface CancelLessonDto {
+  reason: LessonCancelReason;
+  reasonText?: string;
+}
+
+/** `POST /lessons/:id/substitute` (AR-207): ручное назначение заместителя (`schedule.build`). */
+export interface SetSubstituteDto {
+  teacherId: string;
+}
+
+/** Итог автоподбора замены (AR-207): «Замена: Иванова М. И.» либо «Замены нет — сообщено завучу». */
+export interface SubstitutionResultDto {
+  status: 'substituted' | 'no_substitute';
+  substituteTeacherId: string | null;
+  substituteTeacherName: string | null;
+}
+
 // ─────────────────────────── журнал ───────────────────────────
 
 export interface JournalColumnDto {
@@ -890,6 +1124,8 @@ export interface JournalColumnDto {
   future: boolean;
   /** Урок вне расписания после регенерации (AR-85). */
   detached: boolean;
+  /** Урок отменён без замены (AR-207): отметка отклоняется `LESSON_CANCELLED`. */
+  cancelled: boolean;
 }
 
 export interface JournalRowDto {
@@ -1187,6 +1423,10 @@ export type SessionLimits = Partial<Record<SchoolRole, number | null>>;
 
 export interface AccessPolicyDto {
   sessionLimits: SessionLimits;
+  /** AR-205: лимиты носителей ролей; отсутствие ключа — дефолт `DEFAULT_ROLE_LIMITS`. */
+  roleLimits: RoleLimits;
+  /** AR-205: занято носителей по ролям — живые членства плюс пустые слоты `plannedRoles`. */
+  roleHolders: Partial<Record<SchoolRole, number>>;
   /** Последний инцидент-режим: когда и кто закрыл все сессии школы. */
   incidentAt: string | null;
   incidentByName: string | null;
@@ -1195,6 +1435,8 @@ export interface AccessPolicyDto {
 
 export interface SetAccessPolicyDto {
   sessionLimits: SessionLimits;
+  /** AR-205: целое 1..`ROLE_LIMIT_MAX` либо `null`; только роли из `STAFF_ROLES`. */
+  roleLimits?: RoleLimits;
 }
 
 /** Сводка кабинета администратора (`S-62` обзор). */
@@ -1216,11 +1458,24 @@ export interface AdminOverviewDto {
   policy: AccessPolicyDto;
 }
 
-/** Ссылка входа с карточки сотрудника (AR-189, AR-195): 48 часов, многоразовая до истечения. */
+/**
+ * `POST /staff/:id/login-link` (AR-204): срок и число открытий выбирает
+ * выпускающий (`staff.manage`); отсутствуют — дефолты `ACCESS_PARAMS`
+ * (48 часов, без лимита).
+ */
+export interface IssueLoginLinkDto {
+  ttlHours?: 24 | 48 | 168;
+  maxUses?: number | null;
+}
+
+/** Ссылка входа с карточки сотрудника (AR-189, AR-195, AR-204): многоразовая до истечения срока либо лимита открытий. */
 export interface LoginLinkDto {
   url: string;
   token: string;
   expiresAt: string;
+  /** AR-204: лимит открытий; `null` — без лимита. Исчерпан → `LINK_EXHAUSTED`. */
+  maxUses: number | null;
+  useCount: number;
 }
 
 /** Активность учётки для карточки `M-06` (AR-187). */
@@ -1363,6 +1618,8 @@ export const SCHOOL_API = {
   classesBulk: '/api/v1/classes/bulk',
   schoolClass: (id: string) => `/api/v1/classes/${id}`,
   classStudents: (id: string) => `/api/v1/classes/${id}/students`,
+  // AR-202: число групп класса
+  classGroups: (id: string) => `/api/v1/classes/${id}/groups`,
   student: (id: string) => `/api/v1/students/${id}`,
   studentDeactivate: (id: string) => `/api/v1/students/${id}/deactivate`,
   studentReactivate: (id: string) => `/api/v1/students/${id}/reactivate`,
@@ -1401,6 +1658,14 @@ export const SCHOOL_API = {
   scheduleGenerate: '/api/v1/schedule/generate',
   scheduleGenerateCancel: '/api/v1/schedule/generate/cancel',
   scheduleConfirm: '/api/v1/schedule/confirm',
+  // AR-200: обед по классам; AR-206: предпочтения педагога; AR-207: датированные уроки
+  scheduleLunch: '/api/v1/schedule/lunch',
+  schedulePreferencesMe: '/api/v1/schedule/preferences/me',
+  schedulePreferences: '/api/v1/schedule/preferences',
+  scheduleLessons: '/api/v1/schedule/lessons',
+  // AR-207: отмена своего урока (POST) и отзыв отмены (DELETE); ручная замена (schedule.build)
+  lessonCancel: (id: string) => `/api/v1/lessons/${id}/cancel`,
+  lessonSubstitute: (id: string) => `/api/v1/lessons/${id}/substitute`,
   // журнал
   journal: '/api/v1/journal',
   lessonTopic: (id: string) => `/api/v1/lessons/${id}/topic`,
@@ -1422,6 +1687,9 @@ export const SCHOOL_API = {
   adminAsset: (id: string) => `/api/v1/admin/assets/${id}`,
   staffLoginLink: (id: string) => `/api/v1/staff/${id}/login-link`,
   staffActivity: (id: string) => `/api/v1/staff/${id}/activity`,
+  // AR-203: учётка и пароль с карточки сотрудника (`staff.manage`)
+  staffAccount: (id: string) => `/api/v1/staff/${id}/account`,
+  staffPassword: (id: string) => `/api/v1/staff/${id}/password`,
   // кабинет завуча (S-61, AR-193)
   deputyCabinet: '/api/v1/deputy',
 } as const;

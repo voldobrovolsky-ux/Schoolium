@@ -43,11 +43,27 @@ const scrollBehavior = (): ScrollBehavior =>
 
 // ─────────────────────────── модель дня ───────────────────────────
 
+/** Маркер строки урока (AR-207): отменён без замены либо ведёт заместитель. */
+export interface DayCellStatus {
+  kind: "cancelled" | "substituted";
+  /** Слово рядом с цветом (AR-80): «Отменён» / «Замена: Фамилия И.». */
+  label: string;
+}
+
 export interface DayCell {
   key: string;
   title: string;
   sub?: string | null;
   mark?: MarkValue | null;
+  /** AR-207: маркер отмены/замены; нет — обычный урок. */
+  status?: DayCellStatus | null;
+  /**
+   * Действия строки (AR-206/207): кнопки собирает экран-владелец (там живут
+   * его testId и права), здесь — только место под ними внутри ячейки.
+   */
+  actions?: ReactNode;
+  /** Датированный урок за ячейкой — адрес строки для прокрутки и смока. */
+  lessonId?: string | null;
 }
 
 export interface LessonRow {
@@ -83,13 +99,32 @@ export function buildDayRows(opts: {
   grid: DayGridDto | null | undefined;
   dayNo: number;
   cellsByLesson: Map<number, DayCell[]>;
+  /**
+   * AR-200: обед класса после урока N — строка «Обед» встаёт в урочную позицию
+   * N+1 (класс в ней урока не имеет), общие позиции `meal` скелета для такого
+   * класса не показываются. `null`/нет — как у школы. Вид преподавателя и
+   * журнал значение не передают.
+   */
+  lunchAfterLessonNo?: number | null;
 }): DayRow[] {
   const { skeleton, grid, dayNo, cellsByLesson } = opts;
+  const lunchAfter = opts.lunchAfterLessonNo ?? null;
   const rows: DayRow[] = [];
-  const positions = (skeleton ?? []).filter((p) => p.dayNo === dayNo).sort((a, b) => a.posNo - b.posNo);
+  const positions = (skeleton ?? [])
+    .filter((p) => p.dayNo === dayNo)
+    // обед класса заменяет общий обед школы (AR-200)
+    .filter((p) => lunchAfter === null || p.kind !== "meal")
+    .sort((a, b) => a.posNo - b.posNo);
   if (positions.length) {
+    // урочная позиция N+1 у класса с собственным обедом — его «Обед»; если
+    // данные всё же несут там урок, урок сильнее строки-подстановки
+    const isLunchPos = (p: SkeletonPositionDto): boolean =>
+      lunchAfter !== null &&
+      p.kind === "lesson" &&
+      p.lessonNo === lunchAfter + 1 &&
+      (cellsByLesson.get(p.lessonNo ?? -1)?.length ?? 0) === 0;
     const visible = positions.filter(
-      (p) => p.kind !== "lesson" || (cellsByLesson.get(p.lessonNo ?? -1)?.length ?? 0) > 0,
+      (p) => p.kind !== "lesson" || isLunchPos(p) || (cellsByLesson.get(p.lessonNo ?? -1)?.length ?? 0) > 0,
     );
     // «(1|2)» — метка ЧАСТИ ПАРЫ предмета, а не половины времени: ставится
     // только когда обе половины pairNo видимы и несут ОДИН предмет (AR-171).
@@ -105,7 +140,9 @@ export function buildDayRows(opts: {
     visible.forEach((p, i) => {
       const nxt = visible[i + 1];
       const gap = nxt ? nxt.startMin - p.endMin : 0;
-      if (p.kind === "lesson") {
+      if (isLunchPos(p)) {
+        rows.push({ type: "special", posNo: p.posNo, title: "Обед", start: fmtMin(p.startMin), end: fmtMin(p.endMin) });
+      } else if (p.kind === "lesson") {
         let pairLabel: string | null = null;
         if (p.pairNo && labeledPairs.has(p.pairNo)) {
           const part = (pairSeen.get(p.pairNo) ?? 0) + 1;
@@ -128,10 +165,15 @@ export function buildDayRows(opts: {
     });
     return rows.some((r) => r.type === "lesson") ? rows : [];
   }
-  const lessonNos = [...cellsByLesson.keys()].sort((a, b) => a - b);
+  const lessonNos = [...cellsByLesson.keys()].filter((no) => (cellsByLesson.get(no)?.length ?? 0) > 0).sort((a, b) => a - b);
+  // Фолбэк без скелета: обед класса (AR-200) — строка в слоте N+1, когда день
+  // идёт и до него, и после (обед после последнего урока — не часть дня).
+  const lunchSlot =
+    lunchAfter !== null && lessonNos.some((no) => no <= lunchAfter) && lessonNos.some((no) => no >= lunchAfter + 2)
+      ? lunchAfter + 1
+      : null;
   lessonNos.forEach((no, i) => {
     const cells = cellsByLesson.get(no) ?? [];
-    if (!cells.length) return;
     const t = grid ? slotTimes(grid, no) : null;
     const next = lessonNos[i + 1];
     rows.push({
@@ -144,9 +186,27 @@ export function buildDayRows(opts: {
       cells,
       breakAfterMin: t && next !== undefined ? (next === no + 1 ? t.breakAfterMin : null) : null,
     });
+    if (lunchSlot !== null && no === lunchAfter) {
+      const lt = grid ? slotTimes(grid, lunchSlot) : null;
+      rows.push({ type: "special", posNo: lunchSlot, title: "Обед", start: lt?.start ?? "", end: lt?.end ?? "" });
+    }
   });
   return rows;
 }
+
+/** «Фамилия И.» из полного имени (AR-207, формат маркера «Замена: Фамилия И.»). */
+export const teacherShort = (full: string | null | undefined): string => {
+  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  return parts.length === 1 ? parts[0] : `${parts[0]} ${parts[1][0]}.`;
+};
+
+/** «Фамилия И. О.» — форма результата подбора замены («Замена: Иванова М. И.»). */
+export const teacherInitials = (full: string | null | undefined): string => {
+  const parts = (full ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  return [parts[0], ...parts.slice(1, 3).map((p) => `${p[0]}.`)].join(" ");
+};
 
 // ─────────────────────────── список дня ───────────────────────────
 
@@ -154,10 +214,15 @@ export function DayLessonList({
   rows,
   testId,
   pairedTestId,
+  cancelledTestId,
+  substitutedTestId,
 }: {
   rows: DayRow[];
   testId?: string;
   pairedTestId?: string;
+  /** Идентификаторы маркеров отмены/замены (AR-207) — из реестра экрана-владельца. */
+  cancelledTestId?: string;
+  substitutedTestId?: string;
 }) {
   if (!rows.length) {
     // «день помечен, не пуст» (20-cabinets §4, FLOR-ADS §5.21)
@@ -191,7 +256,7 @@ export function DayLessonList({
               <div className="sch-pos-no">{r.posNo}.</div>
               <div className="sch-lesson-body">
                 {r.cells.map((c) => (
-                  <span className="sch-slot" key={c.key}>
+                  <span className="sch-slot" key={c.key} data-lesson-id={c.lessonId ?? undefined}>
                     <span className="sch-lesson-title">
                       <b>
                         {c.title}
@@ -205,6 +270,17 @@ export function DayLessonList({
                       </span>
                     ) : null}
                     {c.sub ? <span>{c.sub}</span> : null}
+                    {/* AR-207: маркер — слово рядом с цветом (AR-80), не только цвет */}
+                    {c.status ? (
+                      <span
+                        className="sch-sched-status"
+                        data-status={c.status.kind}
+                        data-testid={c.status.kind === "cancelled" ? cancelledTestId : substitutedTestId}
+                      >
+                        {c.status.label}
+                      </span>
+                    ) : null}
+                    {c.actions ? <span className="sch-sched-actions">{c.actions}</span> : null}
                   </span>
                 ))}
               </div>
@@ -325,6 +401,7 @@ export function DayPicker({
           <button
             key={d.date}
             type="button"
+            data-date={d.date}
             aria-pressed={d.date === open}
             className={
               "sch-daychip" +
@@ -367,6 +444,7 @@ export function WeekStrip({
         <button
           key={w.monday}
           type="button"
+          data-monday={w.monday}
           data-open={w.monday === open ? "1" : undefined}
           className={
             "sch-weekchip" +

@@ -1,11 +1,13 @@
 /**
  * G-41 (AR-88, AR-30) — **полные права модератора и аудит как противовес.**
  *
- * Перечислением по ВСЕМ 48 мутациям версии (`70-screens.md` §11, строки
- * 39–48 — кабинет администратора 1.3.0, право `school.admin`):
+ * Перечислением по ВСЕМ мутациям версии (`70-screens.md` §11: 48 строк 1.3.0 —
+ * из них 39–48 кабинет администратора, право `school.admin`; плюс 49–56 пакета
+ * 04.09 1.5.0):
  *   · модератор проходит каждую — отказа ПО ПРАВУ он получить не может;
  *   · четыре читающие роли не проходят ни одной;
- *   · педагог проходит только отметки и темы, и только в своих уроках;
+ *   · педагог проходит ровно пять прав: отметки, темы, аватар, предпочтения,
+ *     отмена своего урока (AR-206, AR-207) — и только в своих уроках;
  *   · каждое действие модератора попадает в аудит С ИДЕНТИЧНОСТЬЮ;
  *   · гейт реальности `LESSON_NOT_HELD` срабатывает и для модератора: полные
  *     права не отменяют факта календаря (AR-74);
@@ -74,9 +76,17 @@ async function main(): Promise<void> {
     check(mut.length === 0, `${role}: ни одного мутационного права школы (кроме собственной аватарки) — ${mut.join(', ') || 'пусто'}`);
     check(READ_PERMISSIONS.every((p) => acc.permissions.includes(p)), `${role}: все пять читающих прав выданы (AR-69)`);
   }
+  // AR-206, AR-207: педагог сам задаёт рабочие дни и отменяет СВОЙ урок — два
+  // права с суффиксом `.self`; принадлежность проверяет сервис, не каталог.
+  const TEACHER_MUT = ['journal.mark.post', 'journal.topic.set', 'staff.self.write', 'schedule.preference.self', 'lesson.cancel.self'];
   const teacher = await authz.resolveForRoles(['teacher']);
   check(teacher.permissions.includes('journal.mark.post') && teacher.permissions.includes('journal.topic.set'),
     'педагог держит отметки и темы — но принадлежность урока проверяется сервисом, а не каталогом');
+  check(
+    TEACHER_MUT.every((p) => teacher.permissions.includes(p)) &&
+      MUTATION_PERMISSIONS.filter((p) => !TEACHER_MUT.includes(p)).every((p) => !teacher.permissions.includes(p)),
+    `педагог держит ровно пять мутационных прав: ${TEACHER_MUT.join(', ')} (AR-206, AR-207)`,
+  );
   check(!teacher.permissions.includes('contingent.write') && !teacher.permissions.includes('staff.manage'),
     'педагог не ведёт контингент и не ведёт персонал');
   for (const role of ['parent', 'student'] as const) {
@@ -114,7 +124,10 @@ async function main(): Promise<void> {
       }
     }
   }
-  check(rows.length >= 48, `мутаций контура обнаружено: ${rows.length} (в §11 их 48: 38 базовых + 10 кабинета администратора)`);
+  // §11: 48 строк 1.3.0 (38 базовых + 10 кабинета администратора) + 8 строк
+  // пакета 04.09 (49–56) = 56; нижняя граница — 48 плюс две мутации карточки
+  // (`account`, `password`), остальные шесть добавляют другие модули пакета.
+  check(rows.length >= 50, `мутаций контура обнаружено: ${rows.length} (в §11 их 56 после пакета 04.09)`);
   const gated = rows.filter((r) => permsOf(r).length > 0);
   const passesBy = (acc: { permissions: string[] }, r: { perm: string | string[] | undefined }): string[] =>
     permsOf(r).filter((p) => acc.permissions.includes(p));
@@ -133,8 +146,8 @@ async function main(): Promise<void> {
     check(passes.length === 0, `${role} не проходит ни одной мутации школы (${passes.map((p) => p.route).join(', ') || 'ноль'})`);
   }
   const teacherPasses = gated.filter((r) => passesBy(teacher, r).length > 0);
-  check(teacherPasses.every((r) => passesBy(teacher, r).every((p) => ['journal.mark.post', 'journal.topic.set', 'staff.self.write'].includes(p))),
-    `педагог проходит только ${[...new Set(teacherPasses.flatMap((r) => passesBy(teacher, r)))].join(', ')}`);
+  check(teacherPasses.every((r) => passesBy(teacher, r).every((p) => TEACHER_MUT.includes(p))),
+    `педагог проходит только ${[...new Set(teacherPasses.flatMap((r) => passesBy(teacher, r)))].join(', ')} (AR-206, AR-207)`);
 
   // ─── 3. гейт реальности действует и на модератора ───
   const s = await readySchool(b, 'Школа модератора');
@@ -184,10 +197,11 @@ async function main(): Promise<void> {
     check(Boolean(markEntry), 'отметка администратора в чужом уроке записана в аудит с его идентичностью');
   });
 
-  // ─── 5. все 25 событий версии аудируются ───
+  // ─── 5. все 32 события версии аудируются (25 + семь пакета 04.09) ───
+  check(EVENT_CONTRACT.length === 32, `в контракте ${EVENT_CONTRACT.length} события (22 + 3 кабинета + 7 пакета 04.09 = 32)`);
   const missing = EVENT_CONTRACT.filter((r) => !AUDITED_TYPES.includes(r.type));
   check(missing.length === 0, missing.length === 0
-    ? `все ${EVENT_CONTRACT.length} событий версии попадают в аудит-леджер`
+    ? `все ${EVENT_CONTRACT.length} события версии попадают в аудит-леджер`
     : `вне аудита остались: ${missing.map((m) => m.type).join(', ')}`);
 
   // ─── 6. каждое событие имеет подпись для строки S-60.audit (AR-116) ───

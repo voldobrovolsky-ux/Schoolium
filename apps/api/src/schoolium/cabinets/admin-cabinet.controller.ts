@@ -58,7 +58,7 @@ export class AdminCabinetController {
     return this.svc.policy();
   }
 
-  /** §11 строка 42 · лимиты сессий по ролям (AR-188). */
+  /** §11 строка 42 · лимиты сессий по ролям (AR-188) и носителей ролей (AR-205): `sessionLimits` + `roleLimits`. */
   @RequirePermission('school.admin')
   @Put('policy')
   setPolicy(@Req() req: Req0, @Body() body: SetAccessPolicyDto) {

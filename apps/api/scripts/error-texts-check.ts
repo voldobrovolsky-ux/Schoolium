@@ -84,6 +84,17 @@ const SAMPLE: Record<ErrorCode, Record<string, unknown>> = {
   PASSWORD_TOO_SHORT: {},
   LOGIN_FAILED: {},
   ACTIVATION_REVOKED: {},
+  // 1.5.0 — пакет 04.09 (AR-199…AR-207): цифры примеров §9
+  SUBJECT_EXISTS: { name: 'Алгебра', classLabel: '7' },
+  GROUPS_BOUND: { classLabel: '7А', groups: '3, 4' },
+  ROLE_LIMIT_REACHED: { roleLabel: 'Директор', count: 1, limit: 1 },
+  ADMIN_ACCOUNT_LOCKED: { name: 'Иванова М. И.' },
+  LINK_EXHAUSTED: { useCount: 3, maxUses: 3 },
+  TEACHER_DAYS_SHORT: { teacher: 'Иванова М. И.', hours: 24, slots: 15, days: 'ПН, СР, ПТ' },
+  NOT_YOUR_LESSON: { teacher: 'Иванова М. И.' },
+  LESSON_ALREADY_HELD: { date: '14.09', time: '09:00' },
+  LESSON_CANCELLED: {},
+  SUBSTITUTE_BUSY: { teacher: 'Петров П. П.', classLabel: '6А' },
 };
 
 /** Строки §9, чей текст объявлен НЕ показываемым пользователю. */

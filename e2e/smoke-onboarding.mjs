@@ -29,7 +29,7 @@
  *
  * Мобильный прогон доказывает сверх десктопного три вещи ворот этапа 3:
  * `body` не скроллится по горизонтали НИ НА ОДНОМ экране, тап-мишени ≥44px
- * перечислены, и каждая из восемнадцати модалок открыта и закрыта.
+ * перечислены, и каждая из двадцати трёх модалок реестра открыта и закрыта.
  *
  * Запуск: node e2e/smoke-onboarding.mjs   (нужен Postgres; API/web поднимает сам)
  * Env: SMOKE_DATABASE_URL, SMOKE_SCHOOL_DAY, SMOKE_VIEWPORT, CHROMIUM_PATH.
@@ -189,6 +189,10 @@ const tapTargets = async (page, where) => {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) continue;            // не отрисован
       if (getComputedStyle(el).visibility === 'hidden') continue;
+      // Невидимые помощники доступности (VisuallyHidden 1×1: фокус-прокси
+      // области тостов Radix, aria-hidden) — не мишени: их не видно и не нажать.
+      if (r.width <= 1 && r.height <= 1) continue;
+      if (el.getAttribute('aria-hidden') === 'true') continue;
       // Ячейка журнала — не кнопка: она tabindex-навигация по таблице, её
       // мишень задаётся высотой строки, и реестр её размер не называет.
       if (el.closest('.sch-journal')) continue;
@@ -215,7 +219,9 @@ const tapTargets = async (page, where) => {
  * `M-21`, `M-23`, `M-24`, `M-26` — задокументированные исключения реестра,
  * смок их не требует.
  */
-const MODALS = ['M-01', 'M-02', 'M-03', 'M-04', 'M-05', 'M-06', 'M-07', 'M-08', 'M-09', 'M-10', 'M-11', 'M-12', 'M-13', 'M-14', 'M-15', 'M-22', 'M-25', 'M-27', 'M-28', 'M-29'];
+// Пакет 04.09 (AR-203, AR-206, AR-207): M-30 «Мои предпочтения», M-31 «Отмена урока»,
+// M-32 «Задать пароль» — открываются и закрываются в блоках S-40 (педагог) и S-31.
+const MODALS = ['M-01', 'M-02', 'M-03', 'M-04', 'M-05', 'M-06', 'M-07', 'M-08', 'M-09', 'M-10', 'M-11', 'M-12', 'M-13', 'M-14', 'M-15', 'M-22', 'M-25', 'M-27', 'M-28', 'M-29', 'M-30', 'M-31', 'M-32'];
 /** `M-10`, `M-11`, `M-12` живут в DOM под именами своих экранов (реестр §3). */
 const MODAL_NODE = { 'M-10': 'S-42.refusal', 'M-11': 'S-51', 'M-12': 'S-52' };
 const modalsOpened = new Set();
@@ -592,9 +598,43 @@ async function main() {
     // Два вида (правка 2026-08-31): дисциплины со строчками классов и классы
     // со строчками предметов; фильтр и кнопка компетенций стоят на экране.
     await hasAll(page, ['S-20.view', 'S-20.group.subject', 'S-20.btn.competence']);
+    // Свежая карточка без педагога — незаполненная позиция: фон и слово (AR-208).
+    await has(page, 'S-20.card.subject', 'строка позиции');
+    const unfilledNew = await page.locator('[data-testid="S-20.card.subject"][data-unfilled="true"]').count();
+    if (unfilledNew >= 1) console.log('    ✅ позиция без педагога помечена data-unfilled (AR-208)');
+    else { console.error('    ❌ позиция без педагога не помечена data-unfilled'); failures++; }
+    // AR-208: «По классам» раскрывает справа от фильтра ряд чипов классов —
+    // мультивыбор, по умолчанию все; карточка класса — только у отмеченных.
     await page.locator('[data-testid="S-20.view"] button', { hasText: 'По классам' }).click();
+    await page.waitForSelector('[data-testid="S-20.chips.classes"]', { timeout: 20_000 });
+    await has(page, 'S-20.chips.classes', 'ряд чипов классов раскрылся при «По классам» (AR-208)');
     await has(page, 'S-20.group.class', 'вид «По классам»: карточка класса со строчками предметов');
+    const classChips = page.locator('[data-testid="S-20.chip.class"]');
+    const chipCount = await classChips.count();
+    const allPressed = chipCount > 0 && (await classChips.evaluateAll((els) => els.every((el) => el.getAttribute('aria-pressed') === 'true')));
+    if (chipCount >= 1 && allPressed) console.log(`    ✅ S-20.chip.class — чипов классов ${chipCount}, все отмечены по умолчанию`);
+    else { console.error(`    ❌ S-20.chip.class: чипов ${chipCount}, все отмечены — ${allPressed}`); failures++; }
+    const cardsBefore = await page.locator('[data-testid="S-20.group.class"]').count();
+    await classChips.first().click();
+    const fewer = await page
+      .waitForFunction((n) => document.querySelectorAll('[data-testid="S-20.group.class"]').length < n, cardsBefore, { timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (fewer) console.log(`    ✅ снятый чип убирает карточку класса (${cardsBefore} → ${await page.locator('[data-testid="S-20.group.class"]').count()})`);
+    else { console.error('    ❌ снятый чип класса не убрал его карточку'); failures++; }
+    await classChips.first().click();
+    const restored = await page
+      .waitForFunction((n) => document.querySelectorAll('[data-testid="S-20.group.class"]').length === n, cardsBefore, { timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (restored) console.log('    ✅ отмеченный обратно чип возвращает карточку класса');
+    else { console.error('    ❌ карточка класса не вернулась после повторного тапа по чипу'); failures++; }
+    if (MOBILE) await tapTargets(page, 'S-20 · чипы классов');
+    await shot(page, 'S-20-classes');
     await page.locator('[data-testid="S-20.view"] button', { hasText: 'По дисциплинам' }).click();
+    // При «По дисциплинам» ряд сворачивается (150 мс) и уходит из DOM.
+    await page.waitForSelector('[data-testid="S-20.chips.classes"]', { state: 'detached', timeout: 20_000 });
+    console.log('    ✅ ряд чипов классов свернулся при «По дисциплинам»');
     await shot(page, 'S-20-subjects');
 
     // ── S-30 · персонал ──
@@ -651,6 +691,11 @@ async function main() {
     await teacherCards.last().click();
     await page.waitForSelector('[data-testid="M-06"]', { timeout: 20_000 });
     await modalOpen(page, 'M-06');
+    // AR-203: M-06 полноэкранная на ОБЕИХ раскладках — форма читается атрибутом
+    // слоя (`modalOpen` печатает её на мобайле; здесь она утверждается и на десктопе).
+    const m06Shape = await page.locator('[data-testid="M-06"]').first().getAttribute('data-shape');
+    if (m06Shape === 'fullscreen') console.log(`    ✅ M-06 · data-shape=fullscreen на ${MOBILE ? 'мобайле' : 'десктопе'} (AR-203)`);
+    else { console.error(`    ❌ M-06 · data-shape=${m06Shape}, ждали fullscreen на обеих раскладках (AR-203)`); failures++; }
     // Учётка заведена, входа не было: именной QR — над кодом ФИО (AR-161).
     await hasAll(page, ['S-31.qr.fullName', 'S-31.qr', 'S-31.status', 'S-31.btn.close']);
     const qrName = (await page.locator('[data-testid="S-31.qr.fullName"]').innerText()).trim();
@@ -696,10 +741,51 @@ async function main() {
     if (del + deact === 1) console.log(`    ✅ ровно одна кнопка из пары «удалить/деактивировать» (${del ? 'удалить' : 'деактивировать'})`);
     else { console.error(`    ❌ кнопок пары «удалить/деактивировать» на экране ${del + deact}, должна быть одна`); failures++; }
     await shot(page, 'S-31-activated');
-    // Код входа на случай «телефона нет под рукой» (`S-05`) — шесть цифр.
+
+    // Плашки учётки (AR-203): ФИО, логин, маска пароля; ФИО и логин правятся
+    // инлайн — отчество добавляется и возвращается в плашке из ответа сервера.
+    await hasAll(page, ['S-31.plaque.name', 'S-31.plaque.username', 'S-31.plaque.password', 'S-31.btn.editAccount']);
+    await click(page, 'S-31.btn.editAccount');
+    await page.waitForSelector('[data-testid="S-31.input.middleName"]', { timeout: 20_000 });
+    await hasAll(page, ['S-31.input.lastName', 'S-31.input.firstName', 'S-31.input.username', 'S-31.btn.saveAccount', 'S-31.btn.cancelAccount']);
+    await fill(page, 'S-31.input.middleName', 'Петрович');
+    await shot(page, 'S-31-edit-account');
+    await click(page, 'S-31.btn.saveAccount');
+    await page.waitForSelector('[data-testid="S-31.plaque.name"]', { timeout: 20_000 });
+    const plaqueName = (await page.locator('[data-testid="S-31.plaque.name"]').innerText()).replace(/\s+/g, ' ');
+    if (plaqueName.includes('Петрович')) console.log(`    ✅ ФИО обновлено инлайн (PUT /staff/:id/account): «${plaqueName.trim()}»`);
+    else { console.error(`    ❌ плашка ФИО после сохранения: «${plaqueName}», ждали отчество «Петрович»`); failures++; }
+
+    // M-32 «Задать пароль» (AR-203): поповер у кнопки / нижний лист; пустое поле —
+    // сервер генерирует; пароль показывается один раз (AR-156).
+    await click(page, 'S-31.btn.setPassword');
+    await page.waitForSelector('[data-testid="M-32"]', { timeout: 20_000 });
+    await modalOpen(page, 'M-32');
+    await hasAll(page, ['M-32.input.password', 'M-32.btn.save']);
+    if (MOBILE) await tapTargets(page, 'M-32 · задать пароль');
+    await shot(page, 'M-32-set-password');
+    await click(page, 'M-32.btn.save');
+    await page.waitForSelector('[data-testid="credentials.password"]', { timeout: 20_000 });
+    await has(page, 'credentials.password', 'сгенерированный пароль показан один раз (AR-156)');
+    await modalClosed(page, 'M-32');
+
+    // Ссылка входа с параметрами (AR-204): 24 часа, одно открытие — панель
+    // называет счётчик «использований 0 из 1»; выдаёт `staff.manage`.
+    await hasAll(page, ['S-31.select.linkTtl', 'S-31.select.linkUses', 'S-31.btn.loginLink']);
+    await page.locator('[data-testid="S-31.select.linkTtl"]').selectOption('24');
+    await page.locator('[data-testid="S-31.select.linkUses"]').selectOption('1');
+    await click(page, 'S-31.btn.loginLink');
+    await page.waitForSelector('[data-testid="S-31.loginLink"]', { timeout: 20_000 });
+    const linkText = (await page.locator('[data-testid="S-31.loginLink"]').innerText()).replace(/\s+/g, ' ');
+    if (linkText.includes('из 1')) console.log('    ✅ ссылка входа с лимитом открытий: панель считает «из 1» (AR-204)');
+    else { console.error(`    ❌ панель ссылки входа без счётчика «из 1»: «${linkText}»`); failures++; }
+    await shot(page, 'S-31-login-link');
+
+    // Код входа на случай «телефона нет под рукой» (`S-05`) — шесть цифр и таймер.
     await click(page, 'S-31.btn.loginCode');
     await page.waitForSelector('[data-testid="S-31.loginCode"]', { timeout: 20_000 });
     await has(page, 'S-31.loginCode', 'код показывается модератору, а не отправляется SMS (AR-94)');
+    await has(page, 'S-31.timer.loginCode', 'таймер «мм:сс» до истечения кода (AR-203)');
     await shot(page, 'S-31-login-code');
     // M-07 — добавление роли: поповер у кнопки на десктопе, нижний лист на
     // мобайле (§3). Роль не выдаём — открыть и закрыть достаточно, а лишняя
@@ -783,22 +869,78 @@ async function main() {
     await page.keyboard.press('Escape');
     await modalClosed(page, 'M-04');
 
-    // ── M-25 · управление компетенцией (AR-179): педагог уже есть ──
+    // ── M-25 · управление компетенцией (AR-179, AR-202): педагог уже есть ──
     console.log('▶ M-25 · управление компетенцией');
-    await click(page, 'S-20.btn.competence');
-    await page.waitForSelector('[data-testid="M-25"]', { timeout: 20_000 });
+    // Открыть M-25 на педагоге и раскрыть первую дисциплину — дважды за блок.
+    const openCompetence = async () => {
+      await click(page, 'S-20.btn.competence');
+      await page.waitForSelector('[data-testid="M-25"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="M-25.select.teacher"] select', { timeout: 20_000 });
+      await page.locator('[data-testid="M-25.select.teacher"] select').selectOption({ index: 1 });
+      await page.waitForSelector('[data-testid="M-25.list.subjects"]', { timeout: 20_000 });
+      await page.locator('[data-testid="M-25.group.subject"]').first().click(); // раскрыть дисциплину
+    };
+    // Сохранение: занятые позиции сервер возвращает подтверждением `M-26` —
+    // тогда «Заменить всех»; иначе модалка закрывается сама.
+    const saveCompetence = async () => {
+      await click(page, 'M-25.btn.save');
+      await Promise.race([
+        page.waitForSelector('[data-testid="M-26"]', { timeout: 20_000 }),
+        page.waitForSelector('[data-testid="M-25"]', { state: 'detached', timeout: 20_000 }),
+      ]).catch(() => null);
+      if ((await page.locator('[data-testid="M-26"]').count()) > 0) {
+        console.log('    · занятая позиция → M-26, «Заменить всех»');
+        await click(page, 'M-26.btn.replace');
+      }
+      await modalClosed(page, 'M-25');
+    };
+    const firstRowText = async () => {
+      await page.waitForSelector('[data-testid="S-20.card.subject"]', { timeout: 20_000 });
+      return (await page.locator('[data-testid="S-20.card.subject"]').first().innerText()).replace(/\s+/g, ' ').trim();
+    };
+
+    await openCompetence();
     await modalOpen(page, 'M-25');
-    await page.waitForSelector('[data-testid="M-25.select.teacher"] select', { timeout: 20_000 });
     // выбор педагога открывает чеклист; его текущая позиция уже отмечена
-    await page.locator('[data-testid="M-25.select.teacher"] select').selectOption({ index: 1 });
-    await page.waitForSelector('[data-testid="M-25.list.subjects"]', { timeout: 20_000 });
-    await page.locator('[data-testid="M-25.group.subject"]').first().click(); // раскрыть дисциплину
     const pre = await page.locator('[data-testid="M-25.check.position"]:checked').count();
     if (pre >= 1) console.log(`    ✅ текущие позиции педагога предотмечены (${pre})`);
     else { console.error('    ❌ чеклист не предзаполнен текущими привязками'); failures++; }
+    // Группы назначаются здесь же (AR-202): чип «по группам» у строки класса;
+    // класс смока без групп → селект деления, деление — сразу (PUT /classes/:id/groups).
+    await has(page, 'M-25.toggle.groups', 'чип «по группам» у строки класса (AR-202)');
+    await page.locator('[data-testid="M-25.toggle.groups"]').first().click();
+    await page.waitForSelector('[data-testid="M-25.select.groupCount"], [data-testid="M-25.check.group"]', { timeout: 20_000 });
+    if ((await page.locator('[data-testid="M-25.select.groupCount"]').count()) > 0) {
+      await has(page, 'M-25.select.groupCount', 'класс без групп: селект «разделить на 2 / 3 / 4 группы»');
+      await page.locator('[data-testid="M-25.select.groupCount"]').first().selectOption('2');
+    }
+    await page.waitForSelector('[data-testid="M-25.check.group"]', { timeout: 20_000 });
+    const groupChecks = await page.locator('[data-testid="M-25.check.group"]').count();
+    if (groupChecks === 2) console.log('    ✅ M-25.check.group — две галочки групп после деления на 2');
+    else { console.error(`    ❌ галочек групп ${groupChecks}, ждали 2`); failures++; }
+    await page.locator('[data-testid="M-25.check.group"]').first().check();
     await shot(page, 'M-25-competence');
-    await page.keyboard.press('Escape');
-    await modalClosed(page, 'M-25');
+    await saveCompetence();
+    // В `S-20` строка позиции получила группу: «… · 1 группа — Смирнов О.» (AR-208),
+    // группа 2 без педагога — позиция незаполненная.
+    const rowGrouped = await firstRowText();
+    if (/1 группа/.test(rowGrouped)) console.log(`    ✅ строка позиции с группой: «${rowGrouped}»`);
+    else { console.error(`    ❌ строка позиции без «1 группа»: «${rowGrouped}»`); failures++; }
+    const unfilledGrouped = await page.locator('[data-testid="S-20.card.subject"][data-unfilled="true"]').count();
+    if (unfilledGrouped >= 1) console.log('    ✅ позиция с непокрытой группой помечена data-unfilled');
+    else { console.error('    ❌ строка с непокрытой группой не помечена data-unfilled'); failures++; }
+    // Возврат к «весь класс»: дальше смок собирает расписание, и предмет с
+    // непокрытой группой уронил бы генерацию отказом SUBJECT_UNCOVERED.
+    await openCompetence();
+    const groupPre = await page.locator('[data-testid="M-25.check.group"]:checked').count();
+    if (groupPre === 1) console.log('    ✅ групповая позиция педагога предотмечена');
+    else { console.error(`    ❌ предотмеченных групп ${groupPre}, ждали 1`); failures++; }
+    await page.locator('[data-testid="M-25.toggle.groups"]').first().click(); // обратно на «весь класс»
+    await page.locator('[data-testid="M-25.check.position"]').first().check();
+    await saveCompetence();
+    const rowClass = await firstRowText();
+    if (!/группа/.test(rowClass) && !/нет педагога/.test(rowClass)) console.log(`    ✅ позиция снова классовая: «${rowClass}»`);
+    else { console.error(`    ❌ позиция не вернулась к «весь класс»: «${rowClass}»`); failures++; }
 
     // ── S-40 · расписание: до сборки уроков нет ──
     console.log('▶ S-40 · расписание');
@@ -866,6 +1008,15 @@ async function main() {
     // Раздел скелета дня (AR-171, фаза IV) стоит в той же форме.
     await hasAll(page, ['S-41.skeleton', 'S-41.grid.kind', 'S-41.skel.day', 'S-41.skel.add.lesson', 'S-41.skel.add.event']);
     await fill(page, 'S-41.input.slotsPerDay', '5');
+    // Обед по классам (AR-200) — блок в разделе скелета, строка на класс; без
+    // скелета верхняя граница берётся из «уроков в день» (5 → «после 1-го…4-го»).
+    // Первому классу — «после 1-го урока»: его урочная позиция 2 останется без
+    // урока, что генератор обязан учесть (G-86), а сетка — собраться.
+    await hasAll(page, ['S-41.lunch', 'S-41.lunch.row', 'S-41.lunch.select']);
+    await page.locator('[data-testid="S-41.lunch.select"]').first().selectOption('1');
+    const lunchPicked = await page.locator('[data-testid="S-41.lunch.select"]').first().inputValue();
+    if (lunchPicked === '1') console.log('    ✅ обед первого класса — «после 1-го урока» (S-41.lunch.select)');
+    else { console.error(`    ❌ селект обеда не принял значение: «${lunchPicked}»`); failures++; }
     // Длина дня считается на экране из четырёх параметров, а не «примерно».
     const dayLen = await page.locator('[data-testid="S-41.calc.dayLength"]').innerText();
     console.log(`    · длина учебного дня по параметрам: ${dayLen.replace(/\s+/g, ' ').trim()}`);
@@ -939,6 +1090,108 @@ async function main() {
       if (stale === 0) console.log('    ✅ сразу после подтверждения плашки «устарело» нет');
       else { console.error('    ❌ подтверждённая сетка объявлена устаревшей'); failures++; }
       await shot(page, 'S-40-confirmed');
+
+      // ── S-40 · педагог: предпочтения и отмена урока (AR-206, AR-207) ──
+      // Стендовый телефон педагога («Смирнов Олег», активирован выше) идёт тем
+      // же путём, что человек: кнопка → модалка → сервер → маркер в строке.
+      console.log('▶ S-40 · педагог: предпочтения и отмена урока');
+      // Часы телефона — на учебный день смока (AR-117): «урок не начался» экран
+      // судит своими часами, сервер — SCHOOL_TODAY; расходиться им нельзя, иначе
+      // кнопка отмены стояла бы не на тех уроках, что сервер считает будущими.
+      await phone.clock.setFixedTime(new Date(`${SCHOOL_DAY}T08:00:00`));
+      await phone.goto(`${WEB}/schedule`);
+      await phone.waitForSelector('[data-testid="S-40.grid.week"]', { timeout: 30_000 });
+      await has(phone, 'S-40.btn.preferences', 'у педагога — «Мои предпочтения» (AR-206)');
+      // Вид у педагога по умолчанию — «Преподаватель», и это он сам (AR-206).
+      const viewChip = (await phone.locator('[data-testid="S-40.view"] button[aria-pressed="true"]').innerText()).trim();
+      if (viewChip === 'Преподаватель') console.log('    ✅ вид по умолчанию у педагога — «Преподаватель»');
+      else { console.error(`    ❌ вид по умолчанию у педагога: «${viewChip}», ждали «Преподаватель»`); failures++; }
+      await shot(phone, 'S-40-teacher-week');
+
+      // M-30 — предпочтения: чипы по учебным дням школы. Выбираются ВСЕ дни:
+      // это «любой день» для генератора (последующие генерации смока не
+      // стеснены), а сохранение всё равно роняет сетку в stale (AR-206) —
+      // плашку ниже ждёт свой шаг, ему это не мешает.
+      await click(phone, 'S-40.btn.preferences');
+      await phone.waitForSelector('[data-testid="M-30"]', { timeout: 20_000 });
+      await modalOpen(phone, 'M-30');
+      await phone.waitForSelector('[data-testid="M-30.chip.day"]', { timeout: 20_000 });
+      await hasAll(phone, ['M-30.chip.day', 'M-30.input.note', 'M-30.btn.save']);
+      const dayChips = phone.locator('[data-testid="M-30.chip.day"]');
+      const chipCount = await dayChips.count();
+      for (let i = 0; i < chipCount; i++) await dayChips.nth(i).click();
+      const pressed = await phone.locator('[data-testid="M-30.chip.day"][aria-pressed="true"]').count();
+      if (chipCount >= 5 && pressed === chipCount) console.log(`    ✅ чипов дней ${chipCount} (по учебным дням школы), выбраны все`);
+      else { console.error(`    ❌ чипов дней ${chipCount}, выбрано ${pressed}`); failures++; }
+      await fill(phone, 'M-30.input.note', 'смок: любой день');
+      if (MOBILE) await tapTargets(phone, 'M-30 · мои предпочтения');
+      await shot(phone, 'M-30-preferences');
+      await click(phone, 'M-30.btn.save');
+      await modalClosed(phone, 'M-30');
+      const savedPref = await api(phone, 'GET', '/api/v1/schedule/preferences/me');
+      if (Array.isArray(savedPref.workDays) && savedPref.workDays.length === chipCount)
+        console.log(`    ✅ предпочтения сохранены: дни ${savedPref.workDays.join(', ')}`);
+      else { console.error(`    ❌ сервер хранит дни ${JSON.stringify(savedPref.workDays)}, ждали ${chipCount}`); failures++; }
+
+      // Отмена урока (AR-207): свой БУДУЩИЙ урок — строго позже учебного дня
+      // смока, иначе сервер ответит честным LESSON_ALREADY_HELD. Урок берётся из
+      // датированного оверлея тем же контрактом, что читает экран.
+      const isoPlus = (iso, n) => { const d = new Date(`${iso}T00:00:00.000Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+      const mondayIso = (iso) => isoPlus(iso, -((new Date(`${iso}T00:00:00.000Z`).getUTCDay() + 6) % 7));
+      const meTeacher = await api(phone, 'GET', '/api/v1/me');
+      const mine = await api(phone, 'GET', `/api/v1/schedule/lessons?from=${isoPlus(SCHOOL_DAY, 1)}&to=${isoPlus(SCHOOL_DAY, 20)}&teacherId=${meTeacher.userId}`);
+      const target = mine
+        .filter((l) => !l.detached && !l.substitution)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.slotNo - b.slotNo)[0];
+      if (!target) {
+        console.error(`    ❌ у педагога нет будущего материализованного урока после ${SCHOOL_DAY} (уроков в оверлее: ${mine.length})`);
+        failures++;
+      } else {
+        console.log(`    · будущий урок педагога: ${target.date}, ${target.slotNo}-й, ${target.subjectName} · ${target.classLabel}`);
+        // К дню урока: на телефоне — лентой дней `S-40.daystrip`, на десктопе — лентой недель.
+        if (MOBILE) await phone.locator(`[data-testid="S-40.daystrip"] button[data-date="${target.date}"]`).click();
+        else await phone.locator(`[data-testid="S-40.weeks"] button[data-monday="${mondayIso(target.date)}"]`).click();
+        const cancelBtn = phone.locator(`[data-testid="S-40.btn.cancelLesson"][data-lesson-id="${target.lessonId}"]`);
+        await cancelBtn.waitFor({ timeout: 20_000 });
+        await has(phone, 'S-40.btn.cancelLesson', 'на своём будущем уроке — «Отменить урок»');
+        if (MOBILE) await tapTargets(phone, 'S-40 · педагог');
+        await shot(phone, 'S-40-teacher-cancel');
+        await cancelBtn.click();
+        await phone.waitForSelector('[data-testid="M-31"]', { timeout: 20_000 });
+        await modalOpen(phone, 'M-31');
+        await hasAll(phone, ['M-31.select.reason', 'M-31.input.reasonText', 'M-31.btn.submit']);
+        await phone.locator('[data-testid="M-31.select.reason"]').selectOption('training');
+        await fill(phone, 'M-31.input.reasonText', 'курсы повышения квалификации');
+        if (MOBILE) await tapTargets(phone, 'M-31 · отмена урока');
+        await click(phone, 'M-31.btn.submit');
+        await phone.waitForSelector('[data-testid="M-31.result"]', { timeout: 20_000 });
+        const outcome = (await phone.locator('[data-testid="M-31.result"]').innerText()).replace(/\s+/g, ' ').trim();
+        // Оба исхода легальны: в школе смока педагог той же дисциплины может и не найтись.
+        if (/^Замена: .+/.test(outcome) || outcome === 'Замены нет — сообщено завучу') console.log(`    ✅ итог подбора замены: «${outcome}»`);
+        else { console.error(`    ❌ неожиданный итог подбора: «${outcome}»`); failures++; }
+        await shot(phone, 'M-31-result');
+        await phone.keyboard.press('Escape');
+        await modalClosed(phone, 'M-31');
+        // После закрытия экран перечитывает оверлей — строка урока получает маркер.
+        const marker = phone.locator(
+          `[data-lesson-id="${target.lessonId}"] [data-testid="S-40.cell.cancelled"], [data-lesson-id="${target.lessonId}"] [data-testid="S-40.cell.substituted"]`,
+        );
+        await marker.first().waitFor({ timeout: 20_000 });
+        const markerId = await marker.first().getAttribute('data-testid');
+        const markerText = (await marker.first().innerText()).replace(/\s+/g, ' ').trim();
+        const consistent = /^Замена/.test(outcome) === (markerId === 'S-40.cell.substituted');
+        if (consistent) console.log(`    ✅ строка урока получила маркер ${markerId}: «${markerText}»`);
+        else { console.error(`    ❌ маркер строки ${markerId} расходится с итогом «${outcome}»`); failures++; }
+        await shot(phone, 'S-40-teacher-marked');
+        // Модератор: при отмене без замены — плашка «Уроков без замены: N»
+        // (AR-207). Её наличие — факт, не дефект; отсутствие здесь не судится:
+        // плашка считает три недели от часов модератора, а они не стендовые.
+        await page.goto(`${WEB}/schedule`);
+        await page.waitForSelector('[data-testid="S-40.grid.week"]', { timeout: 30_000 });
+        const noSub = await page.locator('[data-testid="S-40.banner.noSubstitute"]').count();
+        console.log(`    · модератор: плашка «Уроков без замены» ${noSub ? 'показана' : 'не показана'} (итог педагога: «${outcome}»)`);
+        await shot(page, 'S-40-moderator-after-cancel');
+      }
 
       // ── S-50 · журнал: колонки = материализованные уроки ──
       // Пара «класс × предмет» выбирается не наугад: берётся та, у которой урок
@@ -1364,7 +1617,15 @@ async function main() {
     // на стендовом телефоне, а она нужна проверке оболочки ниже.
     await page.goto(`${WEB}/admin/policy`);
     await page.waitForSelector('[data-testid="S-62.policy.limits"]', { timeout: 20_000 });
-    await hasAll(page, ['S-62.policy.limits', 'S-62.policy.btn.save', 'S-62.policy.incident']);
+    await hasAll(page, ['S-62.policy.limits', 'S-62.policy.roleLimits', 'S-62.policy.btn.save', 'S-62.policy.incident']);
+    // Лимит носителей роли (AR-205): второму завучу (УР) политика даёт место;
+    // одна кнопка шлёт оба словаря, «Сохранено» — ответ сервера, форма — из него.
+    await page.locator('#role-limit-deputy_academic').selectOption('2');
+    await click(page, 'S-62.policy.btn.save');
+    await page.locator('.sch-adm-saved', { hasText: 'Сохранено' }).waitFor({ timeout: 20_000 });
+    const deputyLimit = await page.locator('#role-limit-deputy_academic').inputValue();
+    if (deputyLimit === '2') console.log('    ✅ лимит носителей роли завуча (УР) сохранён: 2 (AR-205)');
+    else { console.error(`    ❌ лимит носителей deputy_academic после сохранения: «${deputyLimit}», ждали «2»`); failures++; }
     await click(page, 'S-62.policy.btn.incident');
     await page.waitForSelector('[data-testid="M-28"]', { timeout: 20_000 });
     await modalOpen(page, 'M-28');

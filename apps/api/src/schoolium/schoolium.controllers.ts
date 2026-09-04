@@ -14,8 +14,10 @@ import type {
   FillStaffCardDto,
   MarkValue,
   SchoolRole,
+  SetClassLunchDto,
   SetLoadDto,
   SetPrioritiesDto,
+  SetTeacherPreferenceDto,
   SetTermsDto,
   SwapSlotsDto,
   UpsertStudentDto,
@@ -99,6 +101,13 @@ export class ClassesController {
   @Delete(':id')
   removeClass(@Req() req: Req0, @Param('id') id: string) {
     return this.svc.deleteClass(id, actorOf(req));
+  }
+
+  /** §11 строка 50 · `M-25.select.groupCount` (AR-202): число групп класса 0/2/3/4, `GROUPS_BOUND` при живых групповых привязках. */
+  @RequirePermission('contingent.write')
+  @Put(':id/groups')
+  setGroups(@Req() req: Req0, @Param('id') id: string, @Body() body: import('@edustore/shared').SetClassGroupsDto) {
+    return this.svc.setGroups(id, body, actorOf(req));
   }
 }
 
@@ -345,7 +354,7 @@ export class SubjectsController {
     return this.svc.bindTokenStatus(id);
   }
 
-  /** §11 строка 13 · `M-03`. */
+  /** §11 строка 13 · `M-03`: имя канонизируется по ключу (AR-201), дубль в классе — `SUBJECT_EXISTS`. */
   @RequirePermission('subject.write')
   @Post()
   create(@Body() body: CreateSubjectDto) {
@@ -373,7 +382,7 @@ export class SubjectsController {
     return this.svc.bindTeacherManual(id, body, actorOf(req));
   }
 
-  /** §11 строка 15б · `M-25` (AR-179): компетенции педагога галочками, с заменой и откреплением. */
+  /** §11 строка 15б · `M-25` (AR-179, AR-202): компетенции педагога галочками — класс либо группы (`positions`), с заменой и откреплением. */
   @RequirePermission('subject.write')
   @Post('competence')
   competence(@Req() req: Req0, @Body() body: SaveCompetenceDto) {
@@ -400,6 +409,8 @@ export class SubjectsController {
 @Controller('v1/staff')
 export class StaffController {
   constructor(private readonly svc: StaffService) {}
+  // Типы тел карточки (AR-203, AR-204) — у класса, а не в общем блоке импортов:
+  // пакет 04.09 правится несколькими исполнителями, общий блок — точка слияния.
 
   @RequirePermission('staff.read')
   @Get()
@@ -484,11 +495,25 @@ export class StaffController {
     return this.svc.fillCard(id, body);
   }
 
-  /** `S-31.btn.reissuePassword`: новый пароль, показан один раз. */
+  /** `S-31.btn.reissuePassword`: новый пароль, показан один раз; событие `staff.password.set.v1` с `generated: true` (AR-203). */
   @RequirePermission('staff.manage')
   @Post(':id/credentials')
-  regenerateCredentials(@Param('id') id: string) {
-    return this.svc.regenerateCredentials(id);
+  regenerateCredentials(@Req() req: Req0, @Param('id') id: string) {
+    return this.svc.regenerateCredentials(id, actorOf(req));
+  }
+
+  /** §11 строка 51 · `S-31.btn.saveAccount` (AR-203): ФИО и логин учётки; `USERNAME_TAKEN` / `USERNAME_INVALID`. */
+  @RequirePermission('staff.manage')
+  @Put(':id/account')
+  updateAccount(@Req() req: Req0, @Param('id') id: string, @Body() body: StaffAccountBody) {
+    return this.svc.updateAccount(id, body, actorOf(req));
+  }
+
+  /** §11 строка 52 · `M-32.btn.save` (AR-203): пусто — сгенерировать; короче 8 — `PASSWORD_TOO_SHORT`; ответ — креды один раз. */
+  @RequirePermission('staff.manage')
+  @Post(':id/password')
+  setPassword(@Req() req: Req0, @Param('id') id: string, @Body() body: StaffPasswordBody) {
+    return this.svc.setPassword(id, body ?? {}, actorOf(req));
   }
 
   /** `S-31.btn.revokeActivation` (AR-153): «просканировал не тот». */
@@ -562,11 +587,16 @@ export class StaffController {
     return this.svc.revokeSessions(id, actorOf(req));
   }
 
-  /** §11 строка 39 · `S-31.btn.loginLink` / `S-62` (AR-189): одноразовая ссылка входа на 48 часов — только администратор. */
-  @RequirePermission('school.admin')
+  /**
+   * §11 строка 39 · `S-31.btn.loginLink` / `S-62.devices.btn.grant` (AR-204):
+   * ссылка входа с параметрами — срок 24/48/168 ч и число открытий 1/3/10/без
+   * лимита; выпускает `staff.manage` (модератор и администратор), пустое тело —
+   * дефолты 48 ч без лимита.
+   */
+  @RequirePermission('staff.manage')
   @Post(':id/login-link')
-  loginLink(@Req() req: Req0, @Param('id') id: string) {
-    return this.svc.issueLoginLink(id, actorOf(req), webOrigin(req));
+  loginLink(@Req() req: Req0, @Param('id') id: string, @Body() body?: LoginLinkBody) {
+    return this.svc.issueLoginLink(id, actorOf(req), webOrigin(req), body ?? {});
   }
 
   /** `M-06` (AR-187): активность учётки — активация, устройства, журнал подключений. */
@@ -577,6 +607,11 @@ export class StaffController {
     return this.svc.activity(id, webOrigin(req), actorOf(req).roles.includes('admin'));
   }
 }
+
+/** Тела маршрутов карточки сотрудника (AR-203, AR-204) — алиасы DTO контракта, объявлены у `StaffController`. */
+type StaffAccountBody = import('@edustore/shared').UpdateStaffAccountDto;
+type StaffPasswordBody = import('@edustore/shared').SetStaffPasswordDto;
+type LoginLinkBody = import('@edustore/shared').IssueLoginLinkDto;
 
 // ─────────────────────────── календарь и расписание ───────────────────────────
 
@@ -657,6 +692,37 @@ export class ScheduleController {
   @Put('skeleton')
   setSkeleton(@Req() req: Req0, @Body() body: SetSkeletonDto) {
     return this.svc.setSkeleton(body, actorOf(req));
+  }
+
+  /** §11 строка 49 · `S-41.lunch` (AR-200): обед по классам; версия агрегата (AR-109), отказ `SKELETON_INVALID`. */
+  @RequirePermission('schedule.build')
+  @Put('lunch')
+  setLunch(@Req() req: Req0, @Body() body: SetClassLunchDto) {
+    return this.svc.setLunch(body, actorOf(req));
+  }
+
+  /** `M-30` (AR-206): рабочие дни того, кто спрашивает. */
+  @RequirePermission('schedule.preference.self')
+  @Get('preferences/me')
+  myPreference(@Req() req: Req0) {
+    return this.svc.myPreference(actorOf(req));
+  }
+
+  /** §11 строка 53 · `M-30.btn.save` (AR-206): педагог задаёт рабочие дни сам → `schedule.preference.set.v1`. */
+  @RequirePermission('schedule.preference.self')
+  @Put('preferences/me')
+  setMyPreference(@Req() req: Req0, @Body() body: SetTeacherPreferenceDto) {
+    return this.svc.setMyPreference(body, actorOf(req));
+  }
+
+  /**
+   * `S-41.load.summary` (AR-206): рабочие дни всех педагогов — строителю.
+   * Заметку педагога сервис отдаёт только её автору, строителю и надзору.
+   */
+  @RequirePermission('schedule.read')
+  @Get('preferences')
+  listPreferences(@Req() req: Req0) {
+    return this.svc.listPreferences(actorOf(req));
   }
 
   /** §11 строка 24б · `S-43`: перестановка в черновике; материализует только confirm (AR-18). */

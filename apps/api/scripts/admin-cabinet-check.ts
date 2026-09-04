@@ -1,15 +1,19 @@
 /**
- * G-81, G-82 (AR-186…AR-189, AR-193, AR-194) — **кабинет администратора и
- * кабинет завуча доказаны перечислением.**
+ * G-81, G-82 (AR-186…AR-189, AR-193, AR-194, AR-204, AR-205) — **кабинет
+ * администратора и кабинет завуча доказаны перечислением.**
  *
  *   · три кабинета — три права: `school.admin` только у администратора,
  *     `school.oversee` у завуча и администратора, модератору чужие закрыты;
  *   · каждая мутация `AdminCabinetController` гейчена `school.admin`;
- *   · ссылка входа с карточки: 48 часов, одноразова, вход по ней активирует
- *     учётку и даёт сессию канала `login_link` (AR-189);
+ *   · ссылка входа с карточки гейчена `staff.manage` (AR-204: модератор 200,
+ *     педагог 403); дефолты — 48 часов и без лимита открытий, вход по ней
+ *     активирует учётку и даёт сессию канала `login_link`, второе открытие —
+ *     вторая сессия, счётчик открытий растёт;
  *   · происхождение сессии хранится: вид клиента, адрес, родительская сессия
  *     скана (AR-187);
  *   · лимит сессий роли гасит самую давнюю, а не отклоняет вход (AR-188);
+ *   · лимит носителей роли (AR-205) пишется той же политикой: только штатные
+ *     роли, 1..20 либо пусто; ответ несёт `roleHolders`; аудит `policySet`;
  *   · инцидент-режим закрывает все сессии школы, кроме текущей (AR-188);
  *   · реестры сети и устройств изолированы по школе (G-82) и аудируются;
  *   · чек-лист завуча выведен из данных: пустая школа — всё не готово,
@@ -25,7 +29,7 @@ import 'reflect-metadata';
 import { RequestMethod } from '@nestjs/common';
 import { ModulesContainer } from '@nestjs/core/injector/modules-container';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
-import { ACCESS_PARAMS } from '@edustore/shared';
+import { ACCESS_PARAMS, STAFF_ROLES, effectiveRoleLimit } from '@edustore/shared';
 import { REQUIRE_PERMISSION } from '../src/common/authz/require-permission.decorator';
 import { AuthzService } from '../src/common/authz/authz.service';
 import { TenantContext } from '../src/common/tenant/tenant-context';
@@ -54,12 +58,13 @@ async function main(): Promise<void> {
   const sys = <T>(fn: () => Promise<T>) => TenantContext.runAsSystem(fn);
   const drain = () => sys(() => b.outbox.drain());
 
-  console.log('G-81 · кабинет администратора и кабинет завуча (AR-186…AR-189, AR-193)\n');
+  console.log('G-81 · кабинет администратора и кабинет завуча (AR-186…AR-189, AR-193, AR-204, AR-205)\n');
 
   // ─── 1. три кабинета — три права ───
   const adminAcc = await authz.resolveForRoles(['admin']);
   const modAcc = await authz.resolveForRoles(['moderator']);
   const depAcc = await authz.resolveForRoles(['deputy_academic']);
+  const teacherAcc = await authz.resolveForRoles(['teacher']);
   check(adminAcc.permissions.includes('school.admin') && adminAcc.permissions.includes('school.oversee'),
     'администратор держит school.admin и school.oversee — все три кабинета открыты ему (AR-186)');
   check(!modAcc.permissions.includes('school.admin') && !modAcc.permissions.includes('school.oversee'),
@@ -102,10 +107,12 @@ async function main(): Promise<void> {
   check(modRoutes.length === 1 && modRoutes[0].route === '/v1/moderator/' && modRoutes[0].perm === 'school.manage',
     'кабинет модератора переехал на /v1/moderator за school.manage — прежний /v1/admin отдан администратору (AR-186)');
   const loginLinkRoute = routes.find((r) => r.ctrl === 'StaffController' && r.route === '/v1/staff/:id/login-link' && r.method === RequestMethod.POST);
-  check(loginLinkRoute !== undefined && loginLinkRoute.perm === 'school.admin',
-    `ссылка входа с карточки — POST /v1/staff/:id/login-link в StaffController за school.admin (найдено: ${loginLinkRoute?.perm ?? 'маршрута нет'}), модератору закрыта (AR-189)`);
+  check(loginLinkRoute !== undefined && loginLinkRoute.perm === 'staff.manage',
+    `ссылка входа с карточки — POST /v1/staff/:id/login-link в StaffController за staff.manage (найдено: ${loginLinkRoute?.perm ?? 'маршрута нет'}) — модератор и администратор (AR-204 вытесняет AR-189)`);
+  check(modAcc.permissions.includes('staff.manage') && adminAcc.permissions.includes('staff.manage') && !teacherAcc.permissions.includes('staff.manage'),
+    'ссылку выпускают модератор (200) и администратор (200), педагог — нет (403 по праву)');
 
-  // ─── 3. ссылка входа с карточки (AR-189) ───
+  // ─── 3. ссылка входа с карточки (AR-204: дефолты 48 ч, без лимита) ───
   const a = await bootstrapSchool(b, 'Школа администратора');
   const adminActor = { ...a.moderator, roles: ['admin' as const, 'moderator' as const] };
   const teacher = await makeStaff(b, a, ['teacher'], 'Иванова Мария');
@@ -118,7 +125,9 @@ async function main(): Promise<void> {
   check(linkRow?.purpose === 'login_link' && linkRow?.issuedBy === a.moderator.userId,
     'строка ссылки: purpose = login_link, issuedBy = администратор — аудит различит её с платформенной');
   const ttlH = Math.round(((linkRow?.expiresAt.getTime() ?? 0) - Date.now()) / HOUR);
-  check(ttlH === ACCESS_PARAMS.loginLinkTtlHours, `срок ссылки — ${ttlH} часов (AR-189: ${ACCESS_PARAMS.loginLinkTtlHours})`);
+  check(ttlH === ACCESS_PARAMS.loginLinkTtlHours, `срок ссылки без параметров — ${ttlH} часов (дефолт AR-204: ${ACCESS_PARAMS.loginLinkTtlHours})`);
+  check(link.maxUses === null && link.useCount === 0 && linkRow?.maxUses === null,
+    'без параметров — без лимита открытий (дефолт AR-204), счётчик открытий 0');
 
   const entered = await access.useBootstrapLink(link.token, { deviceHint: 'телефон сотрудника', clientKind: 'pwa', ip: '10.1.2.3' });
   await drain();
@@ -128,10 +137,16 @@ async function main(): Promise<void> {
   check(after?.activatedAt !== null, 'вход по ссылке поставил activatedAt — учётка ушла из «Не авторизованных» (AR-161)');
   const again = await access.useBootstrapLink(link.token, 'ноутбук сотрудника');
   await drain();
-  check(again.session.token !== entered.session.token, 'повторное открытие ссылки в срок — вторая сессия (AR-195, многоразовая)');
+  check(again.session.token !== entered.session.token, 'повторное открытие ссылки в срок — вторая сессия (без лимита открытий, AR-204)');
+  const linkRowAfter = await sys(() => b.prisma.bootstrapLink.findUnique({ where: { token: link.token } }));
+  check(linkRowAfter?.useCount === 2, `счётчик открытий ссылки растёт: ${linkRowAfter?.useCount}`);
   const issuedAudit = await sys(() => b.prisma.auditLog.findFirst({ where: { workspaceId: a.workspaceId, action: SCHOOL_EVENTS.loginLinkIssued } }));
   check(issuedAudit?.actor === a.moderator.userId && issuedAudit?.subjectUserId === teacher.userId,
     'выпуск ссылки в аудите: кто (администратор) и кому (сотрудник)');
+  const issuedEvent = await sys(() => b.prisma.outboxEvent.findFirst({ where: { workspaceId: a.workspaceId, type: SCHOOL_EVENTS.loginLinkIssued } }));
+  const issuedPayload = issuedEvent?.payload as { ttlHours?: number; maxUses?: number | null } | undefined;
+  check(issuedPayload?.ttlHours === ACCESS_PARAMS.loginLinkTtlHours && issuedPayload?.maxUses === null,
+    `событие выпуска несёт срок и лимит: ${issuedPayload?.ttlHours} ч, maxUses ${issuedPayload?.maxUses} (AR-204)`);
 
   // ─── 4. происхождение сессии (AR-187) ───
   check(linkSession?.clientKind === 'pwa' && linkSession?.ip === '10.1.2.3',
@@ -151,12 +166,33 @@ async function main(): Promise<void> {
   check(activity.activated && activity.activeSessions === 3 && activity.profileUrl === `https://school.example/staff/${teacher.cardId}`,
     `активность карточки: активирован, живых сессий ${activity.activeSessions}, ссылка на карточку постоянная`);
 
-  // ─── 5. лимит сессий роли (AR-188) ───
-  const policy = await inSchool(a.workspaceId, () => admin.setPolicy({ sessionLimits: { teacher: 2 } }, adminActor));
+  // ─── 5. лимит сессий роли (AR-188) и лимит носителей роли (AR-205) ───
+  const policy = await inSchool(a.workspaceId, () => admin.setPolicy({ sessionLimits: { teacher: 2 }, roleLimits: { deputy_academic: 2, teacher: null } }, adminActor));
   check(policy.sessionLimits.teacher === 2, 'политика: лимит 2 сессии для роли teacher');
   await inSchool(a.workspaceId, () =>
     refuses(() => admin.setPolicy({ sessionLimits: { teacher: 99 } }, adminActor), 'лимит роли teacher: целое число от 1 до 20 либо пусто', 'лимит вне 1..20'),
   );
+  check(policy.roleLimits.deputy_academic === 2 && policy.roleLimits.teacher === null,
+    `политика: лимит носителей завуча ${policy.roleLimits.deputy_academic}, педагоги — без лимита (AR-205)`);
+  check(effectiveRoleLimit(policy.roleLimits, 'director') === 1 && effectiveRoleLimit(policy.roleLimits, 'founder') === null,
+    'роли без ключа в политике — дефолты кода: директор 1, учредитель без лимита (DEFAULT_ROLE_LIMITS)');
+  check(STAFF_ROLES.every((r) => typeof policy.roleHolders[r] === 'number') && policy.roleHolders.admin === 1 && policy.roleHolders.teacher === 1 && policy.roleHolders.deputy_academic === 0,
+    `ответ несёт занятость по штатным ролям: ${STAFF_ROLES.map((r) => `${r} ${policy.roleHolders[r]}`).join(', ')}`);
+  await inSchool(a.workspaceId, () =>
+    refuses(() => admin.setPolicy({ sessionLimits: {}, roleLimits: { director: 0 } }, adminActor), 'лимит носителей роли director: целое число от 1 до 20 либо пусто', 'лимит носителей 0 отклонён'),
+  );
+  await inSchool(a.workspaceId, () =>
+    refuses(() => admin.setPolicy({ sessionLimits: {}, roleLimits: { director: 99 } }, adminActor), 'лимит носителей роли director: целое число от 1 до 20 либо пусто', 'лимит носителей 99 отклонён'),
+  );
+  await inSchool(a.workspaceId, () =>
+    refuses(() => admin.setPolicy({ sessionLimits: {}, roleLimits: { parent: 1 } }, adminActor), 'лимит носителей роли parent: только штатные роли', 'лимит носителей нештатной роли отклонён'),
+  );
+  const kept = await inSchool(a.workspaceId, () => admin.setPolicy({ sessionLimits: { teacher: 2 } }, adminActor));
+  check(kept.roleLimits.deputy_academic === 2, 'тело без поля roleLimits прежние лимиты ролей не трогает (отсутствие поля ≠ пустой словарь)');
+  const replaced = await inSchool(a.workspaceId, () => admin.setPolicy({ sessionLimits: { teacher: 2 }, roleLimits: { director: 2 } }, adminActor));
+  check(replaced.roleLimits.director === 2 && replaced.roleLimits.deputy_academic === undefined && effectiveRoleLimit(replaced.roleLimits, 'deputy_academic') === 1,
+    'присланный roleLimits ЗАМЕНЯЕТ хранимый словарь целиком, а не сливается с ним: завуч без ключа вернулся к дефолту 1 (как sessionLimits — политика целиком)');
+  await inSchool(a.workspaceId, () => admin.setPolicy({ sessionLimits: { teacher: 2 }, roleLimits: { deputy_academic: 2 } }, adminActor));
   const third = await sessions.issue({ userId: teacher.userId, workspaceId: a.workspaceId, roles: ['teacher'], deviceHint: 'планшет', via: 'password', ip: '10.1.2.5' });
   await drain();
   const teacherSessions = await sys(() => b.prisma.appSession.findMany({ where: { userId: teacher.userId, workspaceId: a.workspaceId } }));
@@ -174,6 +210,10 @@ async function main(): Promise<void> {
   check(limitAudit?.subjectUserId === teacher.userId, 'и легло в аудит с субъектом — сотрудником, потерявшим сессию');
   const policyAudit = await sys(() => b.prisma.auditLog.findFirst({ where: { workspaceId: a.workspaceId, action: SCHOOL_EVENTS.policySet } }));
   check(policyAudit?.actor === a.moderator.userId, 'изменение политики в аудите с идентичностью администратора');
+  const policyEvents = await sys(() => b.prisma.outboxEvent.findMany({ where: { workspaceId: a.workspaceId, type: SCHOOL_EVENTS.policySet }, orderBy: { createdAt: 'asc' } }));
+  const roleLimitsOf = (i: number) => (policyEvents[i]?.payload as { roleLimits?: Record<string, number | null> } | undefined)?.roleLimits;
+  check(policyEvents.length === 4 && roleLimitsOf(0)?.deputy_academic === 2 && roleLimitsOf(1)?.deputy_academic === 2 && JSON.stringify(roleLimitsOf(2)) === '{"director":2}',
+    `событие school.policy.set.v1 несёт хранимый roleLimits (${policyEvents.length} события: задан, сохранён без поля, заменён на {director: 2}, возвращён)`);
 
   // ─── 6. инцидент-режим (AR-188) ───
   const current = await sessions.issue({ userId: a.moderator.userId, workspaceId: a.workspaceId, roles: ['admin', 'moderator'], deviceHint: 'ноутбук админа', via: 'password' });
@@ -234,7 +274,10 @@ async function main(): Promise<void> {
 
   // ─── 9. чек-лист завуча (AR-193) ───
   const empty = await inSchool(c.workspaceId, () => deputy.cabinet());
-  check([...empty.utc, ...empty.kpc].every((i) => !i.done), `пустая школа: все ${empty.utc.length + empty.kpc.length} пунктов не готовы`);
+  const readyInEmpty = [...empty.utc, ...empty.kpc].filter((i) => i.done);
+  check(readyInEmpty.length === 0, readyInEmpty.length === 0
+    ? `пустая школа: все ${empty.utc.length + empty.kpc.length} пунктов не готовы`
+    : `пустая школа: готовыми названы ${readyInEmpty.map((i) => `${i.key} (${i.detail})`).join(', ')}`);
   check(empty.utc.map((i) => i.key).join(',') === 'terms,load,skeleton,dayParams,priorities,generated,confirmed,journal',
     'ключи УТЦ фиксированы и в порядке');
   check(empty.kpc.map((i) => i.key).join(',') === 'classes,students,subjects,bindings,staff,guardians', 'ключи КПЦ фиксированы и в порядке');

@@ -19,7 +19,7 @@
  *   6. `LOAD_EXCEEDS_GRID` считает вместимость по скелету, а не по
  *      `slotsPerDay`;
  *   7. школу со скелетом `DAY_TOO_LONG` не судит: длину дня держит сам скелет
- *      (`SKELETON_INVALID` при сохранении).
+ *      (`SKELETON_INVALID` при сохранении); с AR-199 код не бросается вовсе.
  *
  * Запуск: npm --workspace apps/api run paired:check
  */
@@ -166,17 +166,18 @@ console.log('\nG-76 · спаренная укладка по скелету (AR
   ok(!res.ok && res.code === 'LOAD_EXCEEDS_GRID', `8 часов в 6 позиций — LOAD_EXCEEDS_GRID (${res.ok ? 'ok' : res.code})`);
 }
 
-// ---------- 7. DAY_TOO_LONG школу со скелетом не судит ----------
+// ---------- 7. DAY_TOO_LONG школу со скелетом не судит (с AR-199 — никого) ----------
 {
   const long = baseInput({
-    // арифметика параметров дала бы день длиннее потолка — но день держит скелет
+    // арифметика параметров дала бы день длиннее 420 минут — день держит скелет,
+    // а потолка длины дня с AR-199 нет ни у кого
     params: { days: 5, slotsPerDay: 6, lessonMin: 45, breakMin: 30, bigBreakAfter: 2, bigBreakMin: 30 },
     pairs: [
       { subjectId: 'math', subjectName: 'Математика', classId: 'c5', teacherId: 't1', teacherName: 'Иванова', scope: 'class', groupNos: [], hours: 2, priority: false },
     ],
   });
   const res = generate(long);
-  ok(res.ok, 'школа со скелетом не получает DAY_TOO_LONG от чужой арифметики');
+  ok(res.ok, 'школа со скелетом не получает DAY_TOO_LONG от чужой арифметики (AR-178, AR-199)');
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} G-76 · СПАРЕННАЯ УКЛАДКА ${fail === 0 ? 'ДОКАЗАНА' : 'НАРУШЕНА'} — pass=${pass} fail=${fail}\n`);

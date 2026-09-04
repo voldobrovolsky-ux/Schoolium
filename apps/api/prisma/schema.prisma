@@ -1245,15 +1245,17 @@ model PilotInvite {
 // одного `ALTER` по таблицам контура КТП/КПП (ворота G-47).
 
 /// Класс школы. `letter = null` — явный отказ «⌀ Без литер» мастера (AR-77);
-/// `groupCount = 0` — явный отказ «⌀ Без групп».
+/// `groupCount = 0` — явный отказ «⌀ Без групп». `lunchAfterLessonNo` (AR-200) —
+/// после какого урока у класса обед; NULL — как у школы (позиция `meal` скелета).
 model SchoolClass {
-  id              String          @id @default(cuid())
-  workspaceId     String // тенант = школа (Workspace)
-  parallel        Int
-  letter          String? // null — «без литер»
-  label           String // «5» либо «5А»
-  groupCount      Int             @default(0)
-  plannedStudents Int             @default(0)
+  id                String          @id @default(cuid())
+  workspaceId       String // тенант = школа (Workspace)
+  parallel          Int
+  letter            String? // null — «без литер»
+  label             String // «5» либо «5А»
+  groupCount        Int             @default(0)
+  plannedStudents   Int             @default(0)
+  lunchAfterLessonNo Int? // AR-200: обед после урока N; класс не имеет урока в позиции N+1
   createdAt       DateTime        @default(now())
   students        SchoolStudent[]
   groups          StudentGroup[]
@@ -1305,10 +1307,15 @@ model SchoolStudent {
 
 /// Карточка предмета заводится на ПАРУ «предмет × класс»: математика-5 и
 /// математика-6 — две карточки, у каждой свои привязки и свои часы.
+/// `nameKey` (AR-201) — ключ имени `subjectNameKey(name)`: trim, пробелы в один,
+/// нижний регистр, «ё» → «е». Уникальность пары (workspaceId, nameKey, classId)
+/// держит код (`SUBJECT_EXISTS`), индекс НЕ уникальный — уникальным он станет
+/// следующей миграцией, после слияния дублей прода (`subjects:merge`).
 model SchoolSubject {
   id          String           @id @default(cuid())
   workspaceId String
   name        String
+  nameKey     String? // AR-201: ключ имени; NULL только у строк до бэкфилла
   classId     String // ссылка по ЗНАЧЕНИЮ: класс принадлежит контингенту, не предметам
   priority    Boolean          @default(false) // экран 3 мастера: в начало дня
   createdAt   DateTime         @default(now())
@@ -1316,6 +1323,7 @@ model SchoolSubject {
 
   @@unique([workspaceId, name, classId])
   @@index([workspaceId])
+  @@index([workspaceId, nameKey, classId])
 }
 
 /// Привязка педагога к карточке предмета: весь класс либо перечисленные группы
@@ -1425,7 +1433,9 @@ model SchoolLesson {
 
 /// Колонка журнала = материализованный урок. Два урока в дату — две колонки под
 /// одним числом. `detachedAt` — «вне расписания» (AR-85): отметки читаются, любая
-/// запись отклоняется `LESSON_DETACHED`.
+/// запись отклоняется `LESSON_DETACHED`. `cancelledAt` (AR-207) — урок отменён без
+/// замены по `schedule.lesson.cancelled.v1`: отметка отклоняется `LESSON_CANCELLED`;
+/// `schedule.lesson.restored.v1` снимает пометку.
 model JournalColumn {
   id          String       @id @default(cuid())
   workspaceId String
@@ -1437,6 +1447,7 @@ model JournalColumn {
   subjectId   String
   teacherId   String
   detachedAt  DateTime?
+  cancelledAt DateTime? // AR-207: отменён без замены
   marks       Mark[]
   lessonTopic LessonTopic?
 
@@ -1699,6 +1710,10 @@ model BootstrapLink {
   // консольная — `bootstrap`, `issuedBy` NULL. Срок обеих — 48 часов.
   purpose     String    @default("bootstrap")
   issuedBy    String?
+  // 1.5.0 (AR-204): лимит открытий выбирает выпускающий; NULL — без лимита.
+  // `useCount` растёт в транзакции `useBootstrapLink`; `useCount >= maxUses` → LINK_EXHAUSTED.
+  maxUses     Int?
+  useCount    Int       @default(0)
   usedAt      DateTime?
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
@@ -1740,11 +1755,58 @@ model SchoolAsset {
 
 /// Политика доступа школы (AR-188): лимиты одновременных сессий по ролям и
 /// след последнего инцидент-режима. Одна строка на школу, создаётся лениво.
+/// `roleLimits` (AR-205) — лимиты носителей ролей: `{}` — дефолты
+/// `DEFAULT_ROLE_LIMITS` (директор и оба заместителя по одному).
 model SchoolAccessPolicy {
   id             String    @id @default(cuid())
   workspaceId    String    @unique
   sessionLimits  Json      @default("{}")
+  roleLimits     Json      @default("{}") // AR-205: роль → лимит носителей | null
   incidentAt     DateTime?
   incidentBy     String?
   updatedAt      DateTime  @updatedAt
+}
+
+// ─────────────────── пакет 04.09 1.5.0 — педагог (AR-206, AR-207) ───────────────────
+// Две таблицы под tenant-guard. Ссылки на уроки и людей — по ЗНАЧЕНИЮ, без FK:
+// граница модулей пересекается контрактом, как у всего контура (AR-2).
+
+/// Предпочтения педагога (AR-206, уточняет AR-135: рабочие дни задаёт сам, без
+/// утверждения). `workDays` — номера дней 0..5 (ПН…СБ), пусто = любой день;
+/// генератор считает их жёстким ограничением, автоподбор замены — фильтром.
+/// Версии агрегата нет: сохранение издаёт `schedule.preference.set.v1`, сетка → stale.
+model TeacherPreference {
+  id          String   @id @default(cuid())
+  workspaceId String
+  teacherId   String // User.id — ссылка по значению
+  workDays    Int[]    @default([])
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, teacherId])
+}
+
+/// Замена урока (AR-207, вытесняет AR-145 в части «слот следующей недели»). Одна
+/// запись на урок: `status` substituted (педагог урока := заместитель, событие
+/// reassigned) | no_substitute (событие cancelled, колонка журнала `cancelledAt`) |
+/// withdrawn (отзыв). `reason`: absence | training | official | other; `reasonText`
+/// виден только staff.manage / schedule.build / school.oversee.
+/// Регенерация: урок с записью замены сохраняет текущий teacherId; при удалении
+/// урока без отметок запись удаляется вместе с ним.
+model LessonSubstitution {
+  id                  String    @id @default(cuid())
+  workspaceId         String
+  lessonId            String    @unique // SchoolLesson.id — ссылка по значению
+  originalTeacherId   String
+  substituteTeacherId String?
+  reason              String // absence | training | official | other
+  reasonText          String?
+  status              String // substituted | no_substitute | withdrawn
+  requestedBy         String
+  requestedAt         DateTime  @default(now())
+  decidedAt           DateTime?
+
+  @@index([workspaceId])
+  @@index([workspaceId, originalTeacherId])
 }

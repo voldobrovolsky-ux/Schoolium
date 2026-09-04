@@ -1,0 +1,52 @@
+/*
+ * `S-20` Предметы и `M-25` Управление компетенцией (пакет 04.09: AR-202, AR-208).
+ *
+ * Здесь только то, чего в app.css нет: ряд чипов классов и его раскрытие
+ * вправо (`sch-unfold-x` — единственный переход РАЗМЕРА в контуре; явное
+ * исключение из AR-198 «движение — только цветом» записано в AR-208; строка
+ * в блоке prefers-reduced-motion — в app.css, рядом с остальными), фон
+ * незаполненных позиций, строки групп в `M-25`. Кнопки, чипы, поля, галочки —
+ * из app.css, второй реализации у них не появляется.
+ * Цвета — только токенами (G-37, AR-42). Мишени на телефоне — 44 (§4, G-55).
+ */
+
+/* Шапка фильтра: вид слева, ряд чипов классов раскрывается справа (AR-208). */
+.sch-s20-head { display: flex; align-items: flex-start; gap: var(--sp-12); margin-bottom: var(--sp-16); }
+.sch-s20-classes { flex: 1 1 auto; min-width: 0; }
+
+/* Раскрытие вправо: свёрнуто — max-width 0 и прозрачно; открыто — во всю
+   доступную ширину. 150 мс — потолок версии (60-design §6). Монтируется
+   свёрнутым, `data-open` ставится следующим кадром — переходу есть что вести.
+   Поля 4px с отрицательными внешними — клип `overflow` не срезает фокус-рамку
+   чипов (2px + отступ 2px, §0), раскладка при этом не сдвигается. */
+.sch-unfold-x {
+  max-width: 0; opacity: 0; overflow: hidden; padding: 4px; margin: -4px;
+  transition: max-width 150ms ease-out, opacity 150ms ease-out;
+}
+.sch-unfold-x[data-open='true'] { max-width: 100%; opacity: 1; }
+
+/* Незаполненная позиция (AR-208): фон `state.stale-bg`, слово — в бейдже
+   `S-20.card.subject.badge` (AR-80). Отклик на наведение — цветом рамки,
+   движения нет (AR-198). */
+.sch-subject-row[data-unfilled='true'] { background: var(--c-state-stale-bg); }
+.sch-subject-row[data-unfilled='true']:hover { box-shadow: inset 0 0 0 1px var(--c-state-warning); }
+
+/* `M-25` (AR-202): строка класса — галочка «весь класс» и чип «по группам»;
+   под ней — галочки групп либо селект деления класса. Строка без педагога —
+   тот же фон, что у позиций `S-20` (AR-208). */
+.sch-m25-row { display: flex; flex-direction: column; border-radius: var(--r-md); }
+.sch-m25-row[data-unfilled='true'] { background: var(--c-state-stale-bg); }
+.sch-m25-row-main { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; padding-right: var(--sp-8); }
+.sch-m25-row-main > .sch-check-row { flex: 1 1 auto; }
+.sch-m25-sub { display: flex; flex-direction: column; gap: var(--sp-4); padding: 0 var(--sp-8) var(--sp-8) var(--sp-32); }
+.sch-m25-split { max-width: 260px; }
+
+@media (max-width: 767px) {
+  /* Телефон: ряд чипов классов — под фильтром вида, лента с горизонтальной
+     прокруткой ВНУТРИ контейнера (75-adaptive §6); чипы — 44 из app.css. */
+  .sch-s20-head { flex-direction: column; align-items: stretch; }
+  .sch-s20-classes { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; }
+  .sch-s20-classes .sch-btn { flex: 0 0 auto; }
+  .sch-m25-sub { padding-left: var(--sp-16); }
+  .sch-m25-split { max-width: none; }
+}
