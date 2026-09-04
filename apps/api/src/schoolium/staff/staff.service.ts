@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import {
   ACCESS_PARAMS,
   ROLE_LABELS,
+  ROLE_PERMISSIONS,
   effectiveRoleLimit,
   type ActivationTokenDto,
   type CreateStaffCardDto,
@@ -218,7 +219,8 @@ export class StaffService {
    * сами значения в аудит не едут.
    */
   async updateAccount(cardId: string, dto: UpdateStaffAccountDto, actor: SchoolActor): Promise<StaffCardDto> {
-    const { userId, workspaceId } = await this.registered(cardId);
+    const { membership, userId, workspaceId } = await this.registered(cardId);
+    this.assertMayManageAccount(membership, actor, await this.displayNameOf(userId));
     const lastName = String(dto?.lastName ?? '').trim();
     const firstName = String(dto?.firstName ?? '').trim();
     if (!lastName || !firstName) throw new BadRequestException('фамилия и имя обязательны');
@@ -268,7 +270,8 @@ export class StaffService {
    * открытый текст показывается один раз в ответе и в событие не попадает (AR-156).
    */
   async setPassword(cardId: string, dto: SetStaffPasswordDto, actor: SchoolActor): Promise<CredentialsDto> {
-    const { userId, workspaceId } = await this.registered(cardId);
+    const { membership, userId, workspaceId } = await this.registered(cardId);
+    this.assertMayManageAccount(membership, actor, await this.displayNameOf(userId));
     const given = String(dto?.password ?? '').trim();
     const generated = given === '';
     const password = generated ? generatePassword() : given;
@@ -493,6 +496,28 @@ export class StaffService {
     return this.get(cardId);
   }
 
+  /**
+   * AR-211: контур доступа к учётной записи АДМИНИСТРАТОРА школы держит только
+   * `school.admin`. Пароль, ссылка входа и смена логина — это выдача доступа, а
+   * не ведение персонала: с `staff.manage` модератор задал бы администратору
+   * пароль (или выпустил ссылку) и вошёл бы под ним, и разделение кабинетов
+   * (AR-186) держалось бы на честном слове. Остальной персонал модератор ведёт
+   * как прежде (AR-88), включая роли, деактивацию и удаление.
+   */
+  /** Имя владельца карточки для текста отказа: `User` — справочник вне tenant-guard. */
+  private async displayNameOf(userId: string): Promise<string | null> {
+    const u = await TenantContext.runAsSystem(() =>
+      this.prisma.user.findUnique({ where: { id: userId }, select: { displayName: true } }),
+    );
+    return u?.displayName ?? null;
+  }
+
+  private assertMayManageAccount(membership: { roles: string[] }, actor: SchoolActor, name: string | null): void {
+    if (!membership.roles.includes('admin')) return;
+    if (actor.roles.some((r) => (ROLE_PERMISSIONS[r] ?? []).includes('school.admin'))) return;
+    throw new SchoolError('ADMIN_ACCOUNT_LOCKED', { name: name ?? 'администратор' });
+  }
+
   private async registered(cardId: string) {
     const card = await this.prisma.staffCard.findUnique({ where: { id: cardId } });
     if (!card?.userId) throw new NotFoundException('сотрудник не зарегистрирован');
@@ -676,7 +701,8 @@ export class StaffService {
    * хост запроса — внутренний.
    */
   async issueLoginLink(cardId: string, actor: SchoolActor, origin: string, dto: IssueLoginLinkDto = {}): Promise<LoginLinkDto> {
-    const { userId, workspaceId } = await this.registered(cardId);
+    const { membership, userId, workspaceId } = await this.registered(cardId);
+    this.assertMayManageAccount(membership, actor, await this.displayNameOf(userId));
     const ttlHours: number = dto?.ttlHours ?? ACCESS_PARAMS.loginLinkTtlHours;
     const maxUses: number | null = dto?.maxUses === undefined ? null : dto.maxUses;
     const ttlOptions: readonly number[] = ACCESS_PARAMS.loginLinkTtlOptions;

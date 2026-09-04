@@ -50,6 +50,7 @@ import {
   type GenSlot,
 } from './generator';
 import type { SchoolActor } from '../actor';
+import { actorHas } from './substitution.service';
 
 const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
 const parseDay = (s: string): Date => new Date(`${s}T00:00:00.000Z`);
@@ -312,8 +313,9 @@ export class ScheduleService implements OnModuleInit {
     }
 
     // Рабочие дни педагогов (AR-206): пустой список = любой день — в карту не идёт.
+    // Генератору нужны дни, а не заметки, поэтому читается хранилище напрямую.
     const teacherDays: Record<string, number[]> = {};
-    for (const p of await this.listPreferences()) {
+    for (const p of await this.preferenceRows()) {
       if (p.workDays.length) teacherDays[p.teacherId] = p.workDays;
     }
 
@@ -585,9 +587,11 @@ export class ScheduleService implements OnModuleInit {
   async setLunch(dto: SetClassLunchDto, actor: SchoolActor) {
     await this.state.checkVersion('schedule', dto.version);
     const ws = TenantContext.require();
+    if (!Array.isArray(dto?.entries)) throw new BadRequestException('entries — список пар «класс → номер урока перед обедом»');
     const classes = await this.contingent.classes();
     const max = await this.maxLessonPositions();
     for (const e of dto.entries) {
+      if (!e || typeof e !== 'object') throw new BadRequestException('запись обеда — объект с classId и lunchAfterLessonNo');
       const cls = classes.find((c) => c.id === e.classId);
       if (!cls) throw new NotFoundException(`класс ${e.classId} не найден`);
       const n = e.lunchAfterLessonNo;
@@ -630,9 +634,12 @@ export class ScheduleService implements OnModuleInit {
   /**
    * `PUT /v1/schedule/preferences/me` — педагог задаёт рабочие дни САМ, без
    * утверждения (AR-206 уточняет AR-135). Версии агрегата нет: запись одна на
-   * педагога, правит её только он. Сохранение издаёт `schedule.preference.set.v1`
-   * (подписчик — само расписание: сетка → stale; аудит) и роняет подтверждённую
-   * сетку сразу, не дожидаясь доставки outbox — строитель видит честный сигнал.
+   * педагога, правит её только он.
+   *
+   * Сетку роняет в `stale` и издаёт `schedule.preference.set.v1` ТОЛЬКО смена
+   * рабочих дней: на укладку влияют они, а не заметка. Иначе любое открытие и
+   * сохранение формы (даже без единой правки) объявляло бы расписание школы
+   * устаревшим и останавливало ночную материализацию уроков.
    */
   async setMyPreference(dto: SetTeacherPreferenceDto, actor: SchoolActor): Promise<TeacherPreferenceDto> {
     const ws = TenantContext.require();
@@ -642,31 +649,59 @@ export class ScheduleService implements OnModuleInit {
     }
     const workDays = [...new Set(dto.workDays)].filter((d) => d < reg.days).sort((a, b) => a - b);
     const note = dto.note?.trim() ? dto.note.trim().slice(0, 500) : null;
+    const before = await this.prisma.teacherPreference.findUnique({
+      where: { workspaceId_teacherId: { workspaceId: ws, teacherId: actor.userId } },
+      select: { workDays: true },
+    });
+    const daysChanged = JSON.stringify([...(before?.workDays ?? [])].sort((a, b) => a - b)) !== JSON.stringify(workDays);
     await this.prisma.$transaction(async (tx) => {
       await tx.teacherPreference.upsert({
         where: { workspaceId_teacherId: { workspaceId: ws, teacherId: actor.userId } },
         update: { workDays, note },
         create: { workspaceId: ws, teacherId: actor.userId, workDays, note },
       });
-      await this.outbox.enqueue(
-        tx,
-        newEvent<PreferenceSetV1>({
-          type: SCHOOL_EVENTS.preferenceSet,
-          workspaceId: ws,
-          actor: actor.userId,
-          payload: { teacherId: actor.userId, workDays },
-        }),
-      );
+      if (daysChanged) {
+        await this.outbox.enqueue(
+          tx,
+          newEvent<PreferenceSetV1>({
+            type: SCHOOL_EVENTS.preferenceSet,
+            workspaceId: ws,
+            actor: actor.userId,
+            payload: { teacherId: actor.userId, workDays },
+          }),
+        );
+      }
     });
-    await this.staleSelf();
+    if (daysChanged) await this.staleSelf();
     return { teacherId: actor.userId, workDays, note };
   }
 
-  /** `GET /v1/schedule/preferences` — строителю: строка «дни: ПН, ВТ, ЧТ» в `S-41.load.summary`. */
-  async listPreferences(): Promise<TeacherPreferenceDto[]> {
+  /**
+   * `GET /v1/schedule/preferences` — строителю: строка «дни: ПН, ВТ, ЧТ» в
+   * `S-41.load.summary`. Рабочие дни видит каждый, кто читает расписание: они
+   * объясняют, почему урок стоит именно так. Заметка — свободный текст педагога
+   * о себе, и её читают только тот, кто её написал, строитель сетки
+   * (`schedule.build`) и надзор (`school.oversee`); коллеге по `schedule.read`
+   * возвращается `null`, а не чужое личное сообщение.
+   */
+  async listPreferences(actor: SchoolActor): Promise<TeacherPreferenceDto[]> {
+    const rows = await this.preferenceRows();
+    const readsNotes = actorHas(actor, 'schedule.build') || actorHas(actor, 'school.oversee');
+    return rows.map((r) => ({
+      teacherId: r.teacherId,
+      workDays: r.workDays,
+      note: readsNotes || r.teacherId === actor.userId ? r.note : null,
+    }));
+  }
+
+  /** Строки предпочтений школы: общий источник для генератора и для `S-41.load.summary`. */
+  private async preferenceRows(): Promise<{ teacherId: string; workDays: number[]; note: string | null }[]> {
     const ws = TenantContext.require();
-    const rows = await this.prisma.teacherPreference.findMany({ where: { workspaceId: ws }, orderBy: { teacherId: 'asc' } });
-    return rows.map((r) => ({ teacherId: r.teacherId, workDays: r.workDays, note: r.note }));
+    return this.prisma.teacherPreference.findMany({
+      where: { workspaceId: ws },
+      orderBy: { teacherId: 'asc' },
+      select: { teacherId: true, workDays: true, note: true },
+    });
   }
 
   /**

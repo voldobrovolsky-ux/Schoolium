@@ -172,6 +172,7 @@ async function main(): Promise<void> {
   const journal = b.get(JournalService);
   const diary = b.get(DiaryService);
   const state = b.get(SchoolStateService);
+  const scheduleSvc = b.get(ScheduleService);
   const drain = () => TenantContext.runAsSystem(() => b.outbox.drain());
 
   console.log('G-88 · предпочтения педагога и замена урока (AR-206, AR-207)\n');
@@ -254,10 +255,20 @@ async function main(): Promise<void> {
       'нет права записи в этот урок', 'исходный педагог в переданном уроке — отказ как в чужом');
 
     // ─── 3. отзыв замены: урок возвращается исходному тем же событием обратно ───
+    // Пока урок лежит в прошлом (его провёл заместитель и поставил отметку), отзыв
+    // отклонён: он переписал бы педагога у ПРОВЕДЁННОГО урока, и отметка Кузнецова
+    // оказалась бы в уроке, который «ведёт» Иванова (регрессия ревью 1.5.0).
+    await refusesWith(() => substitution.withdraw(L1.id, ivanova), 'LESSON_ALREADY_HELD',
+      (d) => typeof d.date === 'string' && typeof d.time === 'string',
+      'отзыв отмены прошедшего урока отклонён — историю проведённого урока не переписывают');
+    // Стенд возвращает урок в будущее: дальше проверяется сам механизм отзыва.
+    await moveTo(L1.id, L1.date);
     await substitution.withdraw(L1.id, ivanova);
     check((await lesson(L1.id)).teacherId === s.t1.userId && (await sub(L1.id))?.status === 'withdrawn', 'отзыв: teacherId урока снова у Ивановой, запись — withdrawn');
     await drain();
     check((await column(L1.id)).teacherId === s.t1.userId, 'колонка журнала вернулась исходному педагогу по обратному reassigned');
+    // Урок снова в прошлом: дальше проверяются права на отметки проведённого урока.
+    await moveTo(L1.id, parseDay(day(-1)));
     const back = (await eventsOf(SCHOOL_EVENTS.lessonReassigned)).map((e) => e.payload as { toTeacherId: string; reason: string });
     check(back.some((p) => p.toTeacherId === s.t1.userId && p.reason === 'withdrawn'), 'обратное событие несёт to = исходный педагог и причину withdrawn');
     await journal.postMark(L1.id, s.studentIds[1], '4', journalActor(ivanova));
@@ -418,6 +429,66 @@ async function main(): Promise<void> {
     );
     await drain();
     check((await state.resolve()) === 'stale', 'schedule.preference.set.v1 роняет подтверждённую сетку в stale (STALE_ON_EVENTS; издаёт эндпоинт A1)');
+
+    // ─── 13. регрессии адверсарного ревью пакета 1.5.0 ───
+    // (а) Отзыв отмены — та же граница времени, что у отмены: иначе он переписал бы
+    //     педагога уже ПРОВЕДЁННОГО урока, и заместитель потерял бы свои отметки.
+    const L9 = own[8];
+    const r9 = await substitution.cancel(L9.id, ivanova, { reason: 'absence' });
+    check(r9.status === 'substituted' || r9.status === 'no_substitute', `урок ${L9.slotNo} отменён для проверки отзыва`);
+    process.env.SCHOOL_TODAY = iso(L9.date);
+    process.env.SCHOOL_NOW = '23:59';
+    await refusesWith(() => substitution.withdraw(L9.id, ivanova), 'LESSON_ALREADY_HELD',
+      (d) => d.date === dm(L9.date),
+      'отзыв отмены прошедшего урока отклонён — историю проведённого урока не переписывают (AR-211 ревью)');
+    process.env.SCHOOL_NOW = '00:01';
+    await substitution.withdraw(L9.id, ivanova);
+    delete process.env.SCHOOL_TODAY;
+    delete process.env.SCHOOL_NOW;
+    check((await sub(L9.id))?.status === 'withdrawn', 'тот же отзыв до начала урока проходит');
+    await drain();
+
+    // (б) Отсутствующий педагог не получает чужую замену в том же слоте: его
+    //     собственный урок уже отдан заместителю, и по `teacherId` он выглядел бы
+    //     свободным — подбор смотрит и на записи отмен этого слота.
+    const sameSlot = own.filter((l) => iso(l.date) === iso(own[9].date) && l.slotNo === own[9].slotNo);
+    if (sameSlot.length) {
+      const away = await substitution.cancel(own[9].id, ivanova, { reason: 'absence' });
+      const foreign = await prisma.schoolLesson.findFirst({
+        where: { date: own[9].date, slotNo: own[9].slotNo, detachedAt: null, id: { not: own[9].id }, teacherId: { not: ivanova.userId } },
+      });
+      if (foreign) {
+        void away;
+        const picked = await substitution.cancel(foreign.id, builder, { reason: 'official' });
+        check(picked.substituteTeacherId !== ivanova.userId,
+          `заместителем не назначен педагог, отменивший свой урок в этом же слоте: ${picked.substituteTeacherName ?? 'замены нет'}`);
+        await substitution.withdraw(foreign.id, builder);
+      } else {
+        check(true, 'в слоте нет второго урока — случай «отсутствующий как кандидат» не воспроизводится на этом стенде');
+      }
+      await substitution.withdraw(own[9].id, ivanova).catch(() => undefined);
+      await drain();
+    }
+
+    // (в) Заметка педагога — не общая: коллеге по `schedule.read` она не видна.
+    await scheduleSvc.setMyPreference({ workDays: [0, 1, 2, 3, 4], note: 'по вторникам уезжаю в 15:00' }, ivanova);
+    const prefsColleague = await scheduleSvc.listPreferences(petrov);
+    const mine = await scheduleSvc.listPreferences(ivanova);
+    const prefsBuilder = await scheduleSvc.listPreferences(builder);
+    check(prefsColleague.find((r) => r.teacherId === ivanova.userId)?.note === null,
+      'коллега видит рабочие дни, но не читает чужую заметку (`schedule.read` — не право на личный текст)');
+    check(mine.find((r) => r.teacherId === ivanova.userId)?.note?.includes('вторникам') === true, 'автор свою заметку видит');
+    check(prefsBuilder.find((r) => r.teacherId === ivanova.userId)?.note?.includes('вторникам') === true,
+      'строитель сетки читает заметки — он по ним расставляет уроки');
+
+    // (г) Сохранение без смены рабочих дней не роняет сетку: иначе любое открытие
+    //     формы объявляло бы расписание школы устаревшим.
+    await state.bump(prisma, 'schedule', { id: builder.userId, name: builder.name }, s.workspaceId).catch(() => undefined);
+    const before13 = await state.resolve();
+    await scheduleSvc.setMyPreference({ workDays: [0, 1, 2, 3, 4], note: 'та же заметка, дни те же' }, ivanova);
+    await drain();
+    check((await state.resolve()) === before13,
+      `сохранение предпочтений без смены дней состояние сетки не трогает (было ${before13}, стало ${await state.resolve()})`);
 
     // Генератор: поддержка `teacherDays` объявляется отказом TEACHER_DAYS_SHORT до перебора.
     const pure: GenInput = {

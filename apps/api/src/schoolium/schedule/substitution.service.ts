@@ -178,19 +178,31 @@ export class SubstitutionService {
     if (active) throw new SchoolError('LESSON_CANCELLED');
     await assertLessonNotHeld(this.prisma, ws, lesson);
 
-    const pick = await this.pickSubstitute(lesson, ws);
+    const candidate = await this.pickSubstitute(lesson, ws);
     const now = new Date();
-    const data = {
-      originalTeacherId: lesson.teacherId,
-      substituteTeacherId: pick?.teacherId ?? null,
-      reason,
-      reasonText,
-      status: pick ? 'substituted' : 'no_substitute',
-      requestedBy: actor.userId,
-      requestedAt: now,
-      decidedAt: now,
-    };
+    // Кандидат выбран чтением вне транзакции: пока шёл подбор, тот же педагог мог
+    // достаться другой отмене в этом слоте. Занятость перепроверяется в самой
+    // транзакции, и опоздавшая отмена честно отвечает «замены нет», а не даёт
+    // одному человеку два урока в одну минуту.
+    let pick = candidate;
     await this.prisma.$transaction(async (tx) => {
+      if (candidate) {
+        const taken = await tx.schoolLesson.findFirst({
+          where: { date: lesson.date, slotNo: lesson.slotNo, detachedAt: null, id: { not: lessonId }, teacherId: candidate.teacherId },
+          select: { id: true },
+        });
+        if (taken) pick = null;
+      }
+      const data = {
+        originalTeacherId: lesson.teacherId,
+        substituteTeacherId: pick?.teacherId ?? null,
+        reason,
+        reasonText,
+        status: pick ? 'substituted' : 'no_substitute',
+        requestedBy: actor.userId,
+        requestedAt: now,
+        decidedAt: now,
+      };
       await tx.lessonSubstitution.upsert({ where: { lessonId }, update: data, create: { workspaceId: ws, lessonId, ...data } });
       if (pick) {
         await tx.schoolLesson.update({ where: { id: lessonId }, data: { teacherId: pick.teacherId } });
@@ -238,7 +250,11 @@ export class SubstitutionService {
    * Отзыв — обратимость (AR-90): своё отзывает исходный педагог, любое —
    * строитель. Замена снимается тем же `reassigned` обратно на исходного
    * педагога; отмена без замены — `restored`, и журнал снимает `cancelledAt`.
-   * Гейта времени здесь нет намеренно (§11 строка 55 кодов времени не несёт).
+   *
+   * Гейт времени тот же, что у отмены (`LESSON_ALREADY_HELD`): отзыв переписывает
+   * `SchoolLesson.teacherId`, а с ним и право ставить отметки. Для прошедшего
+   * урока это переписало бы историю — заместитель, который урок ПРОВЁЛ, потерял
+   * бы доступ к своим отметкам, а отсутствовавший педагог получил бы его.
    */
   async withdraw(lessonId: string, actor: SchoolActor): Promise<{ ok: true }> {
     const ws = TenantContext.require();
@@ -248,6 +264,7 @@ export class SubstitutionService {
     if (!actorHas(actor, 'schedule.build') && sub.originalTeacherId !== actor.userId) {
       throw new SchoolError('NOT_YOUR_LESSON', { teacher: await this.nameOf(sub.originalTeacherId) });
     }
+    await assertLessonNotHeld(this.prisma, ws, lesson);
     await this.prisma.$transaction(async (tx) => {
       await tx.lessonSubstitution.update({ where: { lessonId }, data: { status: 'withdrawn', decidedAt: new Date() } });
       if (sub.status === 'substituted') {
@@ -383,14 +400,22 @@ export class SubstitutionService {
       select: { userId: true },
     });
     const active = new Set(members.map((m) => m.userId ?? ''));
-    const busy = new Set(
-      (
-        await this.prisma.schoolLesson.findMany({
-          where: { date: lesson.date, slotNo: lesson.slotNo, detachedAt: null, id: { not: lesson.id } },
-          select: { teacherId: true },
-        })
-      ).map((l) => l.teacherId),
-    );
+    // Занят в слоте: ведёт другой урок этой даты и позиции. `teacherId` урока —
+    // ТЕКУЩИЙ исполнитель, поэтому отдельно исключаются те, кто свой урок этого
+    // слота отменил: их урок уже отдан заместителю, и по одному `teacherId`
+    // отсутствующий выглядел бы свободным (иначе он получил бы чужую замену,
+    // отказавшись вести собственный урок в то же время).
+    const slotLessons = await this.prisma.schoolLesson.findMany({
+      where: { date: lesson.date, slotNo: lesson.slotNo, detachedAt: null, id: { not: lesson.id } },
+      select: { id: true, teacherId: true },
+    });
+    const busy = new Set(slotLessons.map((l) => l.teacherId));
+    for (const away of await this.prisma.lessonSubstitution.findMany({
+      where: { lessonId: { in: slotLessons.map((l) => l.id) }, status: { in: ['substituted', 'no_substitute'] } },
+      select: { originalTeacherId: true },
+    })) {
+      busy.add(away.originalTeacherId);
+    }
     const dayNo = dayNoOf(lesson.date);
     const prefs = await this.prisma.teacherPreference.findMany({ where: { teacherId: { in: [...rank.keys()] } } });
     const worksThatDay = new Map(prefs.map((p) => [p.teacherId, p.workDays.length === 0 || p.workDays.includes(dayNo)]));

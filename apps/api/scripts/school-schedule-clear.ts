@@ -48,6 +48,10 @@ async function main(): Promise<void> {
     await prisma.journalColumn.updateMany({ where: { lessonId: { in: kept } }, data: { detachedAt: now } });
   }
   // Пустые уроки и их колонки — вон (каскад уносит темы; отметок нет по отбору).
+  // Записи отмен и замен (AR-207) ссылаются на урок ЗНАЧЕНИЕМ, каскада у них нет:
+  // без явного удаления они пережили бы свои уроки сиротами и приехали бы в
+  // оверлей `S-40` записью о несуществующем уроке.
+  const subs = await prisma.lessonSubstitution.deleteMany({ where: { workspaceId: ws.id, lessonId: { in: plain } } });
   const cols = await prisma.journalColumn.deleteMany({ where: { workspaceId: ws.id, lessonId: { in: plain } } });
   const gone = await prisma.schoolLesson.deleteMany({ where: { id: { in: plain } } });
   const tpls = await prisma.scheduleTemplate.deleteMany({ where: { workspaceId: ws.id } });
@@ -58,6 +62,7 @@ async function main(): Promise<void> {
     [
       `Школа: ${ws.name} (${ws.id})`,
       `Шаблонов сетки удалено: ${tpls.count}`,
+      `Записей отмен и замен снято: ${subs.count}`,
       `Уроков удалено: ${gone.count} (колонок журнала: ${cols.count})`,
       `Уроков с отметками отвязано: ${kept.length}`,
       'Классы, предметы, привязки, нагрузка и ученики не тронуты.',

@@ -715,11 +715,14 @@ export class ScheduleController {
     return this.svc.setMyPreference(body, actorOf(req));
   }
 
-  /** `S-41.load.summary` (AR-206): рабочие дни всех педагогов — строителю. */
+  /**
+   * `S-41.load.summary` (AR-206): рабочие дни всех педагогов — строителю.
+   * Заметку педагога сервис отдаёт только её автору, строителю и надзору.
+   */
   @RequirePermission('schedule.read')
   @Get('preferences')
-  listPreferences() {
-    return this.svc.listPreferences();
+  listPreferences(@Req() req: Req0) {
+    return this.svc.listPreferences(actorOf(req));
   }
 
   /** §11 строка 24б · `S-43`: перестановка в черновике; материализует только confirm (AR-18). */

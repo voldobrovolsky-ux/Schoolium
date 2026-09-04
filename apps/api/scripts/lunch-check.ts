@@ -169,6 +169,19 @@ async function main(): Promise<void> {
     const keys2 = p2.slots.map((x) => `${x.dayNo}:${x.slotNo}:${x.teacherId}`);
     check(new Set(keys2).size === keys2.length, 'по скелету: педагог не стоит в двух местах одного слота');
     await schedule.cancelGeneration();
+
+    // Форма тела: кривой запрос — именованный отказ 400, а не 500 «внутренняя
+    // ошибка» на первом же `for` по не-массиву (регрессия ревью 1.5.0).
+    let shape = 'принято';
+    await schedule
+      .setLunch({ version: await version(), entries: 'весь-день' as unknown as [] }, s.moderator)
+      .catch((e: Error) => { shape = e.message; });
+    check(shape.includes('entries'), `entries не список — отказ формой, а не 500: «${shape}»`);
+    let itemShape = 'принято';
+    await schedule
+      .setLunch({ version: await version(), entries: ['5А' as unknown as { classId: string; lunchAfterLessonNo: number | null }] }, s.moderator)
+      .catch((e: Error) => { itemShape = e.message; });
+    check(itemShape.includes('classId'), `запись обеда не объект — отказ формой: «${itemShape}»`);
   });
 
   await b.close();

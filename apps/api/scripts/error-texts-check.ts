@@ -88,6 +88,7 @@ const SAMPLE: Record<ErrorCode, Record<string, unknown>> = {
   SUBJECT_EXISTS: { name: 'Алгебра', classLabel: '7' },
   GROUPS_BOUND: { classLabel: '7А', groups: '3, 4' },
   ROLE_LIMIT_REACHED: { roleLabel: 'Директор', count: 1, limit: 1 },
+  ADMIN_ACCOUNT_LOCKED: { name: 'Иванова М. И.' },
   LINK_EXHAUSTED: { useCount: 3, maxUses: 3 },
   TEACHER_DAYS_SHORT: { teacher: 'Иванова М. И.', hours: 24, slots: 15, days: 'ПН, СР, ПТ' },
   NOT_YOUR_LESSON: { teacher: 'Иванова М. И.' },

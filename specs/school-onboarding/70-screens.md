@@ -469,7 +469,10 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 | `S-31.subjects` | группа | привязки педагога из `GET /api/v1/subjects`: «Предмет · класс (группа N) · N ч/год»; у сотрудника без роли `teacher` группа скрыта | — | пусто — «привязок нет» |
 | `S-31.btn.competence` | текст-ссылка | «Компетенции» → `/subjects?competence=<userId>` — открывает `M-25` на этом педагоге | переход | `staff.manage` |
 
-- **error:** `TOKEN_USED` при повторном скане — «Код уже использован, откройте
+- **error:** `ADMIN_ACCOUNT_LOCKED` — пароль, ссылку входа и правку учётки на
+  карточке администратора школы принимает только администратор (AR-211): у
+  модератора кнопки видны, но сервер отвечает отказом с именем владельца
+  карточки; `TOKEN_USED` при повторном скане — «Код уже использован, откройте
   карточку заново»; `LAST_MODERATOR` при попытке удалить или деактивировать
   единственного модератора школы; `ROLE_LIMIT_REACHED` при добавлении роли
   (`M-07`) или возврате доступа, когда носителей роли в школе уже столько,
@@ -1137,6 +1140,7 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | `SUBJECT_EXISTS` | M-03, S-20 | Предмет «Алгебра» в 7 классе уже есть — карточка одна на пару «предмет × класс» |
 | `GROUPS_BOUND` | M-25, S-12 | 7А: группы 3, 4 ведут педагоги — сначала открепите привязки |
 | `ROLE_LIMIT_REACHED` | S-30, S-31 | Директор: в школе уже 1 из 1 носителей роли — лимит задаёт администратор в «Политиках» |
+| `ADMIN_ACCOUNT_LOCKED` | S-31 | Учётной записью администратора школы (Иванова М. И.) управляет только администратор |
 | `LINK_EXHAUSTED` | S-01 (открытие ссылки `/bootstrap/:token`), S-31 | Ссылка использована 3 из 3 раз — попросите выпустить новую |
 | `TEACHER_DAYS_SHORT` | S-41.2, S-42 | Иванова М. И.: 24 часа при 15 уроках в рабочие дни (ПН, СР, ПТ) — расширьте дни или снимите часы |
 | `NOT_YOUR_LESSON` | S-40 | Урок ведёт Иванова М. И. — отменить его может только она |
@@ -1201,7 +1205,7 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | 36 | POST `/api/v1/auth/login-code/verify` | S-05 | аноним | `staff.session.started.v1` | `LOGIN_CODE_INVALID`, `LOGIN_CODE_EXPIRED`, `ACCESS_REVOKED` |
 | 37 | POST `/api/v1/staff/:id/sessions/revoke` | S-31 | `staff.manage` | `staff.session.revoked.v1` | — |
 | 38 | DELETE `/api/v1/auth/sessions/:sid` | S-80 | владелец сессии | `staff.session.revoked.v1` (reason: manual) | — |
-| 39 | POST `/api/v1/staff/:id/login-link` | S-31, S-62 | `staff.manage` | `staff.login_link.issued.v1` (+ `ttlHours`, `maxUses`) | — (тело `IssueLoginLinkDto`: `ttlHours` 24 \| 48 \| 168, `maxUses` число либо `null`; AR-204 вытесняет AR-189 и AR-195) |
+| 39 | POST `/api/v1/staff/:id/login-link` | S-31, S-62 | `staff.manage` | `staff.login_link.issued.v1` (+ `ttlHours`, `maxUses`) | — (тело `IssueLoginLinkDto`: `ttlHours` 24 \| 48 \| 168, `maxUses` число либо `null`; AR-204 вытесняет AR-189 и AR-195) · `ADMIN_ACCOUNT_LOCKED` на карточке администратора (AR-211) |
 | 40 | POST `/api/v1/admin/sessions/:sid/revoke` | S-62 | `school.admin` | `staff.session.revoked.v1` (reason: admin) | `ACCESS_REVOKED` — сессия уже завершена |
 | 41 | POST `/api/v1/admin/sessions/revoke-all` | S-62 (`M-28`) | `school.admin` | `staff.session.revoked.v1` ×N (reason: incident) | — |
 | 42 | PUT `/api/v1/admin/policy` | S-62 | `school.admin` | `school.policy.set.v1` | — (тело `SetAccessPolicyDto`: `sessionLimits` + `roleLimits` — целое 1..20 либо `null`, только штатные роли; AR-205) |
@@ -1213,8 +1217,8 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | 48 | DELETE `/api/v1/admin/assets/:id` | S-62 | `school.admin` | `school.registry.changed.v1` | — |
 | 49 | PUT `/api/v1/schedule/lunch` | S-41.4 | `schedule.build` | — (версия агрегата) | `SKELETON_INVALID`, `CONCURRENT_EDIT` — обед по классам (AR-200) |
 | 50 | PUT `/api/v1/classes/:id/groups` | M-25, S-12 | `contingent.write` | `contingent.class.regrouped.v1` | `GROUPS_BOUND`, `CONCURRENT_EDIT` — число групп класса 0/2/3/4 (AR-202) |
-| 51 | PUT `/api/v1/staff/:id/account` | S-31 | `staff.manage` | `staff.account.updated.v1` | `USERNAME_TAKEN`, `USERNAME_INVALID` (AR-203) |
-| 52 | POST `/api/v1/staff/:id/password` | S-31 (`M-32`) | `staff.manage` | `staff.password.set.v1` | `PASSWORD_TOO_SHORT` (AR-203) |
+| 51 | PUT `/api/v1/staff/:id/account` | S-31 | `staff.manage` | `staff.account.updated.v1` | `USERNAME_TAKEN`, `USERNAME_INVALID` (AR-203) · `ADMIN_ACCOUNT_LOCKED` на карточке администратора (AR-211) |
+| 52 | POST `/api/v1/staff/:id/password` | S-31 (`M-32`) | `staff.manage` | `staff.password.set.v1` | `PASSWORD_TOO_SHORT` (AR-203) · `ADMIN_ACCOUNT_LOCKED` на карточке администратора (AR-211) |
 | 53 | PUT `/api/v1/schedule/preferences/me` | S-40 (`M-30`) | `schedule.preference.self` | `schedule.preference.set.v1` | — (AR-206) |
 | 54 | POST `/api/v1/lessons/:id/cancel` | S-40 (`M-31`) | `lesson.cancel.self` | `schedule.lesson.reassigned.v1` либо `schedule.lesson.cancelled.v1` | `NOT_YOUR_LESSON`, `LESSON_ALREADY_HELD`, `LESSON_DETACHED`, `LESSON_CANCELLED` (AR-207) |
 | 55 | DELETE `/api/v1/lessons/:id/cancel` | S-40 (`S-40.btn.withdrawCancel`) | `lesson.cancel.self` \| `schedule.build` | `schedule.lesson.reassigned.v1` либо `schedule.lesson.restored.v1` | `NOT_YOUR_LESSON` (AR-207) |

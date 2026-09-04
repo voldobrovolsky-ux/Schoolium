@@ -199,6 +199,35 @@ async function main(): Promise<void> {
       `учётка в аудите: ${acc.length} записи, кто (модератор) и о ком (сотрудник)`);
     check(pw.length === 3 && pw.every((r) => r.actor === moderator.userId && r.subjectUserId === card.userId),
       `пароль в аудите: ${pw.length} записи с идентичностью выпускающего и субъектом`);
+    // ── AR-211: учётка администратора закрыта от модератора ──
+    // Пароль и ссылка входа — выдача ДОСТУПА: с `staff.manage` модератор задал бы
+    // администратору пароль и вошёл бы под ним, и разделение кабинетов (AR-186)
+    // держалось бы на его добросовестности.
+    const { card: adminCard } = await staff.addCard({
+      role: 'teacher', lastName: 'Директоров', firstName: 'Пётр', username: `admin_${rnd()}`,
+    });
+    await staff.addRole(adminCard.id, 'admin', moderator);
+    const asAdmin: SchoolActor = { ...school.moderator, roles: ['admin'] };
+
+    await refuses(() => staff.setPassword(adminCard.id, { password: 'podmena123' }, moderator),
+      'ADMIN_ACCOUNT_LOCKED', 'модератор не задаёт пароль администратору школы (AR-211)');
+    await refuses(() => staff.regenerateCredentials(adminCard.id, moderator),
+      'ADMIN_ACCOUNT_LOCKED', 'модератор не перевыпускает пароль администратора');
+    await refuses(() => staff.issueLoginLink(adminCard.id, moderator, 'http://localhost:5173', {}),
+      'ADMIN_ACCOUNT_LOCKED', 'модератор не выпускает ссылку входа на карточку администратора');
+    await refuses(() => staff.updateAccount(adminCard.id, { lastName: 'Директоров', firstName: 'Пётр', username: `taken_${rnd()}` }, moderator),
+      'ADMIN_ACCOUNT_LOCKED', 'модератор не меняет логин администратора');
+
+    const adminPw = await staff.setPassword(adminCard.id, {}, asAdmin);
+    check(adminPw.password.length >= 8, `администратор свою учётку ведёт сам: пароль выпущен (${adminPw.username})`);
+    const adminLink = await staff.issueLoginLink(adminCard.id, asAdmin, 'http://localhost:5173', {});
+    check(Boolean(adminLink.token), 'администратор выпускает ссылку входа на карточку администратора');
+
+    // Ограничение стоит только на контуре доступа: кадровый учёт у модератора прежний (AR-88).
+    const roled = await staff.addRole(adminCard.id, 'deputy_upbringing', moderator);
+    check(roled.roles.includes('deputy_upbringing'), 'роли администратора модератор по-прежнему ведёт (AR-88 не сужен)');
+    const teacherPw = await staff.setPassword(card.id, {}, moderator);
+    check(teacherPw.password.length >= 8, 'учётка обычного сотрудника модератору по-прежнему открыта');
   });
 
   await b.close();
