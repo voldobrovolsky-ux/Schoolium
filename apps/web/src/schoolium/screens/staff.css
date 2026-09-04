@@ -1,19 +1,33 @@
 /*
  * `S-31` · карточка сотрудника (`M-06`): панель управления группами и строки
- * активности учётки (AR-187, AR-189).
+ * активности учётки (AR-187, AR-203, AR-204).
  *
- * Здесь только раскладка (1.4.0, AR-198): группы разделены линией, заголовок
- * группы — подпись, ряд действий с переносом, пары «подпись — значение»,
- * строки сессий. Кнопки, бейджи, поле копирования,
- * канва — из `app.css`, второй реализации у них не появляется.
- * Цвета — только токенами (G-37, AR-42).
+ * Здесь только раскладка (1.4.0, AR-198): полноэкранная модалка с телом до
+ * 1080px по центру, группы в две колонки на десктопе и в одну на телефоне,
+ * плашки учётки, ряд параметров ссылки входа, таймер кода, строки сессий и
+ * привязок. Кнопки, бейджи, поля, поле копирования, канва — из `app.css`,
+ * второй реализации у них не появляется. Цвета — только токенами (G-37, AR-42).
  */
+
+/* Полноэкранная на обеих раскладках (AR-203): тело модалки — колонка до 1080px
+   по центру; форма заведения учётки слота уже — ей хватает 480. */
+.sch-m06-body { width: 100%; max-width: 1080px; margin: 0 auto; }
+.sch-m06-body--narrow { max-width: 480px; }
 
 .sch-m06-groups { display: flex; flex-direction: column; gap: var(--sp-20); }
 .sch-m06-group { display: flex; flex-direction: column; gap: var(--sp-12); }
 /* Группы разделены линией, как секции настроек Linear: заголовок группы —
    подпись 13px, а не третий заголовок; глаз ведёт линия, не размер. */
 .sch-m06-group + .sch-m06-group { border-top: 1px solid var(--c-border-default); padding-top: var(--sp-20); }
+/* Десктоп: группы в две колонки (75-adaptive §3 M-06). Ряды сетки одной
+   высоты, поэтому линия между рядами идёт по обеим колонкам на одном уровне;
+   у первого ряда линии нет. Блок стоит ПОСЛЕ базового правила соседей: та же
+   специфичность, побеждает порядок. */
+@media (min-width: 768px) {
+  .sch-m06-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-20) var(--sp-32); }
+  .sch-m06-group + .sch-m06-group { border-top: 0; padding-top: 0; }
+  .sch-m06-group:nth-child(n + 3) { border-top: 1px solid var(--c-border-default); padding-top: var(--sp-20); }
+}
 .sch-m06-group > h3.sch-section-title { font-family: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--c-ink-secondary); letter-spacing: 0; }
 /* Ряд «бейдж роли + Снять»: кнопка компактная (28), чтобы ряд ролей читался
    строкой, а не столбиком кнопок. На телефоне мишень §4 возвращает 44. */
@@ -48,3 +62,43 @@
 .sch-m06-session-meta { display: flex; gap: var(--sp-12); flex-wrap: wrap; color: var(--c-ink-secondary); }
 /* Завершённая сессия приглушена, но слово «завершена» стоит рядом (AR-80). */
 .sch-m06-session[data-status='ended'] { color: var(--c-ink-secondary); }
+
+/* ─── плашки учётки (AR-203): ФИО · логин · пароль ───
+   Подпись мелко над значением, действия справа; пароль — маска (AR-156). */
+.sch-m06-plaques { display: flex; flex-direction: column; gap: var(--sp-8); }
+.sch-m06-plaque {
+  display: flex; align-items: center; gap: var(--sp-12);
+  padding: var(--sp-8) var(--sp-12);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-canvas);
+}
+.sch-m06-plaque-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.sch-m06-plaque-label { font-size: var(--fs-xs); color: var(--c-ink-secondary); }
+.sch-m06-plaque-value { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-m06-plaque-actions { display: flex; gap: var(--sp-8); flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto; }
+@media (min-width: 768px) {
+  .sch-m06-plaque-actions .sch-btn--ghost { height: var(--ctl-h-sm); padding: 0 var(--sp-8); }
+}
+
+/* ─── ссылка входа с параметрами (AR-204): срок · открытий · кнопка ─── */
+.sch-m06-linkrow { display: flex; align-items: flex-end; gap: var(--sp-12); flex-wrap: wrap; }
+.sch-m06-linkfield { margin-bottom: 0; flex: 0 1 160px; min-width: 120px; }
+
+/* Таймер кода входа «мм:сс» (AR-203): табличные цифры не дёргают строку. */
+.sch-m06-timer { font-variant-numeric: tabular-nums; font-weight: var(--fw-medium); color: var(--c-ink-primary); }
+
+/* ─── привязки педагога (AR-203): «Предмет · класс (группа N) · N ч/год» ─── */
+.sch-m06-subjects { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; font-size: var(--fs-sm); }
+.sch-m06-subjects li { padding: var(--sp-4) 0; border-top: 1px solid var(--c-border-default); }
+.sch-m06-subjects li:first-child { border-top: 0; padding-top: 0; }
+
+@media (max-width: 767px) {
+  /* Плашка на телефоне: действия переносятся под значение и делят строку —
+     каждая кнопка 48 высотой (§4), ширина у пары общая. */
+  .sch-m06-plaque { flex-wrap: wrap; }
+  .sch-m06-plaque-actions { width: 100%; justify-content: stretch; }
+  .sch-m06-plaque-actions .sch-btn { width: auto; flex: 1 1 auto; }
+  /* Селекты параметров ссылки и кнопка — друг под другом, во всю ширину. */
+  .sch-m06-linkrow { flex-direction: column; align-items: stretch; }
+  .sch-m06-linkfield { flex: none; min-width: 0; }
+}

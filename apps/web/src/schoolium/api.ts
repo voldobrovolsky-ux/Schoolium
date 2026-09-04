@@ -17,12 +17,15 @@ import type {
   AdminSessionDto,
   DeputyCabinetDto,
   IncidentResultDto,
+  IssueLoginLinkDto,
   LoginLinkDto,
   SchoolAssetDto,
   SchoolAuditEntryDto,
   SchoolNetworkDto,
   SetAccessPolicyDto,
+  SetStaffPasswordDto,
   StaffActivityDto,
+  UpdateStaffAccountDto,
   UpsertAssetDto,
   UpsertNetworkDto,
   CreateGuardianDto,
@@ -187,6 +190,10 @@ export const api = {
   fillStaffCard: (id: string, dto: FillStaffCardDto) =>
     call<{ card: StaffCardDto; credentials: CredentialsDto }>("POST", `${V1}/staff/${id}/fill`, dto),
   staffCredentials: (id: string) => call<CredentialsDto>("POST", `${V1}/staff/${id}/credentials`),
+  // AR-203 (§11 строки 51–52): ФИО и логин правятся на карточке; пароль —
+  // задаётся (пусто — сервер генерирует) и показывается один раз.
+  updateStaffAccount: (id: string, dto: UpdateStaffAccountDto) => call<StaffCardDto>("PUT", `${V1}/staff/${id}/account`, dto),
+  setStaffPassword: (id: string, dto: SetStaffPasswordDto) => call<CredentialsDto>("POST", `${V1}/staff/${id}/password`, dto),
   revokeStaffActivation: (id: string) => call<StaffCardDto>("POST", `${V1}/staff/${id}/revoke-activation`),
   usernameFree: (u: string) => call<{ free: boolean }>("GET", `${V1}/staff/username-free?u=${encodeURIComponent(u)}`),
   activationToken: (id: string) => call<ActivationTokenDto>("POST", `${V1}/staff/${id}/activation-token`),
@@ -294,8 +301,10 @@ export const api = {
   createAsset: (dto: UpsertAssetDto) => call<SchoolAssetDto>("POST", `${V1}/admin/assets`, dto),
   updateAsset: (id: string, dto: UpsertAssetDto) => call<SchoolAssetDto>("PUT", `${V1}/admin/assets/${id}`, dto),
   deleteAsset: (id: string) => call<{ ok: boolean }>("DELETE", `${V1}/admin/assets/${id}`),
-  // карточка сотрудника: ссылка входа 48 ч (админ) и активность (AR-187, AR-189)
-  staffLoginLink: (id: string) => call<LoginLinkDto>("POST", `${V1}/staff/${id}/login-link`),
+  // карточка сотрудника: ссылка входа с параметрами срока и числа открытий
+  // (AR-204: право `staff.manage`; пустое тело — дефолты 48 ч, без лимита —
+  // так её выдаёт `S-62.devices.btn.grant`) и активность (AR-187)
+  staffLoginLink: (id: string, dto: IssueLoginLinkDto = {}) => call<LoginLinkDto>("POST", `${V1}/staff/${id}/login-link`, dto),
   staffActivity: (id: string) => call<StaffActivityDto>("GET", `${V1}/staff/${id}/activity`),
 
   // ─── кабинет завуча (S-61, AR-193) ───

@@ -20,6 +20,7 @@ import {
   SESSION_VIA_LABELS,
   ASSET_KINDS,
   ASSET_KIND_LABELS,
+  DEFAULT_ROLE_LIMITS,
   MUTATION_PERMISSIONS,
   NETWORK_AUDIENCES,
   NETWORK_AUDIENCE_LABELS,
@@ -29,6 +30,7 @@ import {
   ROLE_LABELS,
   ROLE_PERMISSIONS,
   SCHOOL_ROLES,
+  STAFF_ROLES,
   type AccessPolicyDto,
   type AdminDeviceUserDto,
   type AdminOverviewDto,
@@ -37,6 +39,7 @@ import {
   type IncidentResultDto,
   type LoginLinkDto,
   type NetworkAudience,
+  type RoleLimits,
   type SchoolAssetDto,
   type SchoolNetworkDto,
   type SchoolPermission,
@@ -386,7 +389,11 @@ function UserNode({
         <div className="sch-adm-link" data-testid="S-62.devices.link">
           <div className="sch-stack">
             <CopyField label="Ссылка для входа" value={`${window.location.origin}/bootstrap/${link.token}`} />
-            <span className="sch-muted">действует до {dateTime(link.expiresAt)}</span>
+            {/* Дефолты ссылки (AR-204): 48 часов, без лимита открытий — параметры выбирают на `S-31`. */}
+            <span className="sch-muted">
+              действует до {dateTime(link.expiresAt)},{" "}
+              {link.maxUses === null ? "без лимита открытий" : `использований ${link.useCount} из ${link.maxUses}`}
+            </span>
           </div>
           <div className="sch-qr-frame">
             <QRCodeSVG value={`${window.location.origin}/bootstrap/${link.token}`} size={160} />
@@ -1004,7 +1011,7 @@ function AuditSection() {
   );
 }
 
-// ─────────────────────────── политики (AR-188) ───────────────────────────
+// ─────────────────────────── политики (AR-188, AR-205) ───────────────────────────
 
 const LIMIT_OPTIONS = [1, 2, 3, 5, 10];
 
@@ -1013,6 +1020,41 @@ const limitsToForm = (limits: SessionLimits): Record<SchoolRole, string> => {
   for (const r of SCHOOL_ROLES) {
     const v = limits[r];
     out[r] = typeof v === "number" ? String(v) : "";
+  }
+  return out;
+};
+
+/**
+ * Лимит носителей роли (AR-205) в форме — три состояния, а не два: `""` — не
+ * задано (действует дефолт `DEFAULT_ROLE_LIMITS`: 1 у директора и обоих
+ * замов, без лимита у остальных), `ROLE_LIMIT_NONE` — администратор снял лимит
+ * явно (`null`), число — лимит. Различать «не задано» и «снято» нужно только
+ * ролям с дефолтом: у остальных это одно и то же, и явный `null` сервера
+ * сворачивается в `""`.
+ */
+const ROLE_LIMIT_NONE = "none";
+type RoleLimitForm = Partial<Record<SchoolRole, string>>;
+const hasRoleDefault = (role: SchoolRole): boolean => typeof DEFAULT_ROLE_LIMITS[role] === "number";
+
+const roleLimitsToForm = (limits: RoleLimits): RoleLimitForm => {
+  const out: RoleLimitForm = {};
+  for (const r of STAFF_ROLES) {
+    const v = limits[r];
+    if (typeof v === "number") out[r] = String(v);
+    else if (v === null && hasRoleDefault(r)) out[r] = ROLE_LIMIT_NONE;
+    else out[r] = "";
+  }
+  return out;
+};
+
+/** Словарь для `PUT /admin/policy`: у ролей с дефолтом «не задано» — ключа нет, у остальных — `null`. */
+const formToRoleLimits = (form: RoleLimitForm): RoleLimits => {
+  const out: RoleLimits = {};
+  for (const r of STAFF_ROLES) {
+    const v = form[r] ?? "";
+    if (v === ROLE_LIMIT_NONE) out[r] = null;
+    else if (v !== "") out[r] = Number(v);
+    else if (!hasRoleDefault(r)) out[r] = null;
   }
   return out;
 };
@@ -1053,6 +1095,7 @@ function PolicyBody({
   onIncident: () => Promise<void>;
 }) {
   const [form, setForm] = useState<Record<SchoolRole, string>>(() => limitsToForm(policy.sessionLimits));
+  const [roleForm, setRoleForm] = useState<RoleLimitForm>(() => roleLimitsToForm(policy.roleLimits ?? {}));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1075,11 +1118,13 @@ function PolicyBody({
     try {
       const sessionLimits: SessionLimits = {};
       for (const r of SCHOOL_ROLES) sessionLimits[r] = form[r] === "" ? null : Number(form[r]);
-      const next = await api.setAdminPolicy({ sessionLimits });
+      /* Одна кнопка — оба словаря (AR-205): политика принимается целиком. */
+      const next = await api.setAdminPolicy({ sessionLimits, roleLimits: formToRoleLimits(roleForm) });
       /* «Сохранить» — и данные меняются: форма перечитывается из ответа
          сервера, а не из того, что нажали (§ UI-copy: один глагол на действие
          и результат). Тост здесь был бы шумом. */
       setForm(limitsToForm(next.sessionLimits));
+      setRoleForm(roleLimitsToForm(next.roleLimits ?? {}));
       onPolicy(next);
       setSaved(true);
     } catch (e) {
@@ -1092,16 +1137,31 @@ function PolicyBody({
   return (
     <div className="sch-adm-section">
       <div className="sch-card sch-stack">
-        <h2 className="sch-section-title">Лимит одновременных сессий</h2>
+        <h2 className="sch-section-title">Лимиты: сессии и носители ролей</h2>
         <p className="sch-adm-hint">
-          На роль: число либо без лимита. Превышение закрывает самую старую сессию человека, а не отказывает во входе.
+          Сессий на человека — число либо без лимита: превышение закрывает самую старую сессию, а не отказывает во входе.
+          Носителей роли в школе — сколько людей могут нести роль: когда занято столько, сколько разрешено, заведение
+          карточки, выдача роли и возврат доступа отклоняются; директор и оба заместителя по умолчанию — по одному.
         </p>
+        {/* Сетка в три колонки (AR-205): роль · сессий на человека · носителей роли в школе. */}
         <div className="sch-adm-limits" data-testid="S-62.policy.limits">
+          <span className="sch-adm-limits-head">Роль</span>
+          <span className="sch-adm-limits-head">Сессий на человека</span>
+          <span className="sch-adm-limits-head">Носителей роли в школе</span>
           {SCHOOL_ROLES.map((role) => {
             const cur = form[role];
             const extra = cur !== "" && !LIMIT_OPTIONS.includes(Number(cur)) ? Number(cur) : null;
             return (
-              <LimitRow key={role} role={role} value={cur} extra={extra} onValue={(v) => setForm((f) => ({ ...f, [role]: v }))} />
+              <LimitRow
+                key={role}
+                role={role}
+                value={cur}
+                extra={extra}
+                onValue={(v) => setForm((f) => ({ ...f, [role]: v }))}
+                roleValue={roleForm[role] ?? ""}
+                taken={policy.roleHolders?.[role] ?? 0}
+                onRoleValue={(v) => setRoleForm((f) => ({ ...f, [role]: v }))}
+              />
             );
           })}
         </div>
@@ -1198,31 +1258,83 @@ function PolicyBody({
   );
 }
 
+/**
+ * Строка сетки лимитов: роль · сессий на человека (`limit-{role}`, AR-188) ·
+ * носителей роли в школе (`role-limit-{role}` в ячейке `S-62.policy.roleLimits`,
+ * AR-205). Второй селект — только у штатных ролей: у родителя и ученика
+ * носителей не ограничивают, и ячейка говорит это словами, а не пустотой.
+ */
 function LimitRow({
   role,
   value,
   extra,
   onValue,
+  roleValue,
+  taken,
+  onRoleValue,
 }: {
   role: SchoolRole;
   value: string;
   extra: number | null;
   onValue: (v: string) => void;
+  roleValue: string;
+  taken: number;
+  onRoleValue: (v: string) => void;
 }) {
   const id = `limit-${role}`;
+  const roleId = `role-limit-${role}`;
+  const staff = STAFF_ROLES.includes(role);
+  const withDefault = hasRoleDefault(role);
+  const roleExtra = roleValue !== "" && roleValue !== ROLE_LIMIT_NONE && !LIMIT_OPTIONS.includes(Number(roleValue)) ? Number(roleValue) : null;
   return (
     <>
       <label htmlFor={id}>{ROLE_LABELS[role]}</label>
-      <select id={id} className="sch-input" value={value} onChange={(e) => onValue(e.target.value)}>
-        <option value="">без лимита</option>
-        {/* Значение вне ряда (задано раньше иначе) не теряется молча — стоит своим пунктом. */}
-        {extra !== null ? <option value={String(extra)}>{extra}</option> : null}
-        {LIMIT_OPTIONS.map((n) => (
-          <option key={n} value={String(n)}>
-            {n}
-          </option>
-        ))}
-      </select>
+      <div className="sch-adm-limit-cell">
+        <span className="sch-adm-limits-cap" aria-hidden="true">
+          сессий на человека
+        </span>
+        <select id={id} className="sch-input" aria-label={`${ROLE_LABELS[role]}: сессий на человека`} value={value} onChange={(e) => onValue(e.target.value)}>
+          <option value="">без лимита</option>
+          {/* Значение вне ряда (задано раньше иначе) не теряется молча — стоит своим пунктом. */}
+          {extra !== null ? <option value={String(extra)}>{extra}</option> : null}
+          {LIMIT_OPTIONS.map((n) => (
+            <option key={n} value={String(n)}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </div>
+      {staff ? (
+        <div className="sch-adm-limit-cell" data-testid="S-62.policy.roleLimits">
+          <span className="sch-adm-limits-cap" aria-hidden="true">
+            носителей роли в школе
+          </span>
+          <div className="sch-adm-rolelimit">
+            <select
+              id={roleId}
+              className="sch-input"
+              aria-label={`${ROLE_LABELS[role]}: носителей роли в школе`}
+              value={roleValue}
+              onChange={(e) => onRoleValue(e.target.value)}
+            >
+              {/* У директора и замов пустое значение — дефолт «1 (по умолчанию)» (AR-205);
+                  снятие лимита у них — отдельный явный пункт. */}
+              <option value="">{withDefault ? `${DEFAULT_ROLE_LIMITS[role]} (по умолчанию)` : "без лимита"}</option>
+              {withDefault ? <option value={ROLE_LIMIT_NONE}>без лимита</option> : null}
+              {roleExtra !== null ? <option value={String(roleExtra)}>{roleExtra}</option> : null}
+              {LIMIT_OPTIONS.map((n) => (
+                <option key={n} value={String(n)}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            {/* Занято — живые членства плюс пустые слоты (то же число, что видит проверка сервера). */}
+            <span className="sch-adm-rolelimit-taken">занято {taken}</span>
+          </div>
+        </div>
+      ) : (
+        <span className="sch-adm-hint">не ограничивается</span>
+      )}
     </>
   );
 }

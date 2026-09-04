@@ -210,6 +210,14 @@ export interface ModalProps {
   /** Как эта модалка выглядит на мобайле — из колонки Mobile реестра §3. */
   mobile: MobileShape;
   /**
+   * Форма на десктопе — из колонки Desktop реестра §3: `centered` (дефолт) —
+   * центрированная модалка реестровой ширины; `fullscreen` — на весь экран
+   * (AR-203, `M-06`). Правила `[data-shape='fullscreen']` в `app.css` стоят вне
+   * медиазапроса, поэтому та же форма служит обеим раскладкам; ширину колонки
+   * тела задаёт экран своим CSS.
+   */
+  desktop?: "centered" | "fullscreen";
+  /**
    * «Назад» вместо крестика в хедере мобильного потока (§3, полноэкранная
    * модалка мастера). На десктопе шаг листается кнопками футера, поэтому
    * значение здесь имеет смысл только в паре с `mobile="fullscreen"`.
@@ -259,13 +267,15 @@ export function useFullscreenFlow(active: boolean): void {
  * листа/потока живут в CSS на `.sch-overlay[data-shape]`, и смок читает уровни
  * вложенности числом `.sch-overlay` (AR-82).
  */
-export function Modal({ title, width, onClose, children, footer, testId, level = 1, mobile, onBack }: ModalProps) {
+export function Modal({ title, width, onClose, children, footer, testId, level = 1, mobile, desktop = "centered", onBack }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
-  const shape = isMobile ? mobile : "desktop";
+  const shape = isMobile ? mobile : desktop === "fullscreen" ? "fullscreen" : "desktop";
 
   // Таб-бар уходит только под полноэкранный поток: нижний лист его не прячет —
-  // человек видит, откуда пришёл, и куда вернётся (§3).
+  // человек видит, откуда пришёл, и куда вернётся (§3). На десктопе (AR-203)
+  // признак `body[data-sch-flow]` безвреден: его читают только правила
+  // мобильного медиазапроса.
   useEffect(() => {
     if (shape !== "fullscreen") return;
     enterFlow();
