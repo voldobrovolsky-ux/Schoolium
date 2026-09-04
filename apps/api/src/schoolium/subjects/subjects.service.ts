@@ -2,13 +2,19 @@ import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleIni
 import { randomBytes } from 'node:crypto';
 import {
   ACCESS_PARAMS,
+  canonicalSubjectName,
+  subjectNameKey,
   type BindTeacherDto,
   type BindTeacherManualDto,
   type BindingDto,
+  type CompetenceConflictDto,
   type CreateSubjectDto,
+  type SaveCompetenceDto,
+  type SaveCompetenceResultDto,
   type SubjectDto,
   type TokenStatus,
 } from '@edustore/shared';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { OutboxService } from '../../common/outbox/outbox.service';
@@ -28,6 +34,8 @@ import { ContingentContractService } from '../contingent/contingent.service';
 import type { SchoolActor } from '../actor';
 
 const MIN = 60_000;
+/** Канонические написания пресета — для `canonicalSubjectName` (AR-201). */
+const PRESET_NAMES = SUBJECT_PRESET.map((p) => p.name);
 
 /**
  * Предметы и привязки педагогов (`S-20`, `S-21`, `S-22`).
@@ -153,35 +161,62 @@ export class SubjectsService implements OnModuleInit {
 
   // ─────────────── мутации ───────────────
 
-  /** §11 строка 13 · `M-03`: карточка на пару «предмет × класс». */
+  /**
+   * §11 строка 13 · `M-03`: карточка на пару «предмет × класс». Имя
+   * канонизируется по ключу без регистра (AR-201): «алгебра» при существующей
+   * «Алгебра» в том же классе — `SUBJECT_EXISTS` с объектом и классом, а не
+   * вторая карточка. Ключ хранится в `nameKey`; уникальность до слияния прода
+   * держит код, гонку двух создателей ловит P2002 тем же кодом.
+   */
   async create(dto: CreateSubjectDto) {
     const ws = TenantContext.require();
-    const s = await this.prisma.schoolSubject.create({
-      data: { workspaceId: ws, name: dto.name.trim(), classId: dto.classId },
-    });
-    return this.get(s.id);
+    const nameKey = subjectNameKey(dto.name ?? '');
+    if (!nameKey) throw new BadRequestException('Укажите название предмета');
+    const cls = (await this.contingent.classes()).find((c) => c.id === dto.classId);
+    if (!cls) throw new NotFoundException('класс не найден');
+    const name = canonicalSubjectName(dto.name, PRESET_NAMES);
+    const siblings = await this.prisma.schoolSubject.findMany({ where: { classId: dto.classId } });
+    const dup = siblings.find((x) => (x.nameKey ?? subjectNameKey(x.name)) === nameKey);
+    if (dup) throw new SchoolError('SUBJECT_EXISTS', { name: dup.name, classLabel: cls.label });
+    try {
+      const s = await this.prisma.schoolSubject.create({
+        data: { workspaceId: ws, name, nameKey, classId: dto.classId },
+      });
+      return this.get(s.id);
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        throw new SchoolError('SUBJECT_EXISTS', { name, classLabel: cls.label });
+      }
+      throw e;
+    }
   }
 
   /**
    * Пресет типовых предметов (AR-160): для каждого класса школы создаются
    * карточки «предмет × класс» из справочника по диапазону параллелей.
-   * Идемпотентно (G-70): существующая пара не дублируется (`skipDuplicates` по
-   * уникальности `[workspaceId, name, classId]`), ручные карточки не
+   * Идемпотентно (G-70): существующая пара ищется по КЛЮЧУ имени (AR-201) —
+   * ручная «музыка» не даёт второй карточки «Музыка»; ручные карточки не
    * затираются. Ручное заведение (`S-20`/`S-21`) сохраняется — пресет
    * ускоряет, а не заменяет.
    */
   async applyPreset(): Promise<{ created: number; skipped: number }> {
     const ws = TenantContext.require();
-    const classes = await this.prisma.schoolClass.findMany();
-    const rows = classes.flatMap((c) =>
+    const [classes, existing] = await Promise.all([
+      this.prisma.schoolClass.findMany(),
+      this.prisma.schoolSubject.findMany({ select: { classId: true, name: true, nameKey: true } }),
+    ]);
+    const taken = new Set(existing.map((x) => `${x.classId}·${x.nameKey ?? subjectNameKey(x.name)}`));
+    const wanted = classes.flatMap((c) =>
       SUBJECT_PRESET.filter((p) => c.parallel >= p.from && c.parallel <= p.to).map((p) => ({
         workspaceId: ws,
         name: p.name,
+        nameKey: subjectNameKey(p.name),
         classId: c.id,
       })),
     );
-    const res = await this.prisma.schoolSubject.createMany({ data: rows, skipDuplicates: true });
-    return { created: res.count, skipped: rows.length - res.count };
+    const rows = wanted.filter((r) => !taken.has(`${r.classId}·${r.nameKey}`));
+    const res = rows.length ? await this.prisma.schoolSubject.createMany({ data: rows, skipDuplicates: true }) : { count: 0 };
+    return { created: res.count, skipped: wanted.length - res.count };
   }
 
   /**
@@ -344,15 +379,19 @@ export class SubjectsService implements OnModuleInit {
   }
 
   /**
-   * §11 строка 15б · компетенции педагога (AR-179): модератор галочками
-   * закрывает позиции «предмет × класс» НА ВЕСЬ КЛАСС. Снятая галочка
-   * открепляет; занятая другим позиция при `replace=false` возвращается
-   * КОНФЛИКТОМ (не ошибкой — человеку задают вопрос «Заменить всех?»), при
-   * `replace=true` прежние открепляются. Позиции с групповыми привязками этим
-   * каналом не трогаются (Д6): группы назначаются из карточки предмета.
+   * §11 строка 15б · компетенции педагога (AR-179, AR-202): модератор
+   * галочками закрывает позиции «предмет × класс» — весь класс либо группы
+   * (`positions[].groupNos`; при наличии `positions` список `subjectIds`
+   * не читается). Снятая галочка открепляет; занятая другим позиция при
+   * `replace=false` возвращается КОНФЛИКТОМ (не ошибкой — человеку задают
+   * вопрос «Заменить всех?»), при `replace=true` прежние открепляются.
+   * Д6 держит сервер: класс и группы на одной карточке взаимоисключены —
+   * чужая классовая привязка при групповом назначении и наоборот возвращается
+   * конфликтом (с `groupNo`, если конфликт по группе); replace снимает у
+   * чужого ровно запрошенные группы, остальные его группы остаются.
    * События и аудит — те же `teacher.bound/unbound.v1`, канал не различим.
    */
-  async saveCompetence(dto: import('@edustore/shared').SaveCompetenceDto, actor: SchoolActor) {
+  async saveCompetence(dto: SaveCompetenceDto, actor: SchoolActor): Promise<SaveCompetenceResultDto> {
     const ws = TenantContext.require();
     const membership = await this.prisma.membership.findFirst({
       where: { workspaceId: ws, userId: dto.teacherId, deactivatedAt: null },
@@ -364,38 +403,109 @@ export class SubjectsService implements OnModuleInit {
       this.contingent.classes(),
       this.teachersById(),
     ]);
-    const target = new Set(dto.subjectIds);
     const label = (classId: string) => classes.find((c) => c.id === classId)?.label ?? '—';
+    const me = dto.teacherId;
 
-    const toBind: { id: string; classId: string }[] = [];
-    const toUnbind: { id: string; classId: string }[] = [];
-    const conflicts: { subjectId: string; subjectName: string; classLabel: string; teacherIds: string[] }[] = [];
-    for (const s of subjects) {
-      const own = s.bindings.some((b) => b.teacherId === dto.teacherId && b.scope === 'class');
-      const groupBound = s.bindings.some((b) => b.scope === 'group');
-      if (groupBound) continue; // группы — из карточки предмета (Д6)
-      const others = s.bindings.filter((b) => b.scope === 'class' && b.teacherId !== dto.teacherId);
-      if (target.has(s.id)) {
-        if (own) continue;
-        if (others.length) {
-          conflicts.push({ subjectId: s.id, subjectName: s.name, classLabel: label(s.classId), teacherIds: others.map((b) => b.teacherId) });
-        } else {
-          toBind.push({ id: s.id, classId: s.classId });
-        }
-      } else if (own) {
-        toUnbind.push({ id: s.id, classId: s.classId });
+    // Желаемое состояние: карточка → «весь класс» либо множество групп (AR-202).
+    const desired = new Map<string, 'class' | Set<number>>();
+    if (Array.isArray(dto.positions)) {
+      for (const pos of dto.positions) {
+        const groups = [...new Set((pos.groupNos ?? []).filter((g) => Number.isInteger(g) && g > 0))].sort((a, b) => a - b);
+        desired.set(pos.subjectId, groups.length ? new Set(groups) : 'class');
+      }
+    } else {
+      for (const id of dto.subjectIds ?? []) desired.set(id, 'class');
+    }
+    for (const [subjectId, want] of desired) {
+      const s = subjects.find((x) => x.id === subjectId);
+      if (!s) throw new NotFoundException('предмет не найден');
+      if (want === 'class') continue;
+      const groupCount = classes.find((c) => c.id === s.classId)?.groupCount ?? 0;
+      const outside = [...want].filter((g) => g > groupCount);
+      if (outside.length) {
+        throw new BadRequestException(`${label(s.classId)}: группы ${outside.join(', ')} нет — в классе ${groupCount || 'нет'} групп`);
       }
     }
 
+    interface Plan {
+      subjectId: string;
+      classId: string;
+      /** Снять все свои привязки карточки (смена вида либо снятая галочка). */
+      dropOwn: boolean;
+      /** Создать свою привязку такого вида (часы — от снятых своих, если были). */
+      create: { scope: 'class' | 'group'; groupNos: number[]; hoursPerYear: number; hoursPerWeek: number } | null;
+      /** Чужие, которых снимает replace: педагог → 'all' либо запрошенные группы. */
+      strip: Map<string, 'all' | Set<number>>;
+      conflicts: { groupNo?: number; teacherIds: string[] }[];
+    }
+    const plans: Plan[] = [];
+    const maxHours = (rows: { hoursPerYear: number; hoursPerWeek: number }[]) => ({
+      hoursPerYear: Math.max(0, ...rows.map((r) => r.hoursPerYear)),
+      hoursPerWeek: Math.max(0, ...rows.map((r) => r.hoursPerWeek)),
+    });
+
+    for (const s of subjects) {
+      const want = desired.get(s.id);
+      const own = s.bindings.filter((b) => b.teacherId === me);
+      const others = s.bindings.filter((b) => b.teacherId !== me);
+      const ownClass = own.some((b) => b.scope === 'class');
+      const ownGroups = [...new Set(own.filter((b) => b.scope === 'group').flatMap((b) => b.groupNos))].sort((a, b) => a - b);
+      const plan: Plan = { subjectId: s.id, classId: s.classId, dropOwn: false, create: null, strip: new Map(), conflicts: [] };
+      const block = (b: { teacherId: string; scope: string; groupNos: number[] }, g?: number) => {
+        const cur = plan.strip.get(b.teacherId);
+        if (b.scope === 'class' || g === undefined) plan.strip.set(b.teacherId, 'all');
+        else if (cur !== 'all') plan.strip.set(b.teacherId, new Set([...(cur ?? []), g]));
+      };
+
+      if (!want) {
+        if (own.length) plan.dropOwn = true;
+      } else if (want === 'class') {
+        if (ownClass && !ownGroups.length) continue; // уже ведёт классом
+        // «весь класс» блокирует ЛЮБАЯ чужая привязка (Д6): классовая — как прежде,
+        // групповая — конфликт по каждой занятой группе
+        const otherClass = others.filter((b) => b.scope === 'class');
+        if (otherClass.length) plan.conflicts.push({ teacherIds: otherClass.map((b) => b.teacherId) });
+        const byGroup = new Map<number, string[]>();
+        for (const b of others.filter((x) => x.scope === 'group')) {
+          for (const g of b.groupNos) byGroup.set(g, [...(byGroup.get(g) ?? []), b.teacherId]);
+        }
+        for (const [g, ids] of [...byGroup].sort((a, b) => a[0] - b[0])) plan.conflicts.push({ groupNo: g, teacherIds: ids });
+        for (const b of others) block(b);
+        plan.dropOwn = own.length > 0; // смена вида «группы → класс»
+        plan.create = { scope: 'class', groupNos: [], ...maxHours(own) };
+      } else {
+        const wantArr = [...want];
+        const same = !ownClass && own.length === 1 && ownGroups.length === wantArr.length && ownGroups.every((g, i) => g === wantArr[i]);
+        if (same) continue;
+        const adding = wantArr.filter((g) => !ownGroups.includes(g));
+        // чужая классовая привязка блокирует любую группу; чужая групповая — только свою
+        const otherClass = others.filter((b) => b.scope === 'class');
+        for (const g of adding) {
+          const holders = [
+            ...otherClass.map((b) => b.teacherId),
+            ...others.filter((b) => b.scope === 'group' && b.groupNos.includes(g)).map((b) => b.teacherId),
+          ];
+          if (holders.length) plan.conflicts.push({ groupNo: g, teacherIds: [...new Set(holders)] });
+          for (const b of otherClass) block(b);
+          for (const b of others.filter((x) => x.scope === 'group' && x.groupNos.includes(g))) block(b, g);
+        }
+        plan.dropOwn = own.length > 0;
+        plan.create = { scope: 'group', groupNos: wantArr, ...maxHours(own) };
+      }
+      if (plan.dropOwn || plan.create || plan.conflicts.length) plans.push(plan);
+    }
+
+    const conflicts = plans.flatMap((p) => p.conflicts.map((c) => ({ ...c, subjectId: p.subjectId })));
     if (conflicts.length && !dto.replace) {
-      // группировка «предмет z в классах x и y уже ведёт учитель N» — по
-      // предмету и составу занявших его педагогов
-      const grouped = new Map<string, { subjectName: string; classLabels: string[]; teacherNames: string[] }>();
+      // группировка «предмет z в классах x и y уже ведёт учитель N» — по предмету,
+      // группе и составу занявших позицию педагогов; мутаций нет ни одной
+      const grouped = new Map<string, CompetenceConflictDto>();
       for (const c of conflicts) {
+        const subj = subjects.find((x) => x.id === c.subjectId)!;
         const names = [...new Set(c.teacherIds.map((t) => users.get(t)?.displayName ?? '—'))].sort();
-        const key = `${c.subjectName}·${names.join('|')}`;
-        const g = grouped.get(key) ?? { subjectName: c.subjectName, classLabels: [], teacherNames: names };
-        g.classLabels.push(c.classLabel);
+        const key = `${subj.name}·${c.groupNo ?? ''}·${names.join('|')}`;
+        const g = grouped.get(key) ?? { subjectName: subj.name, classLabels: [], teacherNames: names, ...(c.groupNo !== undefined ? { groupNo: c.groupNo } : {}) };
+        g.classLabels.push(label(subj.classId));
         grouped.set(key, g);
       }
       return { ok: false, conflicts: [...grouped.values()], bound: 0, unbound: 0 };
@@ -403,47 +513,57 @@ export class SubjectsService implements OnModuleInit {
 
     let bound = 0;
     let unbound = 0;
-    const bind = async (subjectId: string, classId: string) => {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.teacherBinding.create({
-          data: { workspaceId: ws, subjectId, teacherId: dto.teacherId, scope: 'class', groupNos: [] },
-        });
-        await this.outbox.enqueue(
-          tx,
-          newEvent<TeacherBoundV1>({
-            type: SCHOOL_EVENTS.teacherBound,
-            workspaceId: ws,
-            actor: actor.userId,
-            payload: { subjectId, classId, teacherId: dto.teacherId, scope: 'class', groupNos: [] },
-          }),
-        );
+    const unboundEvent = (subjectId: string, classId: string, teacherId: string) =>
+      newEvent<TeacherUnboundV1>({
+        type: SCHOOL_EVENTS.teacherUnbound,
+        workspaceId: ws,
+        actor: actor.userId,
+        payload: { subjectId, classId, teacherId, reason: 'manual' },
       });
-      bound += 1;
-    };
-    const unbindOne = async (subjectId: string, classId: string, teacherId: string) => {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.teacherBinding.deleteMany({ where: { subjectId, teacherId } });
-        await this.outbox.enqueue(
-          tx,
-          newEvent<TeacherUnboundV1>({
-            type: SCHOOL_EVENTS.teacherUnbound,
-            workspaceId: ws,
-            actor: actor.userId,
-            payload: { subjectId, classId, teacherId, reason: 'manual' },
-          }),
-        );
+    const boundEvent = (subjectId: string, classId: string, teacherId: string, scope: 'class' | 'group', groupNos: number[]) =>
+      newEvent<TeacherBoundV1>({
+        type: SCHOOL_EVENTS.teacherBound,
+        workspaceId: ws,
+        actor: actor.userId,
+        payload: { subjectId, classId, teacherId, scope, groupNos },
       });
-      unbound += 1;
-    };
 
-    for (const s of toBind) await bind(s.id, s.classId);
-    for (const s of toUnbind) await unbindOne(s.id, s.classId, dto.teacherId);
-    for (const c of conflicts) {
-      const subj = subjects.find((s) => s.id === c.subjectId)!;
-      for (const t of c.teacherIds) await unbindOne(c.subjectId, subj.classId, t);
-      await bind(c.subjectId, subj.classId);
+    for (const p of plans) {
+      await this.prisma.$transaction(async (tx) => {
+        // replace: чужие снимаются ровно в запрошенном объёме — классовая привязка
+        // целиком, у групповой отбираются только запрошенные группы
+        for (const [teacherId, what] of p.strip) {
+          const rows = await tx.teacherBinding.findMany({ where: { subjectId: p.subjectId, teacherId } });
+          if (!rows.length) continue;
+          const keep = what === 'all'
+            ? []
+            : [...new Set(rows.filter((b) => b.scope === 'group').flatMap((b) => b.groupNos))].filter((g) => !what.has(g)).sort((a, b) => a - b);
+          await tx.teacherBinding.deleteMany({ where: { subjectId: p.subjectId, teacherId } });
+          await this.outbox.enqueue(tx, unboundEvent(p.subjectId, p.classId, teacherId));
+          unbound += 1;
+          if (keep.length) {
+            await tx.teacherBinding.create({
+              data: { workspaceId: ws, subjectId: p.subjectId, teacherId, scope: 'group', groupNos: keep, ...maxHours(rows) },
+            });
+            await this.outbox.enqueue(tx, boundEvent(p.subjectId, p.classId, teacherId, 'group', keep));
+            bound += 1;
+          }
+        }
+        if (p.dropOwn) {
+          await tx.teacherBinding.deleteMany({ where: { subjectId: p.subjectId, teacherId: me } });
+          await this.outbox.enqueue(tx, unboundEvent(p.subjectId, p.classId, me));
+          unbound += 1;
+        }
+        if (p.create) {
+          await tx.teacherBinding.create({
+            data: { workspaceId: ws, subjectId: p.subjectId, teacherId: me, ...p.create },
+          });
+          await this.outbox.enqueue(tx, boundEvent(p.subjectId, p.classId, me, p.create.scope, p.create.groupNos));
+          bound += 1;
+        }
+      });
     }
-    this.log.log(`компетенции ${dto.teacherId}: привязано ${bound}, откреплено ${unbound}`);
+    this.log.log(`компетенции ${me}: привязано ${bound}, откреплено ${unbound}`);
     return { ok: true, bound, unbound };
   }
 

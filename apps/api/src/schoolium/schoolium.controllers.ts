@@ -102,6 +102,13 @@ export class ClassesController {
   removeClass(@Req() req: Req0, @Param('id') id: string) {
     return this.svc.deleteClass(id, actorOf(req));
   }
+
+  /** §11 строка 50 · `M-25.select.groupCount` (AR-202): число групп класса 0/2/3/4, `GROUPS_BOUND` при живых групповых привязках. */
+  @RequirePermission('contingent.write')
+  @Put(':id/groups')
+  setGroups(@Req() req: Req0, @Param('id') id: string, @Body() body: import('@edustore/shared').SetClassGroupsDto) {
+    return this.svc.setGroups(id, body, actorOf(req));
+  }
 }
 
 @Controller('v1/students')
@@ -347,7 +354,7 @@ export class SubjectsController {
     return this.svc.bindTokenStatus(id);
   }
 
-  /** §11 строка 13 · `M-03`. */
+  /** §11 строка 13 · `M-03`: имя канонизируется по ключу (AR-201), дубль в классе — `SUBJECT_EXISTS`. */
   @RequirePermission('subject.write')
   @Post()
   create(@Body() body: CreateSubjectDto) {
@@ -375,7 +382,7 @@ export class SubjectsController {
     return this.svc.bindTeacherManual(id, body, actorOf(req));
   }
 
-  /** §11 строка 15б · `M-25` (AR-179): компетенции педагога галочками, с заменой и откреплением. */
+  /** §11 строка 15б · `M-25` (AR-179, AR-202): компетенции педагога галочками — класс либо группы (`positions`), с заменой и откреплением. */
   @RequirePermission('subject.write')
   @Post('competence')
   competence(@Req() req: Req0, @Body() body: SaveCompetenceDto) {
