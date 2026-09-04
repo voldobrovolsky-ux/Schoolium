@@ -6,8 +6,11 @@ import type { DomainEvent } from '../../common/events/domain-event';
 import {
   SCHOOL_EVENTS,
   type ClassDeletedV1,
+  type LessonCancelledV1,
   type LessonDetachedV1,
   type LessonMaterializedV1,
+  type LessonReassignedV1,
+  type LessonRestoredV1,
   type StudentDeactivatedV1,
   type StudentDeletedV1,
   type StudentReactivatedV1,
@@ -40,6 +43,10 @@ export class JournalProjection implements OnModuleInit {
     const on = (type: string, h: (e: DomainEvent) => Promise<void>) => this.bus.subscribe(type, 'journal', h);
     on(SCHOOL_EVENTS.lessonMaterialized, (e) => this.onMaterialized(e));
     on(SCHOOL_EVENTS.lessonDetached, (e) => this.onDetached(e));
+    // AR-207: педагог колонки, отмена без замены и её отзыв — тоже событиями
+    on(SCHOOL_EVENTS.lessonReassigned, (e) => this.onReassigned(e));
+    on(SCHOOL_EVENTS.lessonCancelled, (e) => this.onCancelled(e));
+    on(SCHOOL_EVENTS.lessonRestored, (e) => this.onRestored(e));
     on(SCHOOL_EVENTS.studentUpserted, (e) => this.onStudent(e));
     on(SCHOOL_EVENTS.studentDeactivated, (e) => this.onDeactivated(e));
     on(SCHOOL_EVENTS.studentReactivated, (e) => this.onReactivated(e));
@@ -76,6 +83,41 @@ export class JournalProjection implements OnModuleInit {
         where: { lessonId: p.lessonId },
         data: { detachedAt: new Date(e.occurredAt) },
       }),
+    );
+  }
+
+  /**
+   * Урок получил другого педагога (AR-207): колонка переписывается на него —
+   * заместитель проходит гейт отметки, исходный педагог нет. Отзыв идёт тем же
+   * событием обратно. Урок, который кто-то ведёт, отменённым не бывает —
+   * пометка `cancelledAt` снимается (ручная замена после «замены нет»).
+   */
+  private async onReassigned(e: DomainEvent): Promise<void> {
+    const p = e.payload as LessonReassignedV1;
+    await TenantContext.runAsSystem(() =>
+      this.prisma.journalColumn.updateMany({
+        where: { lessonId: p.lessonId },
+        data: { teacherId: p.toTeacherId, cancelledAt: null },
+      }),
+    );
+  }
+
+  /** Отмена без замены (AR-207): колонка остаётся на дате, запись отклоняется `LESSON_CANCELLED`. */
+  private async onCancelled(e: DomainEvent): Promise<void> {
+    const p = e.payload as LessonCancelledV1;
+    await TenantContext.runAsSystem(() =>
+      this.prisma.journalColumn.updateMany({
+        where: { lessonId: p.lessonId },
+        data: { cancelledAt: new Date(e.occurredAt) },
+      }),
+    );
+  }
+
+  /** Отзыв отмены (AR-207): пометка снята, колонка снова принимает отметки по общему гейту. */
+  private async onRestored(e: DomainEvent): Promise<void> {
+    const p = e.payload as LessonRestoredV1;
+    await TenantContext.runAsSystem(() =>
+      this.prisma.journalColumn.updateMany({ where: { lessonId: p.lessonId }, data: { cancelledAt: null } }),
     );
   }
 

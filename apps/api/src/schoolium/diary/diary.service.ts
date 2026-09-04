@@ -10,6 +10,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { schoolTodayIso } from '../calendar/school-day';
 import { SchoolError } from '../schoolium.errors';
+import { shortName } from '../schedule/lesson-time';
 
 const DAY = 24 * 3600 * 1000;
 const iso = (d: Date): string => d.toISOString().slice(0, 10);
@@ -99,6 +100,29 @@ export class DiaryService {
     const subjects = await this.prisma.schoolSubject.findMany({ where: { id: { in: subjectIds } } });
     const subjectName = new Map(subjects.map((x) => [x.id, x.name]));
 
+    // AR-207: заместитель — из действующей записи замены; ученику и родителю
+    // видна только «Фамилия И.», причина отмены — нет.
+    const subs = columns.length
+      ? await this.prisma.lessonSubstitution.findMany({
+          where: { lessonId: { in: columns.map((c) => c.lessonId) }, status: 'substituted' },
+          select: { lessonId: true, substituteTeacherId: true },
+        })
+      : [];
+    const substituteIds = [...new Set(subs.map((x) => x.substituteTeacherId).filter((x): x is string => Boolean(x)))];
+    const substitutes = substituteIds.length
+      ? await TenantContext.runAsSystem(() =>
+          this.prisma.user.findMany({
+            where: { id: { in: substituteIds } },
+            select: { id: true, lastName: true, firstName: true, displayName: true },
+          }),
+        )
+      : [];
+    const substituteName = new Map<string, string>();
+    for (const x of subs) {
+      const u = substitutes.find((y) => y.id === x.substituteTeacherId);
+      if (u) substituteName.set(x.lessonId, shortName(u));
+    }
+
     const days = new Map<string, DiaryDayDto>();
     for (const c of columns) {
       // урок группы, в которой ребёнок не состоит, в его дневник не попадает
@@ -111,9 +135,9 @@ export class DiaryService {
         subjectName: subjectName.get(c.subjectId) ?? '—',
         topic: c.lessonTopic?.topic ?? null,
         mark: (c.marks[0]?.value as MarkValue | undefined) ?? null,
-        // AR-207: отмена/замена — заполняет schedule-api (A) из JournalColumn.cancelledAt и LessonSubstitution
-        cancelled: false,
-        substituteName: null,
+        // AR-207: «Урок отменён» — по пометке колонки; «Замена: Фамилия И.» — по записи замены
+        cancelled: c.cancelledAt !== null,
+        substituteName: substituteName.get(c.lessonId) ?? null,
       });
       days.set(day, bucket);
     }

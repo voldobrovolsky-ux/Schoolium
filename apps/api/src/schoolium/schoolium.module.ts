@@ -14,6 +14,9 @@ import { SubjectsContractService, SubjectsService } from './subjects/subjects.se
 import { StaffService } from './staff/staff.service';
 import { CalendarContractService, CalendarService } from './calendar/calendar.service';
 import { ScheduleService } from './schedule/schedule.service';
+// 1.5.0 (AR-207): отмена урока и замена — свой сервис и контроллер датированных уроков
+import { SubstitutionService } from './schedule/substitution.service';
+import { LessonsController } from './schedule/lessons.controller';
 import { JournalContractService, JournalService } from './journal/journal.service';
 import { JournalProjection } from './journal/journal.projection';
 import {
@@ -62,6 +65,7 @@ import { DeputyCabinetController } from './cabinets/deputy-cabinet.controller';
     PendingController,
     CalendarController,
     ScheduleController,
+    LessonsController,
     SchoolJournalController,
     ModeratorCabinetController,
     AdminCabinetController,
@@ -80,6 +84,7 @@ import { DeputyCabinetController } from './cabinets/deputy-cabinet.controller';
     CalendarService,
     CalendarContractService,
     ScheduleService,
+    SubstitutionService,
     JournalService,
     JournalContractService,
     JournalProjection,
