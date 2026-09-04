@@ -565,7 +565,7 @@ export class StaffService {
   async issueLoginLink(cardId: string, actor: SchoolActor, origin: string): Promise<LoginLinkDto> {
     const { userId, workspaceId } = await this.registered(cardId);
     const link = await this.access.issueLoginLink(userId, workspaceId, actor.userId);
-    return { url: `${origin}/bootstrap/${link.token}`, token: link.token, expiresAt: link.expiresAt.toISOString() };
+    return { url: `${origin}/bootstrap/${link.token}`, token: link.token, expiresAt: link.expiresAt.toISOString(), maxUses: link.maxUses, useCount: link.useCount };
   }
 
   /**

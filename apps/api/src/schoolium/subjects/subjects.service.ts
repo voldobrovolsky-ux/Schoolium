@@ -147,6 +147,7 @@ export class SubjectsService implements OnModuleInit {
       bindings,
       coverageComplete: uncovered.length === 0,
       uncoveredGroups: uncovered.filter((g) => g > 0),
+      groupCount: cls?.groupCount ?? 0, // AR-202
     };
   }
 

@@ -3,7 +3,9 @@ import { ERROR_CODES, type ErrorCode } from '@edustore/shared';
 
 /**
  * Коды отказа версии с текстами из `70-screens.md` §9 (29 кодов 1.1.1 + пять
- * кодов контура учётки 1.2.0, specs/school-launch/10-identity.md §9).
+ * кодов контура учётки 1.2.0, specs/school-launch/10-identity.md §9, + коды
+ * УТЦ v1.4 и кабинетов, + девять кодов пакета 04.09 1.5.0, AR-199…AR-207 —
+ * итого 46). Три кода СанПиН выведены из употребления (AR-199), тексты хранят.
  *
  * Правило: текст называет **объект и цифры**, а не «произошла ошибка». Поэтому
  * шаблоны здесь — функции от деталей отказа, а не константные строки: сообщение
@@ -40,6 +42,7 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
   // Объект здесь — сама панель, под которой стоит текст (§S-41): номер четверти
   // приезжает в `details` и ставит ошибку на место, а в тексте его нет.
   TERM_REVERSED: () => 'Дата конца раньше даты начала',
+  // выведен из употребления (AR-199): не бросается, текст остаётся ради §9
   LOAD_EXCEEDS_SANPIN: (d) => `${n(d, 'classLabel')} класс: ${n(d, 'total')} часа при потолке ${n(d, 'cap')} — СанПиН 1.2.3685-21`,
   // Разбор источника слотов приезжает деталью `breakdown`: без скелета —
   // «6 уроков в день × 5 дней — потолок параллели», со скелетом (AR-178) —
@@ -50,6 +53,7 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
   TEACHER_OVERBOOKED: (d) => `${n(d, 'teacher')}: ${n(d, 'hours')} часов при ${n(d, 'grid')} слотах недели`,
   SUBJECT_UNCOVERED: (d) => `${n(d, 'subject')}, ${n(d, 'classLabel')} класс: ${n(d, 'groups')} без педагога`,
   GROUPS_UNASSIGNED: (d) => `${n(d, 'classLabel')} класс: группы объявлены, состав не назначен`,
+  // выведены из употребления (AR-199): DAY_EXCEEDS_SANPIN и DAY_TOO_LONG не бросаются
   DAY_EXCEEDS_SANPIN: (d) =>
     `${n(d, 'slotsPerDay')} уроков в день при потолке ${n(d, 'cap')} (старшая параллель школы — ${n(d, 'senior')} класс) — СанПиН 1.2.3685-21`,
   // текст НЕ ссылается на СанПиН: потолок 420 минут — продуктовый дефолт (AR-103)
@@ -68,9 +72,19 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
   STUDENT_INACTIVE: () => 'Ученик деактивирован',
   STUDENT_HAS_MARKS: () => 'У ученика есть выставленные отметки — запись деактивируется, а не удаляется',
   STAFF_HAS_HISTORY: () => 'У сотрудника есть привязки к предметам или выставленные отметки — карточка деактивируется, а не удаляется',
+  // 1.5.0 — пакет 04.09 (AR-199…AR-207): девять кодов, тексты дословно §9
+  SUBJECT_EXISTS: (d) => `Предмет «${n(d, 'name')}» в ${n(d, 'classLabel')} классе уже есть — карточка одна на пару «предмет × класс»`,
+  GROUPS_BOUND: (d) => `${n(d, 'classLabel')}: группы ${n(d, 'groups')} ведут педагоги — сначала открепите привязки`,
+  ROLE_LIMIT_REACHED: (d) => `${n(d, 'roleLabel')}: в школе уже ${n(d, 'count')} из ${n(d, 'limit')} носителей роли — лимит задаёт администратор в «Политиках»`,
+  LINK_EXHAUSTED: (d) => `Ссылка использована ${n(d, 'useCount')} из ${n(d, 'maxUses')} раз — попросите выпустить новую`,
+  TEACHER_DAYS_SHORT: (d) => `${n(d, 'teacher')}: ${n(d, 'hours')} часа при ${n(d, 'slots')} уроках в рабочие дни (${n(d, 'days')}) — расширьте дни или снимите часы`,
+  NOT_YOUR_LESSON: (d) => `Урок ведёт ${n(d, 'teacher')} — отменить его может только она`,
+  LESSON_ALREADY_HELD: (d) => `Урок ${n(d, 'date')} в ${n(d, 'time')} уже начался — отменить нельзя`,
+  LESSON_CANCELLED: () => 'Урок отменён — отметки в него не ставятся',
+  SUBSTITUTE_BUSY: (d) => `${n(d, 'teacher')} в этом слоте ведёт урок в ${n(d, 'classLabel')}`,
 };
 
-/** HTTP-статус отказа: 409 у конфликтов состояния, 403 у отзыва доступа, иначе 400. */
+/** HTTP-статус отказа: 409 у конфликтов состояния, 410 у погасших ссылок, 403 у отзыва доступа, иначе 400. */
 const STATUS: Partial<Record<ErrorCode, HttpStatus>> = {
   CONCURRENT_EDIT: HttpStatus.CONFLICT,
   SWAP_CONFLICT: HttpStatus.CONFLICT,
@@ -90,6 +104,15 @@ const STATUS: Partial<Record<ErrorCode, HttpStatus>> = {
   USERNAME_TAKEN: HttpStatus.CONFLICT,
   LOGIN_FAILED: HttpStatus.UNAUTHORIZED,
   ACTIVATION_REVOKED: HttpStatus.FORBIDDEN,
+  // 1.5.0 — пакет 04.09; TEACHER_DAYS_SHORT — 400 по умолчанию (арифметика до перебора)
+  SUBJECT_EXISTS: HttpStatus.CONFLICT,
+  GROUPS_BOUND: HttpStatus.CONFLICT,
+  ROLE_LIMIT_REACHED: HttpStatus.CONFLICT,
+  LESSON_ALREADY_HELD: HttpStatus.CONFLICT,
+  LESSON_CANCELLED: HttpStatus.CONFLICT,
+  SUBSTITUTE_BUSY: HttpStatus.CONFLICT,
+  LINK_EXHAUSTED: HttpStatus.GONE,
+  NOT_YOUR_LESSON: HttpStatus.FORBIDDEN,
 };
 
 /** Отказ версии: код + человекочитаемая причина с объектом и цифрами + requestId. */
@@ -108,5 +131,5 @@ export class SchoolError extends HttpException {
 
 export const errorText = (code: ErrorCode, details: D = {}): string => TEXTS[code](details);
 
-/** Перечисление для ворот: у каждого из 29 кодов есть непустой текст. */
+/** Перечисление для ворот: у каждого из 46 кодов есть непустой текст. */
 export const ALL_ERROR_CODES = ERROR_CODES;

@@ -59,13 +59,14 @@ export class ContingentService {
     return this.toClassDto(c);
   }
 
-  private async toClassDto(c: { id: string; parallel: number; letter: string | null; label: string; groupCount: number; students: { lastName: string; firstName: string }[] }): Promise<ClassDto> {
+  private async toClassDto(c: { id: string; parallel: number; letter: string | null; label: string; groupCount: number; lunchAfterLessonNo: number | null; students: { lastName: string; firstName: string }[] }): Promise<ClassDto> {
     return {
       id: c.id,
       parallel: c.parallel,
       letter: c.letter,
       label: c.label,
       groupCount: c.groupCount,
+      lunchAfterLessonNo: c.lunchAfterLessonNo, // AR-200
       students: c.students.length,
       // `M-13` называет ЗАПОЛНЕННЫЕ профили отдельно от пустых (AR-105): в
       // единственном опасном случае (профили заполнены, отметок ещё нет) текст

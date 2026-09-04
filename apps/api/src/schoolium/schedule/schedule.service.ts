@@ -530,6 +530,8 @@ export class ScheduleService implements OnModuleInit {
         lessonNo: r.lessonNo,
         pairNo: r.pairNo,
       })),
+      // AR-200: обед по классам — читает schedule-api (A) из SchoolClass.lunchAfterLessonNo; пока пусто
+      classLunch: [],
       version: reg.scheduleVersion,
     };
   }

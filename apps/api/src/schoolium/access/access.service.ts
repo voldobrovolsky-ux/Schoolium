@@ -291,12 +291,13 @@ export class AccessService {
           type: SCHOOL_EVENTS.loginLinkIssued,
           workspaceId,
           actor: issuedBy,
-          payload: { userId, issuedBy, expiresAt: expiresAt.toISOString() },
+          // AR-204: срок и лимит открытий из IssueLoginLinkDto подключает staff-admin (C); пока — дефолты
+          payload: { userId, issuedBy, expiresAt: expiresAt.toISOString(), ttlHours: ACCESS_PARAMS.loginLinkTtlHours, maxUses: null },
         }),
       );
       return link;
     });
-    return { token: row.token, expiresAt: row.expiresAt };
+    return { token: row.token, expiresAt: row.expiresAt, maxUses: row.maxUses, useCount: row.useCount };
   }
 
   /** Первый верифицированный вход ставит `activatedAt` — карточка уходит из «Не авторизованных». */
