@@ -67,6 +67,17 @@ const AUDITED: Record<string, { categories: string[]; subject: (p: Record<string
   [SCHOOL_EVENTS.loginLinkIssued]: { categories: ['identity'], subject: (p) => p.userId as string },
   [SCHOOL_EVENTS.policySet]: { categories: ['process'], subject: () => undefined },
   [SCHOOL_EVENTS.registryChanged]: { categories: ['process'], subject: () => undefined },
+  // ─── Schoolium 1.5.0: пакет 04.09 (AR-202, AR-203, AR-206, AR-207) — семь событий ───
+  // Учётка и пароль с карточки — след с идентичностью выпускающего и субъектом
+  // (AR-203); предпочтения педагога — о человеке; отмена, замена и отзыв урока,
+  // число групп класса — процесс. Ворота G-41: все 32 события версии в леджере.
+  [SCHOOL_EVENTS.accountUpdated]: { categories: ['identity'], subject: (p) => p.userId as string },
+  [SCHOOL_EVENTS.passwordSet]: { categories: ['identity'], subject: (p) => p.userId as string },
+  [SCHOOL_EVENTS.preferenceSet]: { categories: ['identity'], subject: (p) => p.teacherId as string },
+  [SCHOOL_EVENTS.lessonCancelled]: { categories: ['process'], subject: () => undefined },
+  [SCHOOL_EVENTS.lessonReassigned]: { categories: ['process'], subject: () => undefined },
+  [SCHOOL_EVENTS.lessonRestored]: { categories: ['process'], subject: () => undefined },
+  [SCHOOL_EVENTS.classGroupsChanged]: { categories: ['process'], subject: () => undefined },
 };
 
 /** Перечисление для ворот G-41: какие типы событий попадают в аудит. */

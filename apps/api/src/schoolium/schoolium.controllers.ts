@@ -402,6 +402,8 @@ export class SubjectsController {
 @Controller('v1/staff')
 export class StaffController {
   constructor(private readonly svc: StaffService) {}
+  // Типы тел карточки (AR-203, AR-204) — у класса, а не в общем блоке импортов:
+  // пакет 04.09 правится несколькими исполнителями, общий блок — точка слияния.
 
   @RequirePermission('staff.read')
   @Get()
@@ -486,11 +488,25 @@ export class StaffController {
     return this.svc.fillCard(id, body);
   }
 
-  /** `S-31.btn.reissuePassword`: новый пароль, показан один раз. */
+  /** `S-31.btn.reissuePassword`: новый пароль, показан один раз; событие `staff.password.set.v1` с `generated: true` (AR-203). */
   @RequirePermission('staff.manage')
   @Post(':id/credentials')
-  regenerateCredentials(@Param('id') id: string) {
-    return this.svc.regenerateCredentials(id);
+  regenerateCredentials(@Req() req: Req0, @Param('id') id: string) {
+    return this.svc.regenerateCredentials(id, actorOf(req));
+  }
+
+  /** §11 строка 51 · `S-31.btn.saveAccount` (AR-203): ФИО и логин учётки; `USERNAME_TAKEN` / `USERNAME_INVALID`. */
+  @RequirePermission('staff.manage')
+  @Put(':id/account')
+  updateAccount(@Req() req: Req0, @Param('id') id: string, @Body() body: StaffAccountBody) {
+    return this.svc.updateAccount(id, body, actorOf(req));
+  }
+
+  /** §11 строка 52 · `M-32.btn.save` (AR-203): пусто — сгенерировать; короче 8 — `PASSWORD_TOO_SHORT`; ответ — креды один раз. */
+  @RequirePermission('staff.manage')
+  @Post(':id/password')
+  setPassword(@Req() req: Req0, @Param('id') id: string, @Body() body: StaffPasswordBody) {
+    return this.svc.setPassword(id, body ?? {}, actorOf(req));
   }
 
   /** `S-31.btn.revokeActivation` (AR-153): «просканировал не тот». */
@@ -564,11 +580,16 @@ export class StaffController {
     return this.svc.revokeSessions(id, actorOf(req));
   }
 
-  /** §11 строка 39 · `S-31.btn.loginLink` / `S-62` (AR-189): одноразовая ссылка входа на 48 часов — только администратор. */
-  @RequirePermission('school.admin')
+  /**
+   * §11 строка 39 · `S-31.btn.loginLink` / `S-62.devices.btn.grant` (AR-204):
+   * ссылка входа с параметрами — срок 24/48/168 ч и число открытий 1/3/10/без
+   * лимита; выпускает `staff.manage` (модератор и администратор), пустое тело —
+   * дефолты 48 ч без лимита.
+   */
+  @RequirePermission('staff.manage')
   @Post(':id/login-link')
-  loginLink(@Req() req: Req0, @Param('id') id: string) {
-    return this.svc.issueLoginLink(id, actorOf(req), webOrigin(req));
+  loginLink(@Req() req: Req0, @Param('id') id: string, @Body() body?: LoginLinkBody) {
+    return this.svc.issueLoginLink(id, actorOf(req), webOrigin(req), body ?? {});
   }
 
   /** `M-06` (AR-187): активность учётки — активация, устройства, журнал подключений. */
@@ -579,6 +600,11 @@ export class StaffController {
     return this.svc.activity(id, webOrigin(req), actorOf(req).roles.includes('admin'));
   }
 }
+
+/** Тела маршрутов карточки сотрудника (AR-203, AR-204) — алиасы DTO контракта, объявлены у `StaffController`. */
+type StaffAccountBody = import('@edustore/shared').UpdateStaffAccountDto;
+type StaffPasswordBody = import('@edustore/shared').SetStaffPasswordDto;
+type LoginLinkBody = import('@edustore/shared').IssueLoginLinkDto;
 
 // ─────────────────────────── календарь и расписание ───────────────────────────
 

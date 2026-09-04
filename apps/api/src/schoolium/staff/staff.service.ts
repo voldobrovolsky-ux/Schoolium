@@ -1,20 +1,26 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
   ACCESS_PARAMS,
-  SINGLETON_ROLES,
+  ROLE_LABELS,
+  effectiveRoleLimit,
   type ActivationTokenDto,
   type CreateStaffCardDto,
   type CredentialsDto,
   type FillStaffCardDto,
+  type IssueLoginLinkDto,
   type LoginLinkDto,
+  type RoleLimits,
   type SchoolRole,
   type SessionClientKind,
+  type SetStaffPasswordDto,
   type StaffActivityDto,
   type StaffCardDto,
   type TokenStatus,
+  type UpdateStaffAccountDto,
 } from '@edustore/shared';
-import { createAccountWithMembership, generatePassword, hashPassword } from './credentials';
+import type { PrismaClient } from '@prisma/client';
+import { createAccountWithMembership, generatePassword, hashPassword, resolveUsername } from './credentials';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { OutboxService } from '../../common/outbox/outbox.service';
@@ -22,6 +28,8 @@ import { newEvent } from '../../common/events/domain-event';
 import { SchoolSessionService } from '../../common/auth/school-session.service';
 import {
   SCHOOL_EVENTS,
+  type AccountUpdatedV1,
+  type PasswordSetV1,
   type StaffDeactivatedV1,
   type StaffDeletedV1,
   type StaffReactivatedV1,
@@ -36,6 +44,29 @@ import type { SchoolActor } from '../actor';
 import { journalSince, sessionsOfUser, withoutAddress } from '../cabinets/session-view';
 
 const MIN = 60_000;
+
+/**
+ * Носители роли в школе (AR-205, уточняет AR-182): живые членства
+ * (`deactivatedAt: null`) ПЛЮС пустые bootstrap-слоты (`userId: null`,
+ * `plannedRoles` содержит роль) — слот заполнится этой ролью, значит он уже
+ * носитель. Деактивированные не считаются: их роль освобождена (AR-89).
+ *
+ * Одна функция на проверку лимита (`StaffService.assertRoleFree`), на ответ
+ * политики (`AccessPolicyDto.roleHolders`) и на предупреждение консольного
+ * `school:provision` — цифра «занято N» везде одна (П-5). Вызывать вне
+ * tenant-guard либо под `TenantContext.runAsSystem`: фильтр по школе явный.
+ */
+export async function countRoleHolders(
+  db: Pick<PrismaClient, 'membership' | 'staffCard'>,
+  workspaceId: string,
+  role: SchoolRole,
+): Promise<number> {
+  const [members, slots] = await Promise.all([
+    db.membership.count({ where: { workspaceId, deactivatedAt: null, roles: { has: role } } }),
+    db.staffCard.count({ where: { workspaceId, userId: null, plannedRoles: { has: role } } }),
+  ]);
+  return members + slots;
+}
 
 /**
  * Персонал: карточки, присутственная QR-регистрация (AR-76), роли (AR-102),
@@ -144,16 +175,15 @@ export class StaffService {
 
   /**
    * `S-30.btn.addFounder` / `addTeacher` / `addDeputyAcademic` /
-   * `addDeputyUpbringing`: карточка + учётка сразу. Синглтоны (AR-182)
-   * ЗАВОДЯТСЯ, пока роль свободна: bootstrap слотов замов не создаёт, и
+   * `addDeputyUpbringing`: карточка + учётка сразу. Роль с лимитом носителей
+   * (AR-205; дефолт 1 у директора и замов — прежние синглтоны AR-182)
+   * ЗАВОДИТСЯ, пока лимит не исчерпан: bootstrap слотов замов не создаёт, и
    * безусловный запрет оставлял школу без завуча.
    */
   async addCard(dto: CreateStaffCardDto): Promise<{ card: StaffCardDto; credentials: CredentialsDto }> {
     const role = dto.role;
     const ws = TenantContext.require();
-    if (SINGLETON_ROLES.includes(role) && (await this.singletonTaken(ws, role))) {
-      throw new ForbiddenException(`роль ${role} существует в школе в единственном экземпляре`);
-    }
+    await this.assertRoleFree(ws, role);
     const section = role === 'founder' || role === 'director' ? 1 : role === 'teacher' ? 3 : 2;
     const seq = await this.prisma.staffCard.count({ where: { section } });
     const { userId, credentials } = await this.createAccount(ws, dto, [role]);
@@ -173,12 +203,90 @@ export class StaffService {
     return { card: await this.get(cardId), credentials };
   }
 
-  /** `S-31.btn.reissuePassword`: новый пароль, показан модератору один раз. */
-  async regenerateCredentials(cardId: string): Promise<CredentialsDto> {
-    const { userId } = await this.registered(cardId);
-    const password = generatePassword();
+  /** `S-31.btn.reissuePassword`: новый пароль, показан модератору один раз (= `setPassword` с пустым полем, AR-203). */
+  async regenerateCredentials(cardId: string, actor: SchoolActor): Promise<CredentialsDto> {
+    return this.setPassword(cardId, {}, actor);
+  }
+
+  // ─────────────── учётка с карточки (§11 строки 51, 52; AR-203) ───────────────
+
+  /**
+   * `S-31.btn.saveAccount` → `PUT /staff/:id/account`: ФИО и логин учётки
+   * правит `staff.manage`. Юзернейм уникален на всю инсталляцию (AR-154) —
+   * занятый в другой школе тоже `USERNAME_TAKEN`; `displayName` пересобирается
+   * тем же правилом, что при заведении. Событие несёт список изменённых полей,
+   * сами значения в аудит не едут.
+   */
+  async updateAccount(cardId: string, dto: UpdateStaffAccountDto, actor: SchoolActor): Promise<StaffCardDto> {
+    const { userId, workspaceId } = await this.registered(cardId);
+    const lastName = String(dto?.lastName ?? '').trim();
+    const firstName = String(dto?.firstName ?? '').trim();
+    if (!lastName || !firstName) throw new BadRequestException('фамилия и имя обязательны');
+    const middleName = dto?.middleName === undefined || dto?.middleName === null ? null : String(dto.middleName).trim() || null;
+    const given = String(dto?.username ?? '').trim().toLowerCase();
+
+    const user = await TenantContext.runAsSystem(() => this.prisma.user.findUnique({ where: { id: userId } }));
+    if (!user) throw new NotFoundException('учётка не найдена');
+    // тот же логин — не занятость: правила и занятость проверяются только при смене
+    const username =
+      given === (user.username ?? '')
+        ? (user.username ?? '')
+        : await TenantContext.runAsSystem(() => resolveUsername(this.prisma, given, { lastName, firstName }));
+
+    const fields: string[] = [];
+    if (lastName !== user.lastName) fields.push('lastName');
+    if (firstName !== user.firstName) fields.push('firstName');
+    if (middleName !== (user.middleName ?? null)) fields.push('middleName');
+    if (username !== (user.username ?? '')) fields.push('username');
+    if (fields.length === 0) return this.get(cardId);
+
+    const displayName = `${lastName} ${firstName}`.trim();
+    await TenantContext.runAsSystem(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: userId },
+          data: { lastName, firstName, middleName, displayName, username },
+        });
+        await this.outbox.enqueue(
+          tx,
+          newEvent<AccountUpdatedV1>({
+            type: SCHOOL_EVENTS.accountUpdated,
+            workspaceId,
+            actor: actor.userId,
+            payload: { userId, updatedBy: actor.userId, fields },
+          }),
+        );
+      }),
+    );
+    return this.get(cardId);
+  }
+
+  /**
+   * `M-32.btn.save` → `POST /staff/:id/password` и `S-31.btn.reissuePassword`:
+   * пустое поле — пароль генерируется (`generated: true`), иначе берётся заданный
+   * (короче `passwordMinLength` — `PASSWORD_TOO_SHORT`). Хранится только bcrypt-хэш,
+   * открытый текст показывается один раз в ответе и в событие не попадает (AR-156).
+   */
+  async setPassword(cardId: string, dto: SetStaffPasswordDto, actor: SchoolActor): Promise<CredentialsDto> {
+    const { userId, workspaceId } = await this.registered(cardId);
+    const given = String(dto?.password ?? '').trim();
+    const generated = given === '';
+    const password = generated ? generatePassword() : given;
+    const passwordHash = hashPassword(password);
     const user = await TenantContext.runAsSystem(() =>
-      this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hashPassword(password) } }),
+      this.prisma.$transaction(async (tx) => {
+        const u = await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+        await this.outbox.enqueue(
+          tx,
+          newEvent<PasswordSetV1>({
+            type: SCHOOL_EVENTS.passwordSet,
+            workspaceId,
+            actor: actor.userId,
+            payload: { userId, setBy: actor.userId, generated },
+          }),
+        );
+        return u;
+      }),
     );
     return { username: user.username ?? '', password };
   }
@@ -352,14 +460,12 @@ export class StaffService {
   // ─────────────── роли (§11 строки 7, 32; AR-102) ───────────────
 
   /** `S-31.btn.addRole`. Роль `moderator` выдаётся любому — так появляется второй.
-   *  Синглтоны и здесь держит сервер (AR-182, П-4): без этой проверки M-07
-   *  позволял второго завуча, и «единственность» оставалась декларацией. */
+   *  Лимит носителей и здесь держит сервер (AR-205, П-4): без этой проверки M-07
+   *  позволял второго завуча, и лимит оставался декларацией. */
   async addRole(cardId: string, role: SchoolRole, actor: SchoolActor) {
     const { membership, workspaceId } = await this.registered(cardId);
     if (membership.roles.includes(role)) return this.get(cardId);
-    if (SINGLETON_ROLES.includes(role) && (await this.singletonTaken(workspaceId, role))) {
-      throw new ForbiddenException(`роль ${role} существует в школе в единственном экземпляре`);
-    }
+    await this.assertRoleFree(workspaceId, role);
     await TenantContext.runAsSystem(() =>
       this.prisma.membership.update({ where: { id: membership.id }, data: { roles: [...membership.roles, role] } }),
     );
@@ -405,22 +511,28 @@ export class StaffService {
     );
   }
 
+  /** Занято носителей роли: живые членства + пустые слоты (AR-205). */
+  roleHolders(workspaceId: string, role: SchoolRole): Promise<number> {
+    return TenantContext.runAsSystem(() => countRoleHolders(this.prisma, workspaceId, role));
+  }
+
   /**
-   * Синглтон занят, если роль несёт живое членство ЛИБО намечена на карточке
-   * без учётки (пустой bootstrap-слот — тоже носитель: заполнится этой ролью).
-   * Деактивированные не считаются — их слот освобождён (AR-89, AR-182).
+   * Лимит носителей роли (AR-205): читается из политики школы
+   * (`SchoolAccessPolicy.roleLimits`), отсутствие ключа — дефолт
+   * `DEFAULT_ROLE_LIMITS` (директор и оба зама по одному — прежние синглтоны
+   * AR-182), `null` — без лимита. Носителей уже столько, сколько разрешено, —
+   * `ROLE_LIMIT_REACHED` с ролью словами и цифрами «N из M».
    */
-  private async singletonTaken(workspaceId: string, role: SchoolRole): Promise<boolean> {
-    return TenantContext.runAsSystem(async () => {
-      const member = await this.prisma.membership.count({
-        where: { workspaceId, deactivatedAt: null, roles: { has: role } },
-      });
-      if (member > 0) return true;
-      const slot = await this.prisma.staffCard.count({
-        where: { workspaceId, userId: null, plannedRoles: { has: role } },
-      });
-      return slot > 0;
-    });
+  private async assertRoleFree(workspaceId: string, role: SchoolRole): Promise<void> {
+    const policy = await TenantContext.runAsSystem(() =>
+      this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId } }),
+    );
+    const limit = effectiveRoleLimit((policy?.roleLimits ?? {}) as RoleLimits, role);
+    if (limit === null) return;
+    const count = await this.roleHolders(workspaceId, role);
+    if (count >= limit) {
+      throw new SchoolError('ROLE_LIMIT_REACHED', { role, roleLabel: ROLE_LABELS[role], count, limit });
+    }
   }
 
   // ─────────────── удаление, деактивация, реактивация (§11 строки 29–31) ───────────────
@@ -478,15 +590,13 @@ export class StaffService {
 
   /**
    * Реактивация возвращает доступ; сессии не воскресают — вход заново.
-   * Синглтоны перепроверяются (AR-182): пока сотрудник был деактивирован, его
-   * роль могла уйти другому — реактивация не даёт двух живых завучей.
+   * Лимиты ролей перепроверяются (AR-205): пока сотрудник был деактивирован, его
+   * роль могла уйти другому — реактивация не даёт носителей сверх лимита.
    */
   async reactivate(cardId: string, actor: SchoolActor) {
     const { membership, workspaceId, userId } = await this.registered(cardId);
     for (const role of membership.roles as SchoolRole[]) {
-      if (SINGLETON_ROLES.includes(role) && (await this.singletonTaken(workspaceId, role))) {
-        throw new ForbiddenException(`роль ${role} существует в школе в единственном экземпляре`);
-      }
+      await this.assertRoleFree(workspaceId, role);
     }
     await TenantContext.runAsSystem(() =>
       this.prisma.membership.update({ where: { id: membership.id }, data: { deactivatedAt: null } }),
@@ -555,16 +665,29 @@ export class StaffService {
     return { ok: true, revoked: count };
   }
 
-  // ─────────────── ссылка входа и активность учётки 1.3.0 (§11 строка 39, AR-187, AR-189) ───────────────
+  // ─────────────── ссылка входа и активность учётки 1.3.0 (§11 строка 39, AR-187, AR-204) ───────────────
 
   /**
-   * `S-31.btn.loginLink` / `S-62`: одноразовая ссылка входа на 48 часов с
-   * карточки сотрудника. Адрес строится от публичного origin школы
-   * (`WEB_ORIGIN`), а не от хоста запроса: за прокси хост запроса — внутренний.
+   * `S-31.btn.loginLink` / `S-62.devices.btn.grant`: ссылка входа с карточки
+   * сотрудника с параметрами (AR-204): срок из `loginLinkTtlOptions` (дефолт
+   * 48 ч) и число открытий из `loginLinkUsesOptions` (дефолт без лимита) —
+   * значение вне меню отклоняется, а не округляется. Адрес строится от
+   * публичного origin школы (`WEB_ORIGIN`), а не от хоста запроса: за прокси
+   * хост запроса — внутренний.
    */
-  async issueLoginLink(cardId: string, actor: SchoolActor, origin: string): Promise<LoginLinkDto> {
+  async issueLoginLink(cardId: string, actor: SchoolActor, origin: string, dto: IssueLoginLinkDto = {}): Promise<LoginLinkDto> {
     const { userId, workspaceId } = await this.registered(cardId);
-    const link = await this.access.issueLoginLink(userId, workspaceId, actor.userId);
+    const ttlHours: number = dto?.ttlHours ?? ACCESS_PARAMS.loginLinkTtlHours;
+    const maxUses: number | null = dto?.maxUses === undefined ? null : dto.maxUses;
+    const ttlOptions: readonly number[] = ACCESS_PARAMS.loginLinkTtlOptions;
+    const usesOptions: readonly (number | null)[] = ACCESS_PARAMS.loginLinkUsesOptions;
+    if (!ttlOptions.includes(ttlHours)) {
+      throw new BadRequestException(`срок ссылки: одно из ${ttlOptions.join(', ')} часов`);
+    }
+    if (!usesOptions.includes(maxUses)) {
+      throw new BadRequestException(`число открытий ссылки: одно из ${usesOptions.map((v) => (v === null ? 'без лимита' : v)).join(', ')}`);
+    }
+    const link = await this.access.issueLoginLink(userId, workspaceId, actor.userId, { ttlHours, maxUses });
     return { url: `${origin}/bootstrap/${link.token}`, token: link.token, expiresAt: link.expiresAt.toISOString(), maxUses: link.maxUses, useCount: link.useCount };
   }
 
