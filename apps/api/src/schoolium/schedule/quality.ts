@@ -1,12 +1,10 @@
 import { createHmac } from 'node:crypto';
 import {
-  DAY_MINUTES_CAP,
   INVARIANT_TITLES,
   QUALITY_MARKERS,
   QUALITY_MARKER_TITLES,
   QUALITY_WEIGHTS,
   REPAIR_BUDGET,
-  classDayCap,
   type ExportFormat,
   type InvariantViolation,
   type MarkerPenalty,
@@ -192,12 +190,12 @@ export function invariants(units: PlacedUnit[], ctx: QualityContext): InvariantV
     }
   }
 
-  // I-6: дневной потолок ЕГО параллели (AR-114), а не школьное число.
+  // I-6: уроков в день не больше числа «уроков в день» школы. Потолков параллели
+  // (AR-114) с AR-199 нет — школа полного дня объявляет длину дня сама.
   for (const c of ctx.classes) {
-    const cap = classDayCap(c.parallel, slotsPerDay);
     for (let d = 0; d < days; d += 1) {
       const n = (byClassDay.get(`${c.id}:${d}`) ?? []).length;
-      if (n > cap) v.push({ code: 'I-6', address: `${c.id}:${d}`, message: `${n} уроков при потолке ${cap}` });
+      if (n > slotsPerDay) v.push({ code: 'I-6', address: `${c.id}:${d}`, message: `${n} уроков при ${slotsPerDay} уроках в день школы` });
     }
   }
 
@@ -207,9 +205,13 @@ export function invariants(units: PlacedUnit[], ctx: QualityContext): InvariantV
     if (u.slotNo < 1 || u.slotNo > slotsPerDay) v.push({ code: 'I-7', address: u.id, message: `позиция ${u.slotNo} вне 1…${slotsPerDay}` });
   }
 
-  // I-8: длина дня — параметрический инвариант, от расстановки не зависит.
+  // I-8: параметры дня согласованы — параметрический инвариант, от расстановки не
+  // зависит. Норматива длины дня (420 минут, AR-103) с AR-199 нет: день конечен и
+  // описан положительной длиной урока, остальное решает школа.
   const minutes = dayLength(ctx.params);
-  if (minutes > DAY_MINUTES_CAP) v.push({ code: 'I-8', address: 'params', message: `${minutes} мин при потолке ${DAY_MINUTES_CAP}` });
+  if (!Number.isFinite(minutes) || minutes <= 0 || ctx.params.lessonMin <= 0 || slotsPerDay <= 0) {
+    v.push({ code: 'I-8', address: 'params', message: `параметры дня не описывают день: ${slotsPerDay} уроков по ${ctx.params.lessonMin} мин` });
+  }
 
   return v;
 }
@@ -327,7 +329,7 @@ export function penalties(units: PlacedUnit[], ctx: QualityContext, baseline?: M
       out.dayBalance.pi += delta;
       if (delta > 0 && per[d] > 0) out.dayBalance.cells.push(`${c.id}:${d}`);
     }
-    dayBalanceMax += maxSpread(tot, days, classDayCap(c.parallel, slotsPerDay));
+    dayBalanceMax += maxSpread(tot, days, slotsPerDay);
   }
   out.dayBalance.max = Math.max(1, dayBalanceMax);
 
@@ -414,7 +416,7 @@ export function lowerBound(units: PlacedUnit[], ctx: QualityContext): { markers:
     const own = units.filter((u) => u.classId === c.id);
     const H = own.length;
     if (H === 0) continue;
-    const cap = classDayCap(c.parallel, slotsPerDay);
+    const cap = slotsPerDay; // AR-199: вместимость дня — число уроков школы
     const r = H % days;
     lb.dayBalance += 2 * r * (days - r);
 

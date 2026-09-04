@@ -193,25 +193,31 @@ for (const [code, fn] of spoiled) {
   const got = spoil(fn);
   check(got.has(code), `подделка воспроизводит ${code} (поймано: ${[...got].join(', ') || 'ничего'})`);
 }
-// I-6 отдельно: у первой параллели потолок дня 4, кладём в один день пять часов.
+// I-6 отдельно: вместимость дня — «уроков в день» школы (AR-199, потолков параллели
+// нет); кладём в один день на час больше, чем уроков в дне.
 {
-  const first = units.filter((u) => u.classId === 'c1').slice(0, 5);
+  const first = units.filter((u) => u.classId === 'c1').slice(0, ctx.params.slotsPerDay + 1);
   const ids = new Set(first.map((u) => u.id));
   const got = new Set(
     invariants(units.map((u) => (ids.has(u.id) ? { ...u, dayNo: 0, slotNo: first.findIndex((f) => f.id === u.id) + 1 } : u)), ctx).map((v) => v.code),
   );
-  check(got.has('I-6'), `подделка воспроизводит I-6 — дневной потолок параллели (поймано: ${[...got].join(', ')})`);
+  check(got.has('I-6'), `подделка воспроизводит I-6 — уроков больше, чем уроков в дне школы (поймано: ${[...got].join(', ')})`);
 }
 check(SCHEDULE_INVARIANTS.length === 8, `инвариантов ровно восемь: ${SCHEDULE_INVARIANTS.join(', ')}`);
 
 // ─────────────────────── G-58 · автокорректировка ───────────────────────
 
-const fixed = repair(units, ctx);
+// Стенд судит АЛГОРИТМ (локальный минимум, детерминизм), а не секунды машины: с AR-199
+// окрестность хода шире (вместимость дня — «уроков в день» школы, а не потолок
+// параллели), и на медленном раннере 5-секундный бюджет продукта обрывал поиск до
+// минимума. Часы заморожены — предел ходов REPAIR_BUDGET.moves остаётся в силе.
+const FROZEN_CLOCK = () => 0;
+const fixed = repair(units, ctx, undefined, undefined, FROZEN_CLOCK);
 check(fixed.penaltyAfter <= fixed.penaltyBefore, `Π не выросла: ${fixed.penaltyBefore} → ${fixed.penaltyAfter} за ${fixed.movesApplied} ходов`);
 check(fixed.trace.every((t) => t.to < t.from), 'каждый принятый ход уменьшает Π строго — последовательность в ℤ≥0 обрывается, завершение не зависит от таймера');
 check(invariants(fixed.units, ctx).length === 0, 'после автокорректировки жёсткие инварианты держатся');
 check(fixed.localMinimum, 'поиск встал в локальном минимуме, а не упёрся в бюджет');
-check(repair(fixed.units, ctx).movesApplied === 0, 'повторный прогон из локального минимума не делает ни одного хода');
+check(repair(fixed.units, ctx, undefined, undefined, FROZEN_CLOCK).movesApplied === 0, 'повторный прогон из локального минимума не делает ни одного хода');
 check(totalPenalty(penalties(fixed.units, ctx)) >= lowerBound(fixed.units, ctx).total,
   `найденный локальный минимум ${totalPenalty(penalties(fixed.units, ctx))} не ниже аналитической границы ${lowerBound(fixed.units, ctx).total} — «эталон» и локальный минимум это разные величины`);
 check(
@@ -221,7 +227,7 @@ check(
     : 'размена не потребовалось: ни один маркер не ухудшился',
 );
 check(
-  JSON.stringify(repair(units, ctx).units) === JSON.stringify(fixed.units),
+  JSON.stringify(repair(units, ctx, undefined, undefined, FROZEN_CLOCK).units) === JSON.stringify(fixed.units),
   'автокорректировка детерминирована: два прогона на одном входе дают одну сетку',
 );
 // час, подвинутый человеком, машина назад не возвращает
