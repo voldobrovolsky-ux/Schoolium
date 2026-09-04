@@ -91,8 +91,11 @@ async function main(): Promise<void> {
     check(revoked.activated === false, 'G-65: отзыв вернул доступ ученика в «не авторизован» (AR-153)');
     check((await sessions.read(pjoin.sessionToken!)) === null, 'G-65: сессия чужого устройства закрыта отзывом');
 
-    // ─── G-70 · пресет предметов идемпотентен ───
+    // ─── G-70 · пресет предметов идемпотентен — по ключу имени без регистра (AR-201) ───
     const manual = await subjects.create({ name: 'Астрономия', classId: cls.id });
+    // ручная «музыка» строчными — карточка канонизируется в «Музыка» пресета
+    const lower = await subjects.create({ name: 'музыка', classId: cls.id });
+    check(lower.name === 'Музыка', `G-70: ручная «музыка» сохранена каноническим именем пресета «${lower.name}» (AR-201)`);
     const first = await subjects.applyPreset();
     check(first.created > 0, `G-70: пресет создал карточки «предмет × класс»: ${first.created}`);
     const second = await subjects.applyPreset();
@@ -100,6 +103,11 @@ async function main(): Promise<void> {
       'G-70: повторный прогон не создал ни одного дубля — идемпотентно');
     const stillManual = await subjects.get(manual.id).catch(() => null);
     check(stillManual !== null, 'G-70: ручная карточка пресетом не затёрта');
+    const music = (await subjects.list()).filter((s) => s.classId === cls.id && s.name === 'Музыка');
+    check(music.length === 1 && music[0].id === lower.id,
+      'G-70: пресет не завёл вторую «Музыку» поверх ручной «музыки» — дубль опознан по ключу, не по регистру');
+    await refuses(() => subjects.create({ name: ' МУЗЫКА ', classId: cls.id }), 'SUBJECT_EXISTS',
+      'G-70: создание « МУЗЫКА » при существующей «Музыка» в классе — SUBJECT_EXISTS');
 
     // ─── родитель: карточка, связь, дневник ребёнка (AR-151/AR-158) ───
     const g = await accounts.createGuardian({

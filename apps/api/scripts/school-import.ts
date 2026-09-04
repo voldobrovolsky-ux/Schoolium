@@ -34,6 +34,8 @@ import { AccountsService } from '../src/schoolium/access/accounts.service';
 import { SchoolStateService } from '../src/schoolium/school-state.service';
 import type { SchoolActor } from '../src/schoolium/actor';
 import type { SchoolRole, Sex, TermDto } from '@edustore/shared';
+import { subjectNameKey } from '@edustore/shared';
+import { mergeImportSubjectRows } from '../src/schoolium/subjects/subject-merge';
 
 interface ImpStudent {
   row: number;
@@ -227,14 +229,18 @@ async function main(): Promise<void> {
     console.log(`Персонал: ${teacherByFio.size} (имена — фамилия + инициалы, дополнит модератор)`);
 
     // ─── предметы и привязки: тот же токен-маршрут, что у QR на экране ───
+    // Ключ карточки — `subjectNameKey` (AR-201): строки файла одного ключа в
+    // классе («алгебра» и «Алгебра») объединяются в одну карточку — педагоги
+    // складываются, часы берутся максимумом; имя канонизирует `create`.
     let bound = 0;
     const bindingHours = new Map<string, number>();
     const subjIdByClassName = new Map<string, string>();
-    for (const row of data.subjects) {
+    const subjectRows = mergeImportSubjectRows(data.subjects);
+    for (const row of subjectRows) {
       const cls = classByParallel.get(row.class);
       if (!cls) continue;
       const subj = await subjects.create({ name: row.name, classId: cls.id });
-      subjIdByClassName.set(`${row.class}·${row.name}`, subj.id);
+      subjIdByClassName.set(`${row.class}·${subjectNameKey(row.name)}`, subj.id);
       for (const fio of row.teachers) {
         const teacherId = teacherByFio.get(fio);
         if (!teacherId) continue;
@@ -246,7 +252,7 @@ async function main(): Promise<void> {
       bindingHours.set(`${subj.id}`, row.hours);
     }
     await drain();
-    console.log(`Предметы: ${data.subjects.length}, привязок педагогов: ${bound}`);
+    console.log(`Предметы: ${subjectRows.length} (строк в файле ${data.subjects.length}, объединено по ключу имени ${data.subjects.length - subjectRows.length}), привязок педагогов: ${bound}`);
 
     // ─── недельные часы из штатки — в нагрузку генератора (сетку соберут после события) ───
     // План этой школы (40 ач/нед полного дня: самоподготовка, лежачие занятия)
@@ -302,7 +308,7 @@ async function main(): Promise<void> {
       const rows: { dayNo: number; slotNo: number; classId: string; subjectId: string; teacherId: string }[] = [];
       for (const s of tt.slots) {
         const cls = classByParallel.get(s.class);
-        const subjectId = subjIdByClassName.get(`${s.class}·${s.subject}`);
+        const subjectId = subjIdByClassName.get(`${s.class}·${subjectNameKey(s.subject)}`);
         const teacherId = s.teacher ? teacherByFio.get(s.teacher) : undefined;
         if (!cls || !subjectId || !teacherId) {
           skippedSlots.push(`${s.class} кл · день ${s.day + 1} · слот ${s.slot} · ${s.subject}${s.teacher ? '' : ' (вакансия)'}`);

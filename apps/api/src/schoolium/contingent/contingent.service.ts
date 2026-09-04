@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { ClassDto, CreateClassesDto, StudentDto, UpsertStudentDto } from '@edustore/shared';
+import type { ClassDto, CreateClassesDto, SetClassGroupsDto, StudentDto, UpsertStudentDto } from '@edustore/shared';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { OutboxService } from '../../common/outbox/outbox.service';
@@ -9,6 +9,7 @@ import {
   SCHOOL_EVENTS,
   type ClassCreatedV1,
   type ClassDeletedV1,
+  type ClassGroupsChangedV1,
   type StudentDeactivatedV1,
   type StudentDeletedV1,
   type StudentReactivatedV1,
@@ -208,6 +209,81 @@ export class ContingentService {
       await this.state.bump(tx, 'contingent', { id: actor.userId, name: actor.name }, ws);
     });
     return { ok: true, created: dto.parallels * letters.length };
+  }
+
+  // ─────────────── число групп класса (§11 строка 50, AR-202) ───────────────
+
+  /**
+   * `PUT /classes/:id/groups` · `M-25.select.groupCount`: группы остаются
+   * свойством класса (AR-75), меняется их число. 0→N заводит группы 1..N и
+   * раздаёт учеников дефолтным разбиением (`assignGroup`); N→M добавляет пустые
+   * группы либо снимает лишние (их ученики остаются без группы — до нового
+   * назначения генератор ответит `GROUPS_UNASSIGNED`). Снять группу, которую
+   * ведёт педагог (`TeacherBinding` scope group с её номером), нельзя —
+   * `GROUPS_BOUND` с классом и номерами: сначала открепить. Версия —
+   * контингента (AR-109); событие `contingent.class.groups.changed.v1` роняет
+   * подтверждённую сетку в `stale` — число групп меняет укладку.
+   */
+  async setGroups(classId: string, dto: SetClassGroupsDto, actor: SchoolActor): Promise<ClassDto> {
+    const ws = TenantContext.require();
+    const cls = await this.prisma.schoolClass.findUnique({ where: { id: classId }, include: { groups: true, students: true } });
+    if (!cls) throw new NotFoundException('класс не найден');
+    // те же границы и тот же текст, что у шага мастера `S-11` (плюс явный «без групп»)
+    if (![0, 2, 3, 4].includes(dto.groupCount)) throw new BadRequestException('Групп может быть от 2 до 4');
+    if (dto.groupCount > 0 && dto.groupCount > cls.students.length) {
+      throw new BadRequestException('Групп не больше, чем учеников: в классе из 1 ученика деления нет');
+    }
+    await this.state.checkVersion('contingent', dto.version);
+
+    const target = dto.groupCount;
+    const current = cls.groupCount;
+    if (target === current) return this.getClass(classId); // ничего не меняется — без версии и события
+
+    if (target < current) {
+      const subjects = await this.prisma.schoolSubject.findMany({ where: { classId }, select: { id: true } });
+      const bindings = await this.prisma.teacherBinding.findMany({
+        where: { subjectId: { in: subjects.map((s) => s.id) }, scope: 'group' },
+        select: { groupNos: true },
+      });
+      const held = [...new Set(bindings.flatMap((b) => b.groupNos).filter((g) => g > target))].sort((a, b) => a - b);
+      if (held.length) throw new SchoolError('GROUPS_BOUND', { classLabel: cls.label, groups: held.join(', ') });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const have = new Set(cls.groups.map((g) => g.groupNo));
+      for (let g = 1; g <= target; g += 1) {
+        if (have.has(g)) continue;
+        await tx.studentGroup.create({ data: { workspaceId: ws, classId, groupNo: g, name: `Группа ${g}` } });
+      }
+      // снятая группа уносит членство (FK SetNull) — ученики остаются без группы
+      await tx.studentGroup.deleteMany({ where: { classId, groupNo: { gt: target } } });
+      await tx.schoolClass.update({ where: { id: classId }, data: { groupCount: target } });
+      await this.outbox.enqueue(
+        tx,
+        newEvent<ClassGroupsChangedV1>({
+          type: SCHOOL_EVENTS.classGroupsChanged,
+          workspaceId: ws,
+          actor: actor.userId,
+          payload: { classId, groupCount: target },
+        }),
+      );
+      await this.state.bump(tx, 'contingent', { id: actor.userId, name: actor.name }, ws);
+    });
+
+    // 0→N: дефолтное разбиение тем же правилом, что у заполненного класса (AR-75);
+    // при N→M состав существующих групп не пересчитывается (см. assignGroup)
+    if (current === 0 && target > 0) await this.distributeUnassigned(classId);
+    return this.getClass(classId);
+  }
+
+  /** Ученики без группы получают её правилом `assignGroup`: первый вызов раздаёт заполненный класс целиком, остальные — добор. */
+  private async distributeUnassigned(classId: string): Promise<void> {
+    const students = await this.prisma.schoolStudent.findMany({ where: { classId, groupId: null }, orderBy: { seq: 'asc' } });
+    for (const s of students) {
+      const fresh = await this.prisma.schoolStudent.findUnique({ where: { id: s.id }, select: { groupId: true } });
+      if (fresh?.groupId) continue; // уже разведён дефолтным разбиением первого вызова
+      await this.assignGroup(s.id, classId, null);
+    }
   }
 
   // ─────────────── профиль ученика (§11 строки 9, 10) ───────────────
