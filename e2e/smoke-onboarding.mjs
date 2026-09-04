@@ -1004,6 +1004,15 @@ async function main() {
     // Раздел скелета дня (AR-171, фаза IV) стоит в той же форме.
     await hasAll(page, ['S-41.skeleton', 'S-41.grid.kind', 'S-41.skel.day', 'S-41.skel.add.lesson', 'S-41.skel.add.event']);
     await fill(page, 'S-41.input.slotsPerDay', '5');
+    // Обед по классам (AR-200) — блок в разделе скелета, строка на класс; без
+    // скелета верхняя граница берётся из «уроков в день» (5 → «после 1-го…4-го»).
+    // Первому классу — «после 1-го урока»: его урочная позиция 2 останется без
+    // урока, что генератор обязан учесть (G-86), а сетка — собраться.
+    await hasAll(page, ['S-41.lunch', 'S-41.lunch.row', 'S-41.lunch.select']);
+    await page.locator('[data-testid="S-41.lunch.select"]').first().selectOption('1');
+    const lunchPicked = await page.locator('[data-testid="S-41.lunch.select"]').first().inputValue();
+    if (lunchPicked === '1') console.log('    ✅ обед первого класса — «после 1-го урока» (S-41.lunch.select)');
+    else { console.error(`    ❌ селект обеда не принял значение: «${lunchPicked}»`); failures++; }
     // Длина дня считается на экране из четырёх параметров, а не «примерно».
     const dayLen = await page.locator('[data-testid="S-41.calc.dayLength"]').innerText();
     console.log(`    · длина учебного дня по параметрам: ${dayLen.replace(/\s+/g, ' ').trim()}`);
@@ -1077,6 +1086,108 @@ async function main() {
       if (stale === 0) console.log('    ✅ сразу после подтверждения плашки «устарело» нет');
       else { console.error('    ❌ подтверждённая сетка объявлена устаревшей'); failures++; }
       await shot(page, 'S-40-confirmed');
+
+      // ── S-40 · педагог: предпочтения и отмена урока (AR-206, AR-207) ──
+      // Стендовый телефон педагога («Смирнов Олег», активирован выше) идёт тем
+      // же путём, что человек: кнопка → модалка → сервер → маркер в строке.
+      console.log('▶ S-40 · педагог: предпочтения и отмена урока');
+      // Часы телефона — на учебный день смока (AR-117): «урок не начался» экран
+      // судит своими часами, сервер — SCHOOL_TODAY; расходиться им нельзя, иначе
+      // кнопка отмены стояла бы не на тех уроках, что сервер считает будущими.
+      await phone.clock.setFixedTime(new Date(`${SCHOOL_DAY}T08:00:00`));
+      await phone.goto(`${WEB}/schedule`);
+      await phone.waitForSelector('[data-testid="S-40.grid.week"]', { timeout: 30_000 });
+      await has(phone, 'S-40.btn.preferences', 'у педагога — «Мои предпочтения» (AR-206)');
+      // Вид у педагога по умолчанию — «Преподаватель», и это он сам (AR-206).
+      const viewChip = (await phone.locator('[data-testid="S-40.view"] button[aria-pressed="true"]').innerText()).trim();
+      if (viewChip === 'Преподаватель') console.log('    ✅ вид по умолчанию у педагога — «Преподаватель»');
+      else { console.error(`    ❌ вид по умолчанию у педагога: «${viewChip}», ждали «Преподаватель»`); failures++; }
+      await shot(phone, 'S-40-teacher-week');
+
+      // M-30 — предпочтения: чипы по учебным дням школы. Выбираются ВСЕ дни:
+      // это «любой день» для генератора (последующие генерации смока не
+      // стеснены), а сохранение всё равно роняет сетку в stale (AR-206) —
+      // плашку ниже ждёт свой шаг, ему это не мешает.
+      await click(phone, 'S-40.btn.preferences');
+      await phone.waitForSelector('[data-testid="M-30"]', { timeout: 20_000 });
+      await modalOpen(phone, 'M-30');
+      await phone.waitForSelector('[data-testid="M-30.chip.day"]', { timeout: 20_000 });
+      await hasAll(phone, ['M-30.chip.day', 'M-30.input.note', 'M-30.btn.save']);
+      const dayChips = phone.locator('[data-testid="M-30.chip.day"]');
+      const chipCount = await dayChips.count();
+      for (let i = 0; i < chipCount; i++) await dayChips.nth(i).click();
+      const pressed = await phone.locator('[data-testid="M-30.chip.day"][aria-pressed="true"]').count();
+      if (chipCount >= 5 && pressed === chipCount) console.log(`    ✅ чипов дней ${chipCount} (по учебным дням школы), выбраны все`);
+      else { console.error(`    ❌ чипов дней ${chipCount}, выбрано ${pressed}`); failures++; }
+      await fill(phone, 'M-30.input.note', 'смок: любой день');
+      if (MOBILE) await tapTargets(phone, 'M-30 · мои предпочтения');
+      await shot(phone, 'M-30-preferences');
+      await click(phone, 'M-30.btn.save');
+      await modalClosed(phone, 'M-30');
+      const savedPref = await api(phone, 'GET', '/api/v1/schedule/preferences/me');
+      if (Array.isArray(savedPref.workDays) && savedPref.workDays.length === chipCount)
+        console.log(`    ✅ предпочтения сохранены: дни ${savedPref.workDays.join(', ')}`);
+      else { console.error(`    ❌ сервер хранит дни ${JSON.stringify(savedPref.workDays)}, ждали ${chipCount}`); failures++; }
+
+      // Отмена урока (AR-207): свой БУДУЩИЙ урок — строго позже учебного дня
+      // смока, иначе сервер ответит честным LESSON_ALREADY_HELD. Урок берётся из
+      // датированного оверлея тем же контрактом, что читает экран.
+      const isoPlus = (iso, n) => { const d = new Date(`${iso}T00:00:00.000Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+      const mondayIso = (iso) => isoPlus(iso, -((new Date(`${iso}T00:00:00.000Z`).getUTCDay() + 6) % 7));
+      const meTeacher = await api(phone, 'GET', '/api/v1/me');
+      const mine = await api(phone, 'GET', `/api/v1/schedule/lessons?from=${isoPlus(SCHOOL_DAY, 1)}&to=${isoPlus(SCHOOL_DAY, 20)}&teacherId=${meTeacher.userId}`);
+      const target = mine
+        .filter((l) => !l.detached && !l.substitution)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.slotNo - b.slotNo)[0];
+      if (!target) {
+        console.error(`    ❌ у педагога нет будущего материализованного урока после ${SCHOOL_DAY} (уроков в оверлее: ${mine.length})`);
+        failures++;
+      } else {
+        console.log(`    · будущий урок педагога: ${target.date}, ${target.slotNo}-й, ${target.subjectName} · ${target.classLabel}`);
+        // К дню урока: на телефоне — лентой дней `S-40.daystrip`, на десктопе — лентой недель.
+        if (MOBILE) await phone.locator(`[data-testid="S-40.daystrip"] button[data-date="${target.date}"]`).click();
+        else await phone.locator(`[data-testid="S-40.weeks"] button[data-monday="${mondayIso(target.date)}"]`).click();
+        const cancelBtn = phone.locator(`[data-testid="S-40.btn.cancelLesson"][data-lesson-id="${target.lessonId}"]`);
+        await cancelBtn.waitFor({ timeout: 20_000 });
+        await has(phone, 'S-40.btn.cancelLesson', 'на своём будущем уроке — «Отменить урок»');
+        if (MOBILE) await tapTargets(phone, 'S-40 · педагог');
+        await shot(phone, 'S-40-teacher-cancel');
+        await cancelBtn.click();
+        await phone.waitForSelector('[data-testid="M-31"]', { timeout: 20_000 });
+        await modalOpen(phone, 'M-31');
+        await hasAll(phone, ['M-31.select.reason', 'M-31.input.reasonText', 'M-31.btn.submit']);
+        await phone.locator('[data-testid="M-31.select.reason"]').selectOption('training');
+        await fill(phone, 'M-31.input.reasonText', 'курсы повышения квалификации');
+        if (MOBILE) await tapTargets(phone, 'M-31 · отмена урока');
+        await click(phone, 'M-31.btn.submit');
+        await phone.waitForSelector('[data-testid="M-31.result"]', { timeout: 20_000 });
+        const outcome = (await phone.locator('[data-testid="M-31.result"]').innerText()).replace(/\s+/g, ' ').trim();
+        // Оба исхода легальны: в школе смока педагог той же дисциплины может и не найтись.
+        if (/^Замена: .+/.test(outcome) || outcome === 'Замены нет — сообщено завучу') console.log(`    ✅ итог подбора замены: «${outcome}»`);
+        else { console.error(`    ❌ неожиданный итог подбора: «${outcome}»`); failures++; }
+        await shot(phone, 'M-31-result');
+        await phone.keyboard.press('Escape');
+        await modalClosed(phone, 'M-31');
+        // После закрытия экран перечитывает оверлей — строка урока получает маркер.
+        const marker = phone.locator(
+          `[data-lesson-id="${target.lessonId}"] [data-testid="S-40.cell.cancelled"], [data-lesson-id="${target.lessonId}"] [data-testid="S-40.cell.substituted"]`,
+        );
+        await marker.first().waitFor({ timeout: 20_000 });
+        const markerId = await marker.first().getAttribute('data-testid');
+        const markerText = (await marker.first().innerText()).replace(/\s+/g, ' ').trim();
+        const consistent = /^Замена/.test(outcome) === (markerId === 'S-40.cell.substituted');
+        if (consistent) console.log(`    ✅ строка урока получила маркер ${markerId}: «${markerText}»`);
+        else { console.error(`    ❌ маркер строки ${markerId} расходится с итогом «${outcome}»`); failures++; }
+        await shot(phone, 'S-40-teacher-marked');
+        // Модератор: при отмене без замены — плашка «Уроков без замены: N»
+        // (AR-207). Её наличие — факт, не дефект; отсутствие здесь не судится:
+        // плашка считает три недели от часов модератора, а они не стендовые.
+        await page.goto(`${WEB}/schedule`);
+        await page.waitForSelector('[data-testid="S-40.grid.week"]', { timeout: 30_000 });
+        const noSub = await page.locator('[data-testid="S-40.banner.noSubstitute"]').count();
+        console.log(`    · модератор: плашка «Уроков без замены» ${noSub ? 'показана' : 'не показана'} (итог педагога: «${outcome}»)`);
+        await shot(page, 'S-40-moderator-after-cancel');
+      }
 
       // ── S-50 · журнал: колонки = материализованные уроки ──
       // Пара «класс × предмет» выбирается не наугад: берётся та, у которой урок

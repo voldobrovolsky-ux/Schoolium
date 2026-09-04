@@ -1,0 +1,79 @@
+/*
+ * `S-40` расписание, `S-41` настройка и общий вид дня (schedule-view.tsx):
+ * пакет 04.09 — обед по классам (AR-200), предпочтения педагога (AR-206),
+ * отмена урока и замена (AR-207). Дневник `S-90` рисует те же маркеры тем же
+ * модулем и импортирует этот файл тоже.
+ *
+ * Здесь только то, чего в app.css нет: маркер строки, ряд действий в ячейке,
+ * панель фильтров с кнопкой педагога, строки обеда по классам, карточка
+ * результата подбора. Цвета — только токенами (G-37, AR-42); движения нет
+ * (AR-198) — блока prefers-reduced-motion не требуется.
+ */
+
+/* ─── маркер строки урока (AR-207): слово рядом с цветом (AR-80) ─── */
+/* `.sch-lesson-body span` задаёт вторичный цвет и обрезку — здесь специфичность
+   выше, и маркер читается целиком. */
+.sch-lesson-body .sch-sched-status {
+  display: inline-flex; align-items: center; gap: var(--sp-4);
+  font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  white-space: normal; overflow: visible;
+}
+.sch-lesson-body .sch-sched-status[data-status='cancelled'] { color: var(--c-state-warning); }
+.sch-lesson-body .sch-sched-status[data-status='substituted'] { color: var(--c-brand-violet-700); }
+
+/* ─── действия в ячейке: «Отменить урок», «Отозвать отмену», «Назначить замену» ─── */
+.sch-lesson-body .sch-sched-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-8);
+  margin-top: var(--sp-4); white-space: normal; overflow: visible;
+}
+/* Текст-действие компактно (28), как ряд ролей в `M-06`; на телефоне мишень §4. */
+@media (min-width: 768px) {
+  .sch-sched-actions .sch-btn--ghost { height: var(--ctl-h-sm); padding: 0 var(--sp-8); }
+  .sch-sched-actions select.sch-input { width: auto; min-width: 220px; }
+}
+@media (max-width: 767px) {
+  .sch-sched-actions .sch-btn { width: auto; min-height: var(--tap-min); }
+  .sch-sched-actions select.sch-input { flex: 1 1 100%; }
+}
+/* Заместитель в строке — фирменным цветом, как маркер замены. */
+.sch-sched-actions .sch-btn--ghost { color: var(--c-brand-violet-700); }
+
+/* ─── панель фильтров `S-40`: чипы + селектор + кнопка педагога (AR-206) ─── */
+.sch-sched-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-8) var(--sp-16); }
+.sch-sched-filters > .sch-field { margin-bottom: 0; }
+@media (min-width: 768px) {
+  .sch-sched-filters > .sch-field { min-width: 240px; }
+  /* «Мои предпочтения» — правым краем панели фильтров (75-adaptive §6) */
+  .sch-sched-filters > .sch-btn { margin-left: auto; }
+}
+@media (max-width: 767px) {
+  /* кнопка педагога во всю ширину ПОД фильтром (75-adaptive §6) */
+  .sch-sched-filters { flex-direction: column; align-items: stretch; }
+}
+/* Оверлей недели не прочитался — шаблон виден, причина названа словами (§0). */
+.sch-sched-overlay-error { font-size: var(--fs-sm); }
+
+/* ─── `S-41.lunch`: обед по классам (AR-200) — строка на класс ─── */
+.sch-s41-lunch { display: flex; flex-direction: column; gap: var(--sp-8); }
+.sch-s41-lunch-row { display: flex; align-items: center; gap: var(--sp-12); }
+.sch-s41-lunch-row > strong { flex: 1 1 auto; min-width: 0; }
+.sch-s41-lunch-row > select { flex: 0 0 220px; }
+@media (max-width: 767px) {
+  .sch-s41-lunch-row { flex-direction: column; align-items: stretch; gap: var(--sp-4); }
+  .sch-s41-lunch-row > select { flex: 1 1 auto; }
+}
+
+/* ─── `S-41.load.summary`: педагог с рабочими днями (AR-206), под ним его пары ─── */
+.sch-s41-teacher { gap: var(--sp-4); padding-top: var(--sp-8); border-top: 1px solid var(--c-border-default); }
+.sch-s41-teacher:first-child { padding-top: 0; border-top: 0; }
+.sch-s41-teacher-days { font-variant-numeric: tabular-nums; }
+
+/* ─── `M-31.result`: итог подбора замены ─── */
+.sch-m31-lesson { color: var(--c-ink-secondary); font-size: var(--fs-sm); margin: 0; }
+.sch-m31-result {
+  border-radius: var(--r-lg); padding: var(--sp-12) var(--sp-16);
+  background: var(--c-brand-violet-050); color: var(--c-brand-violet-700);
+  font-weight: var(--fw-medium);
+}
+/* Замены нет — предупреждающий фон и слово «сообщено завучу» (AR-80). */
+.sch-m31-result[data-status='no_substitute'] { background: var(--c-state-stale-bg); color: var(--c-state-warning); }
