@@ -99,6 +99,9 @@ export const TENANT_COLUMN: Record<string, string> = {
   SchoolNetwork: 'workspaceId',
   SchoolAsset: 'workspaceId',
   SchoolAccessPolicy: 'workspaceId',
+  // ─── Schoolium 1.5.0: предпочтения педагога (AR-206) и замены уроков (AR-207) ───
+  TeacherPreference: 'workspaceId',
+  LessonSubstitution: 'workspaceId',
   // ─── Schoolium 1.2.0: карточки родителей и связи с детьми (AR-155) ───
   GuardianCard: 'workspaceId',
   GuardianLink: 'workspaceId',

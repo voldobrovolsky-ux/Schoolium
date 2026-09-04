@@ -111,6 +111,9 @@ export class DiaryService {
         subjectName: subjectName.get(c.subjectId) ?? '—',
         topic: c.lessonTopic?.topic ?? null,
         mark: (c.marks[0]?.value as MarkValue | undefined) ?? null,
+        // AR-207: отмена/замена — заполняет schedule-api (A) из JournalColumn.cancelledAt и LessonSubstitution
+        cancelled: false,
+        substituteName: null,
       });
       days.set(day, bucket);
     }

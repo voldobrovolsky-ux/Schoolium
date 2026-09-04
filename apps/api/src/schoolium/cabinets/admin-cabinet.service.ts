@@ -261,10 +261,13 @@ export class AdminCabinetService {
   async policy(): Promise<AccessPolicyDto> {
     const ws = TenantContext.require();
     const row = await this.prisma.schoolAccessPolicy.findUnique({ where: { workspaceId: ws } });
-    if (!row) return { sessionLimits: {}, incidentAt: null, incidentByName: null, updatedAt: null };
+    // AR-205: roleHolders (живые членства + пустые слоты) считает staff-admin (C); пока {}
+    if (!row) return { sessionLimits: {}, roleLimits: {}, roleHolders: {}, incidentAt: null, incidentByName: null, updatedAt: null };
     const by = row.incidentBy ? await this.usersOf([row.incidentBy]) : new Map<string, { name: string }>();
     return {
       sessionLimits: (row.sessionLimits ?? {}) as SessionLimits,
+      roleLimits: (row.roleLimits ?? {}) as AccessPolicyDto['roleLimits'],
+      roleHolders: {},
       incidentAt: row.incidentAt ? row.incidentAt.toISOString() : null,
       incidentByName: row.incidentBy ? (by.get(row.incidentBy)?.name ?? null) : null,
       updatedAt: row.updatedAt.toISOString(),
@@ -305,7 +308,8 @@ export class AdminCabinetService {
           type: SCHOOL_EVENTS.policySet,
           workspaceId: ws,
           actor: actor.userId,
-          payload: { sessionLimits: limits },
+          // AR-205: валидацию и запись roleLimits подключает staff-admin (C); пока — пусто (дефолты)
+          payload: { sessionLimits: limits, roleLimits: {} },
         }),
       );
     });

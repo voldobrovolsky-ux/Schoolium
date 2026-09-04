@@ -168,14 +168,9 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
   for (const c of classes) {
     const total = classWeekHours(c.id, pairs);
 
-    // AR-178 (решение владельца 2026-08-31, школа полного дня): у школы СО
-    // СКЕЛЕТОМ день и неделю судит сам скелет — развивашки и самоподготовка
-    // тоже уроки, табличные потолки СанПиН их не описывают. Табличные потолки
-    // остаются судьёй только бесскелетного фолбэка.
-    const weekCap = WEEK_HOURS_CAP[c.parallel];
-    if (!input.skeleton && weekCap !== undefined && total > weekCap) {
-      return { code: 'LOAD_EXCEEDS_SANPIN', details: { classLabel: c.label, total, cap: weekCap } };
-    }
+    // AR-199 (пакет 04.09, школа полного дня): недельные и дневные потолки
+    // СанПиН не судят ни школу со скелетом, ни фолбэк — `LOAD_EXCEEDS_SANPIN`,
+    // `DAY_EXCEEDS_SANPIN` и `DAY_TOO_LONG` выведены из употребления.
     // «уроков в день» — второй множитель «слотов недели» (AR-103); без скелета
     // считается ПОКЛАССНО: день класса ограничен потолком ЕГО параллели
     // (AR-114), а не школьным числом — иначе первоклассник тянул бы вниз всю
@@ -247,39 +242,12 @@ export function arithmeticRefusal(input: GenInput): { code: GeneratorRefusal; de
     }
   }
 
-  // Число с экрана 4 — ВЕРХНЯЯ ГРАНИЦА школьного дня (AR-114): отказ срабатывает
-  // только когда оно выше потолка самой старшей параллели школы. Ниже него число
-  // осмысленно, потому что каждый класс всё равно ограничен своим потолком.
-  // Со скелетом (AR-178) размер дня задаёт скелет, и это число день не судит.
-  if (!input.skeleton) {
-    const unknown = classes.find((c) => DAY_SLOTS_CAP[c.parallel] === undefined);
-    if (unknown) {
-      return { code: 'DAY_EXCEEDS_SANPIN', details: { senior: unknown.parallel, slotsPerDay: params.slotsPerDay, cap: '—' } };
-    }
-    const dayCap = schoolDayCap(classes.map((c) => c.parallel));
-    if (classes.length > 0 && params.slotsPerDay > dayCap) {
-      const senior = classes.reduce((a, c) => (DAY_SLOTS_CAP[c.parallel] > DAY_SLOTS_CAP[a.parallel] ? c : a), classes[0]);
-      // Отказ про ШКОЛУ, а не про класс: число выше потолка старшей параллели —
-      // значит текст обязан назвать эту параллель, иначе он указывает не на тот
-      // объект (§9, AR-114).
-      return { code: 'DAY_EXCEEDS_SANPIN', details: { senior: senior.parallel, slotsPerDay: params.slotsPerDay, cap: dayCap } };
-    }
-  }
-
-  // Длина дня школы со скелетом задана временами самого скелета и проверена
-  // при его сохранении (`SKELETON_INVALID`) — арифметика параметров дня её
-  // больше не описывает и потому не судит.
-  const minutes = dayLength(params);
-  if (!input.skeleton && minutes > DAY_MINUTES_CAP) {
-    return {
-      code: 'DAY_TOO_LONG',
-      details: { minutes, cap: DAY_MINUTES_CAP, breakdown: dayLengthBreakdown(params) },
-    };
-  }
+  // AR-199: длину дня и число уроков в день задаёт школа; нормативных
+  // потолков (AR-103, AR-114) генератор больше не считает.
   return null;
 }
 
-/** Все восемь кодов, считаемых до перебора — перечисление для ворот G-46. */
+/** Все шесть кодов, считаемых до перебора — перечисление для ворот G-46 (AR-199, AR-206). */
 export const PRE_SEARCH_CODES = ARITHMETIC_REFUSALS;
 
 function buildUnits(input: GenInput): Unit[] {

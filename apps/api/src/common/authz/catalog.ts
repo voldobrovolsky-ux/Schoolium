@@ -79,8 +79,8 @@ export const PERMISSIONS: PermissionDef[] = [
   { code: 'psych.cases.view', section: 'psych', screen: 'cases', action: 'view', label: 'Кейсы' },
   { code: 'psych.sessions.view', section: 'psych', screen: 'sessions', action: 'view', label: 'Сессии' },
   { code: 'psych.risk.view', section: 'psych', screen: 'risk', action: 'view', label: 'Risk-карта' },
-  // ─── Schoolium 1.1.1 (AR-69, AR-88): тринадцать кодов версии ───
-  // Восемь мутационных. `schedule.build` уже есть выше — код тот же, пакет другой.
+  // ─── Schoolium 1.1.1 (AR-69, AR-88): тринадцать кодов версии; 1.3.0 и 1.5.0 добавили ещё шесть ───
+  // Мутационные. `schedule.build` уже есть выше — код тот же, пакет другой.
   { code: 'school.manage', section: 'school', screen: 'admin', action: 'manage', label: 'Кабинет модератора школы' },
   { code: 'contingent.write', section: 'school', screen: 'classes', action: 'write', label: 'Ведение классов и контингента' },
   { code: 'subject.write', section: 'school', screen: 'subjects', action: 'write', label: 'Ведение предметов и привязок' },
@@ -95,6 +95,11 @@ export const PERMISSIONS: PermissionDef[] = [
   // `school.oversee` — надзорный кабинет завуча (S-61), читающий.
   { code: 'school.admin', section: 'school', screen: 'administration', action: 'manage', label: 'Кабинет администратора: сеть, устройства, политики, реестры, аудит школы' },
   { code: 'school.oversee', section: 'school', screen: 'deputy', action: 'read', label: 'Кабинет завуча: сводки готовности УТЦ и КПЦ' },
+  // 1.5.0 (AR-206, AR-207): два права педагога с суффиксом `.self` — рабочие дни
+  // задаёт сам, отменяет только СВОЙ урок (принадлежность проверяет сервис).
+  // В пакет `teacher` попадают через `ROLE_PERMISSIONS.teacher` (админ — через spread).
+  { code: 'schedule.preference.self', section: 'school', screen: 'schedule', action: 'preference', label: 'Мои предпочтения: рабочие дни педагога' },
+  { code: 'lesson.cancel.self', section: 'school', screen: 'schedule', action: 'cancel', label: 'Отмена своего урока с автоподбором замены' },
   // Пять читающих: выдаются всем шести ролям. Записи «*.read» в каталоге не
   // существует — это сокращение текста спеки, а не код (G-10 сверяет коды).
   // Проекция ученика и родителя (AR-158): дневник и средние по предметам.
