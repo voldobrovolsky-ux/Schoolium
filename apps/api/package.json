@@ -49,7 +49,7 @@
     "staffcard:check": "ts-node scripts/staffcard-check.ts",
     "teacher:check": "ts-node scripts/teacher-check.ts",
     "subjects:merge": "ts-node scripts/school-subjects-merge.ts",
-    "schoolium:check": "npm run shared:build && npm run schemafit:check && npm run daygrid:check && npm run generator:check && npm run subscribers:check && npm run access:check && npm run login:check && npm run qr:check && npm run onboarding:check && npm run calendar:check && npm run schooljournal:check && npm run skeleton:check && npm run paired:check && npm run bindmanual:check && npm run regen:check && npm run reversal:check && npm run destructive:check && npm run moderator:check && npm run secondschool:check && npm run concurrent:check && npm run launch:check && npm run texts:check && npm run admin:check",
+    "schoolium:check": "npm run shared:build && npm run schemafit:check && npm run daygrid:check && npm run generator:check && npm run subscribers:check && npm run access:check && npm run login:check && npm run qr:check && npm run onboarding:check && npm run calendar:check && npm run schooljournal:check && npm run skeleton:check && npm run paired:check && npm run bindmanual:check && npm run regen:check && npm run reversal:check && npm run destructive:check && npm run moderator:check && npm run secondschool:check && npm run concurrent:check && npm run launch:check && npm run texts:check && npm run admin:check && npm run subjects:check && npm run lunch:check && npm run staffcard:check && npm run teacher:check",
     "skeleton:check": "ts-node scripts/skeleton-check.ts",
     "paired:check": "ts-node scripts/paired-check.ts",
     "bindmanual:check": "ts-node scripts/bind-manual-check.ts",
