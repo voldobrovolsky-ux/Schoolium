@@ -70,7 +70,11 @@ async function main(): Promise<void> {
   check(ACCESS_PARAMS.loginCodeTtlMinutes === 5 && ACCESS_PARAMS.loginCodeDigits === 6,
     `код входа — ${ACCESS_PARAMS.loginCodeDigits} цифр, ${ACCESS_PARAMS.loginCodeTtlMinutes} минут (AR-92)`);
   check(ACCESS_PARAMS.bootstrapLinkTtlHours === 48, `ссылка bootstrap — ${ACCESS_PARAMS.bootstrapLinkTtlHours} часов (AR-93, AR-189)`);
-  check(ACCESS_PARAMS.loginLinkTtlHours === 48, `ссылка входа с карточки — ${ACCESS_PARAMS.loginLinkTtlHours} часов (AR-189)`);
+  check(ACCESS_PARAMS.loginLinkTtlHours === 48, `ссылка входа с карточки — ${ACCESS_PARAMS.loginLinkTtlHours} часов по умолчанию (AR-204)`);
+  check(ACCESS_PARAMS.loginLinkTtlOptions.join(',') === '24,48,168' && (ACCESS_PARAMS.loginLinkTtlOptions as readonly number[]).includes(ACCESS_PARAMS.loginLinkTtlHours),
+    `меню срока ссылки — ${ACCESS_PARAMS.loginLinkTtlOptions.join(' / ')} часов, дефолт входит в меню (AR-204)`);
+  check(ACCESS_PARAMS.loginLinkUsesOptions.length === 4 && ACCESS_PARAMS.loginLinkUsesOptions.slice(0, 3).join(',') === '1,3,10' && ACCESS_PARAMS.loginLinkUsesOptions[3] === null,
+    'меню числа открытий ссылки — 1 / 3 / 10 / без лимита (null), дефолт — без лимита (AR-204)');
   check(ACCESS_PARAMS.pollIntervalMs === 2000, `ожидание скана — поллинг раз в ${ACCESS_PARAMS.pollIntervalMs / 1000} секунды (AR-87)`);
 
   // ─── 3. bypass fail-closed при неизвестном AUTH_MODE ───

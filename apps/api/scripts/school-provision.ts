@@ -25,8 +25,9 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { ACCESS_PARAMS, usernameProblem, type SchoolRole } from '@edustore/shared';
+import { ACCESS_PARAMS, ROLE_LABELS, effectiveRoleLimit, usernameProblem, type RoleLimits, type SchoolRole } from '@edustore/shared';
 import { generatePassword, hashPassword } from '../src/schoolium/staff/credentials';
+import { countRoleHolders } from '../src/schoolium/staff/staff.service';
 
 const prisma = new PrismaClient();
 
@@ -74,6 +75,7 @@ async function ensure(
     process.exit(3);
   }
   const [lastName, firstName] = displayName.split(/\s+/);
+  const warnings = await roleLimitWarnings(workspaceId, roles, username);
   let user = await prisma.user.findUnique({ where: { username } });
   let creds = 'креды прежние — учётка уже существовала, пароль не тронут';
   if (!user) {
@@ -112,7 +114,33 @@ async function ensure(
     `— ${displayName} (@${username}) · роли: ${roles.join(', ')}`,
     `  ${creds}`,
     `  ссылка входа (${ACCESS_PARAMS.loginLinkTtlHours} ч, открывать можно повторно): ${url}`,
+    ...warnings,
   ];
+}
+
+/**
+ * Лимит носителей роли (AR-205) консоль НЕ блокирует, а предупреждает [дефолт]:
+ * платформенный оператор чинит школу, у которой другого канала может не быть.
+ * Считается той же функцией, что отказ `ROLE_LIMIT_REACHED` на экране; учётка,
+ * уже несущая роль, носителей не прибавляет.
+ */
+async function roleLimitWarnings(workspaceId: string, roles: SchoolRole[], username: string): Promise<string[]> {
+  const policy = await prisma.schoolAccessPolicy.findUnique({ where: { workspaceId } });
+  const limits = (policy?.roleLimits ?? {}) as RoleLimits;
+  const existing = await prisma.user.findUnique({ where: { username } });
+  const membership = existing ? await prisma.membership.findFirst({ where: { userId: existing.id, workspaceId } }) : null;
+  const out: string[] = [];
+  for (const role of roles) {
+    const limit = effectiveRoleLimit(limits, role);
+    if (limit === null || membership?.roles.includes(role)) continue;
+    const count = await countRoleHolders(prisma, workspaceId, role);
+    if (count >= limit) {
+      out.push(
+        `  ⚠ ${ROLE_LABELS[role]}: в школе уже ${count} из ${limit} носителей роли — экран отказал бы ROLE_LIMIT_REACHED; консоль заводит, лимит правит администратор в «Политиках» (AR-205)`,
+      );
+    }
+  }
+  return out;
 }
 
 async function main(): Promise<void> {

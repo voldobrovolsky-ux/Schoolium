@@ -48,8 +48,9 @@ export const asClient = (c: ClientArg): SessionClient =>
  *
  * Тупика «входа нет и никто не поможет» не существует по построению: у
  * единственного модератора без единой живой сессии остаётся перевыпуск
- * bootstrap-ссылки платформой (AR-93), а с 1.3.0 — та же одноразовая ссылка
- * с карточки сотрудника у администратора (AR-189, 48 часов).
+ * bootstrap-ссылки платформой (AR-93), а с 1.3.0 — та же ссылка с карточки
+ * сотрудника у модератора и администратора (AR-204: срок и число открытий
+ * выбирает выпускающий).
  */
 @Injectable()
 export class AccessService {
@@ -222,13 +223,14 @@ export class AccessService {
     return { session, roles: membership.roles as SchoolRole[] };
   }
 
-  // ─────────────── одноразовая ссылка: bootstrap (AR-93) и ссылка входа (AR-189) ───────────────
+  // ─────────────── ссылка входа: bootstrap (AR-93) и ссылка с карточки (AR-204) ───────────────
 
   /**
-   * Вход по одноразовой ссылке, 48 часов: платформенной (`purpose = bootstrap`,
-   * первый модератор школы и учётки `provision`) либо выпущенной администратором
-   * с карточки сотрудника (`purpose = login_link`). Канал сессии различает их —
-   * карта устройств показывает, чьей ссылкой человек вошёл.
+   * Вход по ссылке: платформенной (`purpose = bootstrap`, первый модератор
+   * школы и учётки `provision`; 48 часов, без лимита открытий) либо выпущенной
+   * с карточки сотрудника (`purpose = login_link`, срок и лимит открытий
+   * выбирает выпускающий — AR-204). Канал сессии различает их — карта устройств
+   * показывает, чьей ссылкой человек вошёл.
    *
    * Вошедший по ссылке — активированный носитель (AR-161): до 1.3.0 учётки,
    * заведённые `provision`, оставались «не авторизованными» после входа, потому
@@ -238,19 +240,32 @@ export class AccessService {
     const c = asClient(client);
     const link = await TenantContext.runAsSystem(() => this.prisma.bootstrapLink.findUnique({ where: { token } }));
     if (!link) throw new SchoolError('TOKEN_EXPIRED');
-    // Ссылка МНОГОРАЗОВАЯ до истечения срока (AR-195, решение владельца
-    // 2026-09-03): человек открывает её с телефона и с ноутбука, каждое
-    // открытие — новая сессия; `usedAt` помнит первое открытие для аудита.
+    // Ссылка многоразовая до истечения срока ЛИБО лимита открытий (AR-195 →
+    // AR-204): человек открывает её с телефона и с ноутбука, каждое открытие —
+    // новая сессия и `useCount + 1`; `usedAt` помнит первое открытие для аудита.
     if (link.expiresAt < new Date()) throw new SchoolError('TOKEN_EXPIRED');
+    if (link.maxUses !== null && link.useCount >= link.maxUses) {
+      throw new SchoolError('LINK_EXHAUSTED', { useCount: link.useCount, maxUses: link.maxUses });
+    }
     const membership = await TenantContext.runAsSystem(() =>
       this.prisma.membership.findFirst({ where: { userId: link.userId, workspaceId: link.workspaceId } }),
     );
     if (!membership || membership.deactivatedAt) throw new SchoolError('ACCESS_REVOKED');
-    if (!link.usedAt) {
-      await TenantContext.runAsSystem(() =>
-        this.prisma.bootstrapLink.update({ where: { id: link.id }, data: { usedAt: new Date() } }),
-      );
-    }
+    // Счётчик растёт в транзакции под `FOR UPDATE`: два одновременных открытия
+    // ссылки «на один раз» иначе оба насчитали бы «место есть» и дали две сессии.
+    await TenantContext.runAsSystem(() =>
+      this.prisma.$transaction(async (tx) => {
+        const [row] = await tx.$queryRaw<{ useCount: number; maxUses: number | null }[]>`
+          SELECT "useCount", "maxUses" FROM "BootstrapLink" WHERE "id" = ${link.id} FOR UPDATE`;
+        if (row && row.maxUses !== null && row.useCount >= row.maxUses) {
+          throw new SchoolError('LINK_EXHAUSTED', { useCount: row.useCount, maxUses: row.maxUses });
+        }
+        await tx.bootstrapLink.update({
+          where: { id: link.id },
+          data: { useCount: { increment: 1 }, ...(link.usedAt ? {} : { usedAt: new Date() }) },
+        });
+      }),
+    );
     await this.markActivated(membership.id, membership.activatedAt);
     const via: SessionVia = link.purpose === 'bootstrap' ? 'bootstrap_link' : 'login_link';
     const session = await this.sessions.issue({
@@ -267,13 +282,22 @@ export class AccessService {
   }
 
   /**
-   * Ссылка входа с карточки сотрудника (AR-189, AR-195): та же ссылка, что
-   * у bootstrap, но выпускает её администратор из `S-62`/`S-31`, и аудит
-   * помнит, кто и кому. Срок — 48 часов, открывать можно повторно до истечения;
-   * повторный выпуск не гасит прежнюю.
+   * Ссылка входа с карточки сотрудника (AR-204; прежде AR-189, AR-195): та же
+   * ссылка, что у bootstrap, но выпускает её модератор либо администратор из
+   * `S-31`/`S-62`, и аудит помнит, кто, кому, на какой срок и на сколько
+   * открытий. Дефолты — 48 часов и без лимита (поведение AR-195); значения
+   * из меню проверяет `StaffService.issueLoginLink`. Повторный выпуск не гасит
+   * прежнюю.
    */
-  async issueLoginLink(userId: string, workspaceId: string, issuedBy: string) {
-    const expiresAt = new Date(Date.now() + ACCESS_PARAMS.loginLinkTtlHours * HOUR);
+  async issueLoginLink(
+    userId: string,
+    workspaceId: string,
+    issuedBy: string,
+    opts: { ttlHours?: number; maxUses?: number | null } = {},
+  ) {
+    const ttlHours = opts.ttlHours ?? ACCESS_PARAMS.loginLinkTtlHours;
+    const maxUses = opts.maxUses ?? null;
+    const expiresAt = new Date(Date.now() + ttlHours * HOUR);
     const row = await this.prisma.$transaction(async (tx) => {
       const link = await tx.bootstrapLink.create({
         data: {
@@ -282,6 +306,7 @@ export class AccessService {
           token: randomBytes(24).toString('hex'),
           purpose: 'login_link',
           issuedBy,
+          maxUses,
           expiresAt,
         },
       });
@@ -291,8 +316,7 @@ export class AccessService {
           type: SCHOOL_EVENTS.loginLinkIssued,
           workspaceId,
           actor: issuedBy,
-          // AR-204: срок и лимит открытий из IssueLoginLinkDto подключает staff-admin (C); пока — дефолты
-          payload: { userId, issuedBy, expiresAt: expiresAt.toISOString(), ttlHours: ACCESS_PARAMS.loginLinkTtlHours, maxUses: null },
+          payload: { userId, issuedBy, expiresAt: expiresAt.toISOString(), ttlHours, maxUses },
         }),
       );
       return link;
