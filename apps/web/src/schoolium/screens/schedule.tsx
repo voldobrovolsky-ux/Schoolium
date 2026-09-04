@@ -946,10 +946,12 @@ export function WeekGrid({ preview, testId, pick }: { preview: SchedulePreviewDt
    */
   if (mobile) return <WeekGridMobile preview={preview} testId={testId} classes={classes} maxSlot={maxSlot} days={days} pick={pick} />;
 
+  // Собственный класс сетки: `sch-week` — чип недели `S-50.weeks` (flex по центру), в нём широкая
+  // таблица вылезала за оба края и левая часть была недостижима прокруткой (дефект S-43, пакет 04.09).
   return (
     // Широкое содержимое скроллится ВНУТРИ контейнера: `body` по горизонтали не
     // скроллится никогда (§6).
-    <div className="sch-week" data-testid={testId}>
+    <div className="sch-weekgrid" data-testid={testId}>
       <table>
         <thead>
           <tr>

@@ -493,7 +493,8 @@ function AccountPlaques({
       <div className="sch-m06-plaque" data-testid="S-31.plaque.name">
         <span className="sch-m06-plaque-text">
           <span className="sch-m06-plaque-label">ФИО</span>
-          <span className="sch-m06-plaque-value">{card.name ?? "—"}</span>
+          {/* ФИО целиком: displayName сервера — «Фамилия Имя», отчество берётся из частей (AR-203) */}
+          <span className="sch-m06-plaque-value">{[card.lastName, card.firstName, card.middleName].filter(Boolean).join(" ") || card.name || "—"}</span>
         </span>
         {mayManage ? (
           <span className="sch-m06-plaque-actions">
