@@ -594,9 +594,43 @@ async function main() {
     // Два вида (правка 2026-08-31): дисциплины со строчками классов и классы
     // со строчками предметов; фильтр и кнопка компетенций стоят на экране.
     await hasAll(page, ['S-20.view', 'S-20.group.subject', 'S-20.btn.competence']);
+    // Свежая карточка без педагога — незаполненная позиция: фон и слово (AR-208).
+    await has(page, 'S-20.card.subject', 'строка позиции');
+    const unfilledNew = await page.locator('[data-testid="S-20.card.subject"][data-unfilled="true"]').count();
+    if (unfilledNew >= 1) console.log('    ✅ позиция без педагога помечена data-unfilled (AR-208)');
+    else { console.error('    ❌ позиция без педагога не помечена data-unfilled'); failures++; }
+    // AR-208: «По классам» раскрывает справа от фильтра ряд чипов классов —
+    // мультивыбор, по умолчанию все; карточка класса — только у отмеченных.
     await page.locator('[data-testid="S-20.view"] button', { hasText: 'По классам' }).click();
+    await page.waitForSelector('[data-testid="S-20.chips.classes"]', { timeout: 20_000 });
+    await has(page, 'S-20.chips.classes', 'ряд чипов классов раскрылся при «По классам» (AR-208)');
     await has(page, 'S-20.group.class', 'вид «По классам»: карточка класса со строчками предметов');
+    const classChips = page.locator('[data-testid="S-20.chip.class"]');
+    const chipCount = await classChips.count();
+    const allPressed = chipCount > 0 && (await classChips.evaluateAll((els) => els.every((el) => el.getAttribute('aria-pressed') === 'true')));
+    if (chipCount >= 1 && allPressed) console.log(`    ✅ S-20.chip.class — чипов классов ${chipCount}, все отмечены по умолчанию`);
+    else { console.error(`    ❌ S-20.chip.class: чипов ${chipCount}, все отмечены — ${allPressed}`); failures++; }
+    const cardsBefore = await page.locator('[data-testid="S-20.group.class"]').count();
+    await classChips.first().click();
+    const fewer = await page
+      .waitForFunction((n) => document.querySelectorAll('[data-testid="S-20.group.class"]').length < n, cardsBefore, { timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (fewer) console.log(`    ✅ снятый чип убирает карточку класса (${cardsBefore} → ${await page.locator('[data-testid="S-20.group.class"]').count()})`);
+    else { console.error('    ❌ снятый чип класса не убрал его карточку'); failures++; }
+    await classChips.first().click();
+    const restored = await page
+      .waitForFunction((n) => document.querySelectorAll('[data-testid="S-20.group.class"]').length === n, cardsBefore, { timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (restored) console.log('    ✅ отмеченный обратно чип возвращает карточку класса');
+    else { console.error('    ❌ карточка класса не вернулась после повторного тапа по чипу'); failures++; }
+    if (MOBILE) await tapTargets(page, 'S-20 · чипы классов');
+    await shot(page, 'S-20-classes');
     await page.locator('[data-testid="S-20.view"] button', { hasText: 'По дисциплинам' }).click();
+    // При «По дисциплинам» ряд сворачивается (150 мс) и уходит из DOM.
+    await page.waitForSelector('[data-testid="S-20.chips.classes"]', { state: 'detached', timeout: 20_000 });
+    console.log('    ✅ ряд чипов классов свернулся при «По дисциплинам»');
     await shot(page, 'S-20-subjects');
 
     // ── S-30 · персонал ──
@@ -785,22 +819,78 @@ async function main() {
     await page.keyboard.press('Escape');
     await modalClosed(page, 'M-04');
 
-    // ── M-25 · управление компетенцией (AR-179): педагог уже есть ──
+    // ── M-25 · управление компетенцией (AR-179, AR-202): педагог уже есть ──
     console.log('▶ M-25 · управление компетенцией');
-    await click(page, 'S-20.btn.competence');
-    await page.waitForSelector('[data-testid="M-25"]', { timeout: 20_000 });
+    // Открыть M-25 на педагоге и раскрыть первую дисциплину — дважды за блок.
+    const openCompetence = async () => {
+      await click(page, 'S-20.btn.competence');
+      await page.waitForSelector('[data-testid="M-25"]', { timeout: 20_000 });
+      await page.waitForSelector('[data-testid="M-25.select.teacher"] select', { timeout: 20_000 });
+      await page.locator('[data-testid="M-25.select.teacher"] select').selectOption({ index: 1 });
+      await page.waitForSelector('[data-testid="M-25.list.subjects"]', { timeout: 20_000 });
+      await page.locator('[data-testid="M-25.group.subject"]').first().click(); // раскрыть дисциплину
+    };
+    // Сохранение: занятые позиции сервер возвращает подтверждением `M-26` —
+    // тогда «Заменить всех»; иначе модалка закрывается сама.
+    const saveCompetence = async () => {
+      await click(page, 'M-25.btn.save');
+      await Promise.race([
+        page.waitForSelector('[data-testid="M-26"]', { timeout: 20_000 }),
+        page.waitForSelector('[data-testid="M-25"]', { state: 'detached', timeout: 20_000 }),
+      ]).catch(() => null);
+      if ((await page.locator('[data-testid="M-26"]').count()) > 0) {
+        console.log('    · занятая позиция → M-26, «Заменить всех»');
+        await click(page, 'M-26.btn.replace');
+      }
+      await modalClosed(page, 'M-25');
+    };
+    const firstRowText = async () => {
+      await page.waitForSelector('[data-testid="S-20.card.subject"]', { timeout: 20_000 });
+      return (await page.locator('[data-testid="S-20.card.subject"]').first().innerText()).replace(/\s+/g, ' ').trim();
+    };
+
+    await openCompetence();
     await modalOpen(page, 'M-25');
-    await page.waitForSelector('[data-testid="M-25.select.teacher"] select', { timeout: 20_000 });
     // выбор педагога открывает чеклист; его текущая позиция уже отмечена
-    await page.locator('[data-testid="M-25.select.teacher"] select').selectOption({ index: 1 });
-    await page.waitForSelector('[data-testid="M-25.list.subjects"]', { timeout: 20_000 });
-    await page.locator('[data-testid="M-25.group.subject"]').first().click(); // раскрыть дисциплину
     const pre = await page.locator('[data-testid="M-25.check.position"]:checked').count();
     if (pre >= 1) console.log(`    ✅ текущие позиции педагога предотмечены (${pre})`);
     else { console.error('    ❌ чеклист не предзаполнен текущими привязками'); failures++; }
+    // Группы назначаются здесь же (AR-202): чип «по группам» у строки класса;
+    // класс смока без групп → селект деления, деление — сразу (PUT /classes/:id/groups).
+    await has(page, 'M-25.toggle.groups', 'чип «по группам» у строки класса (AR-202)');
+    await page.locator('[data-testid="M-25.toggle.groups"]').first().click();
+    await page.waitForSelector('[data-testid="M-25.select.groupCount"], [data-testid="M-25.check.group"]', { timeout: 20_000 });
+    if ((await page.locator('[data-testid="M-25.select.groupCount"]').count()) > 0) {
+      await has(page, 'M-25.select.groupCount', 'класс без групп: селект «разделить на 2 / 3 / 4 группы»');
+      await page.locator('[data-testid="M-25.select.groupCount"]').first().selectOption('2');
+    }
+    await page.waitForSelector('[data-testid="M-25.check.group"]', { timeout: 20_000 });
+    const groupChecks = await page.locator('[data-testid="M-25.check.group"]').count();
+    if (groupChecks === 2) console.log('    ✅ M-25.check.group — две галочки групп после деления на 2');
+    else { console.error(`    ❌ галочек групп ${groupChecks}, ждали 2`); failures++; }
+    await page.locator('[data-testid="M-25.check.group"]').first().check();
     await shot(page, 'M-25-competence');
-    await page.keyboard.press('Escape');
-    await modalClosed(page, 'M-25');
+    await saveCompetence();
+    // В `S-20` строка позиции получила группу: «… · 1 группа — Смирнов О.» (AR-208),
+    // группа 2 без педагога — позиция незаполненная.
+    const rowGrouped = await firstRowText();
+    if (/1 группа/.test(rowGrouped)) console.log(`    ✅ строка позиции с группой: «${rowGrouped}»`);
+    else { console.error(`    ❌ строка позиции без «1 группа»: «${rowGrouped}»`); failures++; }
+    const unfilledGrouped = await page.locator('[data-testid="S-20.card.subject"][data-unfilled="true"]').count();
+    if (unfilledGrouped >= 1) console.log('    ✅ позиция с непокрытой группой помечена data-unfilled');
+    else { console.error('    ❌ строка с непокрытой группой не помечена data-unfilled'); failures++; }
+    // Возврат к «весь класс»: дальше смок собирает расписание, и предмет с
+    // непокрытой группой уронил бы генерацию отказом SUBJECT_UNCOVERED.
+    await openCompetence();
+    const groupPre = await page.locator('[data-testid="M-25.check.group"]:checked').count();
+    if (groupPre === 1) console.log('    ✅ групповая позиция педагога предотмечена');
+    else { console.error(`    ❌ предотмеченных групп ${groupPre}, ждали 1`); failures++; }
+    await page.locator('[data-testid="M-25.toggle.groups"]').first().click(); // обратно на «весь класс»
+    await page.locator('[data-testid="M-25.check.position"]').first().check();
+    await saveCompetence();
+    const rowClass = await firstRowText();
+    if (!/группа/.test(rowClass) && !/нет педагога/.test(rowClass)) console.log(`    ✅ позиция снова классовая: «${rowClass}»`);
+    else { console.error(`    ❌ позиция не вернулась к «весь класс»: «${rowClass}»`); failures++; }
 
     // ── S-40 · расписание: до сборки уроков нет ──
     console.log('▶ S-40 · расписание');
