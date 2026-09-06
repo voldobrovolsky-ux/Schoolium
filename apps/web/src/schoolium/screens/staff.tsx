@@ -37,6 +37,7 @@ import {
   type SubjectDto,
 } from "@edustore/shared";
 import { AccountForm, CredentialsBox } from "./account-form";
+import { WorkforceRail, WorkforceTables, workforceTitle, type WorkforceView } from "./staff-workforce";
 import { dateTime } from "./misc";
 import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile, usePolling, type Async } from "../hooks";
@@ -73,6 +74,8 @@ export function StaffScreen({ openId }: { openId?: string }) {
   const [created, setCreated] = useState<CredentialsDto | null>(null);
   /** Свёрнутые секции мобайла (§6). По умолчанию раскрыты все три. */
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
+  /** AR-212: что показано вместо карточек — таблица рельса или ничего. */
+  const [view, setView] = useState<WorkforceView>(null);
   const { toast, showToast } = useToast();
   const mobile = useIsMobile();
   const mayManage = can("staff.manage");
@@ -106,96 +109,115 @@ export function StaffScreen({ openId }: { openId?: string }) {
     <>
       <div className="sch-page-head">
         <h1>Персонал</h1>
-        {mayManage ? (
+        {/* Пока открыта таблица, кнопка активации не показывается: она ведёт
+            карточками, а карточек на экране сейчас нет. */}
+        {mayManage && !view ? (
           <Button kind="primary" testId="S-30.btn.activate" onClick={() => setExpanded(true)}>
             Активация персонала
           </Button>
         ) : null}
       </div>
 
-      {!shown ? (
-        <EmptyState
-          testId="S-30.empty"
-          title="Персонал не активирован"
-          hint={mayManage ? "Активируйте сотрудников — они получат доступ" : "Сотрудники появятся, когда модератор их активирует"}
-          action={
-            mayManage ? (
-              <Button kind="primary" testId="S-30.btn.activate" onClick={() => setExpanded(true)}>
-                Активация персонала
-              </Button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="sch-sections">
-          {STAFF_SECTIONS.map((sec) => (
-            /* На мобайле секции сворачиваемые (§6): три раскрытых списка на
-               390px превращают экран в бесконечную ленту, в которой третья
-               секция — «Преподаватели», самая нужная, — всегда внизу.
-               На десктопе три колонки видны разом, и сворачивать нечего. */
-            <section
-              key={sec.level}
-              data-testid={`S-30.section.level${sec.level}`}
-              className={mobile ? "sch-section--collapsible" : undefined}
-            >
-              <div className="sch-row sch-row--between">
-                {mobile ? (
-                  <button
-                    className="sch-section-toggle"
-                    aria-expanded={!collapsed.has(sec.level)}
-                    onClick={() =>
-                      setCollapsed((cur) => {
-                        const next = new Set(cur);
-                        if (next.has(sec.level)) next.delete(sec.level);
-                        else next.add(sec.level);
-                        return next;
-                      })
-                    }
-                  >
-                    <span aria-hidden="true">
-                      <Icon name={collapsed.has(sec.level) ? "chevronRight" : "chevronDown"} size={18} />
-                    </span>{" "}
-                    {sec.title}
-                  </button>
-                ) : (
-                  <h2 className="sch-section-title">{sec.title}</h2>
-                )}
-                {/* Кнопка на каждую заводимую роль секции (AR-182). Смок стоит
-                    на addFounder/addTeacher — их не переименовывать. */}
-                {mayManage
-                  ? sec.addable.map((role) => (
-                      <Button
-                        key={role}
-                        kind="secondary"
-                        testId={
-                          role === "founder"
-                            ? "S-30.btn.addFounder"
-                            : role === "teacher"
-                              ? "S-30.btn.addTeacher"
-                              : role === "deputy_academic"
-                                ? "S-30.btn.addDeputyAcademic"
-                                : "S-30.btn.addDeputyUpbringing"
+      {/* AR-212: рельс справа стоит всегда, таблица занимает место карточек. */}
+      <div className="sch-staff-layout">
+        <div className="sch-staff-main">
+          {view ? (
+            <>
+              <h2 className="sch-section-title">{workforceTitle(view)}</h2>
+              <WorkforceTables
+                view={view}
+                canBind={can("subject.write")}
+                canSetHours={can("schedule.load.write")}
+                onError={showToast}
+                onSaved={reload}
+              />
+            </>
+          ) : !shown ? (
+            <EmptyState
+              testId="S-30.empty"
+              title="Персонал не активирован"
+              hint={mayManage ? "Активируйте сотрудников — они получат доступ" : "Сотрудники появятся, когда модератор их активирует"}
+              action={
+                mayManage ? (
+                  <Button kind="primary" testId="S-30.btn.activate" onClick={() => setExpanded(true)}>
+                    Активация персонала
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="sch-sections">
+              {STAFF_SECTIONS.map((sec) => (
+                /* На мобайле секции сворачиваемые (§6): три раскрытых списка на
+                   390px превращают экран в бесконечную ленту, в которой третья
+                   секция — «Преподаватели», самая нужная, — всегда внизу.
+                   На десктопе три колонки видны разом, и сворачивать нечего. */
+                <section
+                  key={sec.level}
+                  data-testid={`S-30.section.level${sec.level}`}
+                  className={mobile ? "sch-section--collapsible" : undefined}
+                >
+                  <div className="sch-row sch-row--between">
+                    {mobile ? (
+                      <button
+                        className="sch-section-toggle"
+                        aria-expanded={!collapsed.has(sec.level)}
+                        onClick={() =>
+                          setCollapsed((cur) => {
+                            const next = new Set(cur);
+                            if (next.has(sec.level)) next.delete(sec.level);
+                            else next.add(sec.level);
+                            return next;
+                          })
                         }
-                        onClick={() => setAdding(role)}
                       >
-                        {ADD_LABELS[role] ?? "Добавить"}
-                      </Button>
-                    ))
-                  : null}
-              </div>
-              {mobile && collapsed.has(sec.level) ? null : (
-                <div className="sch-cards--3">
-                  {cards
-                    .filter((c) => c.section === sec.level)
-                    .map((c) => (
-                      <PersonCard key={c.id} card={c} meta={c.userId ? teacherMeta.get(c.userId) : undefined} />
-                    ))}
-                </div>
-              )}
-            </section>
-          ))}
+                        <span aria-hidden="true">
+                          <Icon name={collapsed.has(sec.level) ? "chevronRight" : "chevronDown"} size={18} />
+                        </span>{" "}
+                        {sec.title}
+                      </button>
+                    ) : (
+                      <h2 className="sch-section-title">{sec.title}</h2>
+                    )}
+                    {/* Кнопка на каждую заводимую роль секции (AR-182). Смок стоит
+                        на addFounder/addTeacher — их не переименовывать. */}
+                    {mayManage
+                      ? sec.addable.map((role) => (
+                          <Button
+                            key={role}
+                            kind="secondary"
+                            testId={
+                              role === "founder"
+                                ? "S-30.btn.addFounder"
+                                : role === "teacher"
+                                  ? "S-30.btn.addTeacher"
+                                  : role === "deputy_academic"
+                                    ? "S-30.btn.addDeputyAcademic"
+                                    : "S-30.btn.addDeputyUpbringing"
+                            }
+                            onClick={() => setAdding(role)}
+                          >
+                            {ADD_LABELS[role] ?? "Добавить"}
+                          </Button>
+                        ))
+                      : null}
+                  </div>
+                  {mobile && collapsed.has(sec.level) ? null : (
+                    <div className="sch-cards--3">
+                      {cards
+                        .filter((c) => c.section === sec.level)
+                        .map((c) => (
+                          <PersonCard key={c.id} card={c} meta={c.userId ? teacherMeta.get(c.userId) : undefined} />
+                        ))}
+                    </div>
+                  )}
+                </section>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+        <WorkforceRail view={view} onOpen={setView} onClose={() => setView(null)} />
+      </div>
 
       {open ? <StaffCardModal card={open} subjects={subjState} onClose={() => navigate("/staff")} onChanged={reload} /> : null}
 

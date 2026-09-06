@@ -1,0 +1,254 @@
+/*
+ * `S-30` · раскладка правого рельса и двух таблиц персонала (AR-212).
+ *
+ * Здесь только раскладка. Кнопки, поля, обёртка таблицы (`.sch-tablewrap`) и
+ * сама таблица (`.sch-table`) — из `app.css`, второй реализации у них не
+ * появляется. Цвета, отступы, радиусы, тени — только токенами (G-37, AR-42):
+ * литерального цвета в файле нет.
+ *
+ * Ключевое решение раскладки: раскрытый рельс НАКРЫВАЕТ контент, а не
+ * раздвигает его. Полоса места под рельс держится всегда (`--rail-w`), а
+ * растёт по наведению только абсолютно позиционированная панель — иначе
+ * таблица переливалась бы при каждом проходе курсора мимо края экрана.
+ */
+
+.sch-staff-layout {
+  --rail-w: 44px;
+  --rail-open-w: 268px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--rail-w);
+  gap: var(--sp-16);
+  align-items: start;
+}
+
+.sch-staff-main { min-width: 0; }
+
+/* ─────────────────────────── рельс ─────────────────────────── */
+
+.sch-rail {
+  position: sticky;
+  top: var(--sp-8);
+  width: var(--rail-w);
+  min-height: 220px;
+}
+
+/* Панель отсчитывается от ПРАВОГО края полосы: растёт влево, накрывая контент. */
+.sch-rail-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  padding: var(--sp-8);
+  border: 1px solid var(--c-border-default);
+  border-radius: var(--r-card);
+  background: var(--c-surface-card);
+  box-shadow: var(--sh-card);
+  overflow: hidden;
+  transition: width 140ms ease, box-shadow 140ms ease;
+}
+
+/* Наведение — основной способ; «прижат» — для телефона, где наведения нет. */
+.sch-rail:hover .sch-rail-panel,
+.sch-rail--pinned .sch-rail-panel {
+  width: var(--rail-open-w);
+  box-shadow: var(--sh-pop);
+  z-index: 3;
+}
+
+/* Клавиатура — ОТДЕЛЬНЫМ правилом и по `:focus-visible`, а не `:focus-within`:
+   нажатая мышью строка сохраняет фокус в DOM, и рельс оставался бы раскрытым
+   поверх только что открытой таблицы. Правило стоит одно, чтобы браузер без
+   `:has()` терял раскрытие с клавиатуры, а не раскрытие наведением. */
+.sch-rail:has(:focus-visible) .sch-rail-panel {
+  width: var(--rail-open-w);
+  box-shadow: var(--sh-pop);
+  z-index: 3;
+}
+
+[data-anim="off"] .sch-rail-panel { transition: none; }
+
+.sch-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  min-height: 28px;
+}
+
+.sch-rail-spine,
+.sch-rail-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--c-ink-secondary);
+  cursor: pointer;
+}
+
+.sch-rail-spine:hover,
+.sch-rail-close:hover { background: var(--c-brand-violet-050); color: var(--c-ink-primary); }
+.sch-rail-spine:focus-visible,
+.sch-rail-close:focus-visible { outline: 2px solid var(--c-border-focus); outline-offset: 2px; }
+
+/* Корешок ведёт слева, крестик — справа: пока таблица не открыта, крестика
+   нет, и корешок стоит один. */
+.sch-rail-spine { order: 1; }
+.sch-rail-close { order: 2; margin-left: auto; }
+
+/* Свёрнутый рельс с открытой таблицей показывает КРЕСТИК, а не корешок: в
+   44px помещается одна мишень, и это та, ради которой рельс сейчас нужен —
+   вернуть карточки. Раскрытый рельс показывает обе. */
+.sch-rail--table:not(:hover):not(.sch-rail--pinned) .sch-rail-spine { display: none; }
+.sch-rail--table:has(:focus-visible) .sch-rail-spine { display: inline-flex; }
+
+.sch-rail-list { display: flex; flex-direction: column; gap: 2px; }
+
+.sch-rail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  width: 100%;
+  min-height: 32px;
+  padding: var(--sp-4) var(--sp-8);
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--c-ink-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sch-rail-row:hover { background: var(--c-brand-violet-050); color: var(--c-ink-primary); }
+.sch-rail-row:focus-visible { outline: 2px solid var(--c-border-focus); outline-offset: -2px; }
+.sch-rail-row--active { background: var(--c-brand-violet-100); color: var(--c-brand-violet-700); font-weight: var(--fw-medium); }
+
+.sch-rail-mark { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: 0 0 20px; }
+.sch-rail-row--sub .sch-rail-mark { color: var(--c-ink-muted); }
+
+/* Подпись прячется в свёрнутом рельсе шириной, а не `display: none`: строка
+   остаётся кнопкой и остаётся достижимой с клавиатуры (фокус её раскрывает). */
+.sch-rail-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sch-rail:hover .sch-rail-label,
+.sch-rail--pinned .sch-rail-label { opacity: 1; }
+.sch-rail:has(:focus-visible) .sch-rail-label { opacity: 1; }
+
+[data-anim="off"] .sch-rail-label { transition: none; }
+
+.sch-rail-chev { display: inline-flex; flex: 0 0 auto; color: var(--c-ink-muted); }
+.sch-rail-sub { display: flex; flex-direction: column; gap: 2px; padding-left: var(--sp-12); }
+
+/* ─────────────────────────── таблицы ─────────────────────────── */
+
+.sch-wf { max-width: 100%; }
+/* Подпись стоит ПОД обёрткой таблицы, а не внутри: внутри она уезжала бы
+   вместе с горизонтальной прокруткой широкой сводной. */
+.sch-wf-note { margin: var(--sp-8) 0 0; font-size: var(--fs-xs); }
+
+/* Строка таблицы здесь не ведёт никуда: курсор-указатель `.sch-table tbody tr`
+   обещал бы переход, которого нет. */
+.sch-table--wf tbody tr { cursor: default; }
+.sch-table--wf tbody tr:hover td { box-shadow: none; }
+
+.sch-wf-col-subject { width: 42%; }
+.sch-wf-col-hours { width: 140px; }
+.sch-wf-col-act { width: 52px; }
+.sch-wf-col-fio { width: 220px; }
+.sch-wf-col-total { width: 88px; }
+
+/* Заголовок класса — вторая шапка внутри таблицы: она делит её на блоки
+   ровно так же, как делит бумажную таблицу владельца. */
+.sch-wf-classhead > th {
+  position: static;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  background: var(--c-surface-canvas);
+  border-top: 1px solid var(--c-border-strong);
+  color: var(--c-ink-primary);
+  font-size: var(--fs-sm);
+}
+
+.sch-wf-block:first-of-type .sch-wf-classhead > th { border-top: 0; }
+.sch-wf-classname { font-weight: var(--fw-semibold); }
+.sch-wf-classmeta { color: var(--c-ink-secondary); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
+
+.sch-wf-hours { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
+.sch-wf-hours-ro { display: inline-block; min-width: 84px; font-variant-numeric: tabular-nums; }
+.sch-wf-select { width: 100%; max-width: 320px; }
+
+.sch-wf-add td { background: var(--c-surface-canvas); }
+.sch-wf-addform { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.sch-wf-addform .sch-input { flex: 1 1 220px; max-width: 320px; }
+
+/* Сводная: числа и подписи их колонок — по правому краю; иначе заголовок
+   стоит не над своим столбцом и таблица читается косо. */
+.sch-table--numeric td,
+.sch-table--numeric th { text-align: right; font-variant-numeric: tabular-nums; }
+.sch-table--numeric th[scope="row"],
+.sch-table--numeric th:first-child { text-align: left; }
+/* ФИО — заголовок СТРОКИ: липкость и фон шапки `.sch-table th` ему не нужны. */
+.sch-wf-fio {
+  position: static;
+  background: var(--c-surface-card);
+  font-weight: var(--fw-regular);
+  font-size: var(--fs-sm);
+  color: var(--c-ink-primary);
+  white-space: nowrap;
+}
+.sch-wf-zero { color: var(--c-ink-muted); }
+.sch-wf-total { font-weight: var(--fw-semibold); }
+.sch-wf-totals th,
+.sch-wf-totals td {
+  position: static;
+  background: var(--c-surface-canvas);
+  color: var(--c-ink-secondary);
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-xs);
+  border-bottom: 1px solid var(--c-border-strong);
+}
+
+/* ─────────────────────────── телефон ─────────────────────────── */
+
+/*
+ * На телефоне наведения нет, и рельс шириной в палец бесполезен: полоса
+ * уезжает под контент, а панель разворачивается на всю ширину нажатием на
+ * корешок (`--pinned`). Мишень корешка — 44px (§4).
+ */
+@media (max-width: 767px) {
+  .sch-staff-layout { grid-template-columns: minmax(0, 1fr); }
+  /* Рельс встаёт НАД содержимым: в разметке он идёт вторым (справа на
+     десктопе), и без переупорядочивания крестик оказывался бы под длинной
+     таблицей — закрывать её пришлось бы, докрутив до конца. */
+  .sch-rail { order: -1; position: static; width: 100%; min-height: 0; margin-bottom: var(--sp-12); }
+  .sch-rail-panel { position: static; width: 100%; }
+  .sch-rail:hover .sch-rail-panel,
+  .sch-rail--pinned .sch-rail-panel { width: 100%; }
+  .sch-rail-label { opacity: 1; }
+  .sch-rail-spine, .sch-rail-close { width: var(--tap-min); height: var(--tap-min); }
+  .sch-rail-row { min-height: var(--tap-min); }
+  /* Свёрнутый рельс на телефоне — только шапка со списком разделов: список
+     скрывается, пока панель не прижата нажатием. */
+  .sch-rail:not(.sch-rail--pinned) .sch-rail-list { display: none; }
+  .sch-wf-col-fio { width: auto; }
+}
