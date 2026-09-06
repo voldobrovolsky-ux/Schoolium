@@ -41,7 +41,8 @@ const HOME = {
   'S-10': ['screens/classes.tsx'], 'S-11': ['screens/classes.tsx'],
   'S-12': ['screens/classes.tsx'], 'S-13': ['screens/classes.tsx'],
   'S-20': ['screens/subjects.tsx'], 'S-21': ['screens/subjects.tsx'], 'S-22': ['screens/subjects.tsx'],
-  'S-30': ['screens/staff.tsx'], 'S-31': ['screens/staff.tsx'],
+  // AR-212: карточки и таблицы «Персонала» — два вида одного экрана в двух модулях.
+  'S-30': ['screens/staff.tsx', 'screens/staff-workforce.tsx'], 'S-31': ['screens/staff.tsx'],
   'S-40': ['screens/schedule.tsx'], 'S-41': ['screens/schedule.tsx'], 'S-42': ['screens/schedule.tsx'],
   'S-43': ['screens/schedule.tsx'],
   'S-50': ['screens/journal.tsx'], 'S-51': ['screens/journal.tsx'], 'S-52': ['screens/journal.tsx'],
