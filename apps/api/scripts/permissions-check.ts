@@ -1,5 +1,5 @@
 /**
- * G-89 (AR-213) — **тумблер разрешений действительно меняет разрешение.**
+ * G-90 (AR-214) — **тумблер разрешений действительно меняет разрешение.**
  *
  * Раздел «Разрешения» `S-62` — не витрина каталога: правка администратора школы
  * обязана дойти до гейта роутов и до `GET /v1/me`, пережить рестарт (boot-sync
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   const authz = b.get(AuthzService);
   const drain = () => TenantContext.runAsSystem(() => b.outbox.drain());
 
-  console.log('G-89 · разрешения школы: тумблер меняет право (AR-213)\n');
+  console.log('G-90 · разрешения школы: тумблер меняет право (AR-214)\n');
 
   // ─── 1. словарь разделов полон и однозначен ───
   const owners = new Map<string, string[]>();
@@ -168,7 +168,7 @@ async function main(): Promise<void> {
   check(personal.length >= 2, `адресные правки названы субъектом: ${personal.length}`);
 
   await b.close();
-  report('G-89 · разрешения школы (AR-213)');
+  report('G-90 · разрешения школы (AR-214)');
 }
 
 void main();

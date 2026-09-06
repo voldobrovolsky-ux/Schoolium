@@ -309,6 +309,14 @@ export class StaffService {
     const card = await this.prisma.staffCard.findUnique({ where: { id: cardId } });
     if (!card) throw new NotFoundException('карточка не найдена');
     if (!card.userId) throw new ForbiddenException('сначала заведите учётку: ФИО и юзернейм');
+    // Отзыв активации возвращает карточку в «Не авторизованные» (AR-213), и
+    // выпуск QR оттуда пошёл бы сам собой. Гейт живёт в КОНТРАКТЕ, а не в
+    // интерфейсе: код, который не пустит («Вернуть доступ» не нажали), не
+    // выпускается вовсе — иначе экран обещает вход, которого нет.
+    const access = await TenantContext.runAsSystem(() =>
+      this.prisma.membership.findFirst({ where: { userId: card.userId!, workspaceId: ws } }),
+    );
+    if (access?.deactivatedAt) throw new SchoolError('ACCESS_REVOKED');
     const t = await this.prisma.activationToken.create({
       data: {
         workspaceId: ws,
@@ -441,21 +449,52 @@ export class StaffService {
   }
 
   /**
-   * «Просканировал не тот» (AR-153): все сессии учётки закрываются, карточка
-   * возвращается в «Не авторизованные», токен перевыпускается кнопкой. Креды не
-   * трогаются — их заводил модератор, чужой сканер их не знает. История
-   * карточки не затрагивается: это не удаление и не деактивация.
+   * `S-31.btn.revokeActivation` — «Отозвать активацию» (AR-213, вытесняет
+   * AR-153 в части персонала и поглощает прежнюю `deactivate` AR-89).
+   *
+   * Разрушающих операций над сотрудником две, и различаются они объёмом потери
+   * данных: эта **сохраняет все данные** и снимает право взаимодействовать со
+   * школой. Прежде их было четыре, и две из них человек различить не мог:
+   * «Отозвать активацию» снимала `activatedAt`, оставляя права, «Деактивировать»
+   * ставила `deactivatedAt` — на экране обе выглядели одинаково, а разделял их
+   * невидимый флаг членства.
+   *
+   * Что делает: закрывает все сессии (`ACCESS_REVOKED` первым же запросом
+   * чужого устройства — случай «просканировал не тот»), гасит ожидающие токены,
+   * снимает право доступа и возвращает карточку в «Не авторизованные», снимает
+   * привязки к предметам каскадом (сетка → `stale`, AR-89). Креды не трогаются
+   * — их заводил модератор. Обратная операция — `reactivate` («Вернуть
+   * доступ»). Последнего активного модератора школа так не теряет.
    */
   async revokeActivation(cardId: string, actor: SchoolActor) {
     const { membership, workspaceId, userId } = await this.registered(cardId);
-    await this.sessions.revokeAllForUser(userId, 'activation_revoked');
+    if (membership.roles.includes('moderator') && (await this.activeModerators(workspaceId)) <= 1) {
+      throw new SchoolError('LAST_MODERATOR');
+    }
+    const unboundSubjects = await this.cascadeUnbind(userId, workspaceId, actor);
     await TenantContext.runAsSystem(() =>
-      this.prisma.membership.update({ where: { id: membership.id }, data: { activatedAt: null } }),
+      this.prisma.membership.update({
+        where: { id: membership.id },
+        data: { deactivatedAt: new Date(), activatedAt: null },
+      }),
     );
+    // сессии гасятся НЕМЕДЛЕННО — иначе доступ уволенного живёт 90 дней (AR-92)
+    await this.sessions.revokeAllForUser(userId, 'activation_revoked');
     await this.prisma.activationToken.updateMany({
       where: { purpose: 'staff_activation', targetId: cardId, state: 'waiting' },
       data: { state: 'expired' },
     });
+    await this.prisma.$transaction((tx) =>
+      this.outbox.enqueue(
+        tx,
+        newEvent<StaffDeactivatedV1>({
+          type: SCHOOL_EVENTS.staffDeactivated,
+          workspaceId,
+          actor: actor.userId,
+          payload: { userId, unboundSubjects },
+        }),
+      ),
+    );
     await this.access.publishSessionRevoked(userId, workspaceId, 'activation_revoked', actor.userId);
     return this.get(cardId);
   }
@@ -586,37 +625,11 @@ export class StaffService {
     return unbound.map((u) => u.subjectId);
   }
 
-  async deactivate(cardId: string, actor: SchoolActor) {
-    const { membership, workspaceId, userId } = await this.registered(cardId);
-    if (membership.roles.includes('moderator') && (await this.activeModerators(workspaceId)) <= 1) {
-      throw new SchoolError('LAST_MODERATOR');
-    }
-    const unboundSubjects = await this.cascadeUnbind(userId, workspaceId, actor);
-    await TenantContext.runAsSystem(() =>
-      this.prisma.membership.update({ where: { id: membership.id }, data: { deactivatedAt: new Date() } }),
-    );
-    // деактивация отзывает активные сессии НЕМЕДЛЕННО — иначе доступ уволенного
-    // живёт 90 дней (AR-92)
-    await this.sessions.revokeAllForUser(userId, 'deactivated');
-    await this.prisma.$transaction((tx) =>
-      this.outbox.enqueue(
-        tx,
-        newEvent<StaffDeactivatedV1>({
-          type: SCHOOL_EVENTS.staffDeactivated,
-          workspaceId,
-          actor: actor.userId,
-          payload: { userId, unboundSubjects },
-        }),
-      ),
-    );
-    await this.access.publishSessionRevoked(userId, workspaceId, 'deactivated', actor.userId);
-    return this.get(cardId);
-  }
-
   /**
-   * Реактивация возвращает доступ; сессии не воскресают — вход заново.
-   * Лимиты ролей перепроверяются (AR-205): пока сотрудник был деактивирован, его
-   * роль могла уйти другому — реактивация не даёт носителей сверх лимита.
+   * `S-31.btn.reactivateStaff` — «Вернуть доступ»: обратная операция к отзыву
+   * активации (AR-213). Сессии не воскресают — вход заново по QR либо коду.
+   * Лимиты ролей перепроверяются (AR-205): пока доступ был закрыт, роль могла
+   * уйти другому — возврат доступа не даёт носителей сверх лимита.
    */
   async reactivate(cardId: string, actor: SchoolActor) {
     const { membership, workspaceId, userId } = await this.registered(cardId);
@@ -641,8 +654,18 @@ export class StaffService {
   }
 
   /**
-   * Удаление доступно сотруднику БЕЗ привязок и БЕЗ выставленных отметок;
-   * сотрудник с историей деактивируется, и деактивация обратима (AR-89).
+   * `S-31.btn.deleteStaff` — «Удалить профиль» (AR-213). Вторая из двух
+   * разрушающих операций карточки: **физически стирает данные человека** и
+   * обратной не имеет. Гейта «есть история» больше нет (`STAFF_HAS_HISTORY`
+   * выведен из употребления): удаляется и педагог, успевший выставить отметки,
+   * — его отметки принадлежат школе, а не ему.
+   *
+   * Что остаётся и почему: отметки (`postedBy`), уроки и колонки журнала
+   * (`teacherId`), слоты шаблона, замены — записи ШКОЛЫ, ссылки в них по
+   * значению и историчны (правило AR-89); `AuditLog` — журнал обработки ПДн,
+   * стирание которого уничтожило бы доказательство самого удаления (152-ФЗ,
+   * AR-30). Ровно этот список стережёт G-89.
+   *
    * Последний активный модератор не удаляется — правило защищает школу, а не
    * должность: при двух модераторах любой удаляется свободно.
    */
@@ -651,15 +674,10 @@ export class StaffService {
     if (membership.roles.includes('moderator') && (await this.activeModerators(workspaceId)) <= 1) {
       throw new SchoolError('LAST_MODERATOR');
     }
-    // Гейт живёт в контракте, а не в интерфейсе (красная линия 3): карточка могла
-    // показать «Удалить» до того, как сотрудник выставил отметку (AR-113).
-    if (await this.hasHistory(userId)) throw new SchoolError('STAFF_HAS_HISTORY');
     const unboundSubjects = await this.cascadeUnbind(userId, workspaceId, actor);
     await this.sessions.revokeAllForUser(userId, 'deleted');
-    await TenantContext.runAsSystem(async () => {
-      await this.prisma.membership.deleteMany({ where: { id: membership.id } });
-      await this.prisma.staffCard.update({ where: { id: cardId }, data: { userId: null } });
-    });
+    // Событие уходит в outbox ДО стирания: аудит обязан сохранить строку об
+    // удалении, а подписчик читает payload события, а не таблицу пользователя.
     await this.prisma.$transaction((tx) =>
       this.outbox.enqueue(
         tx,
@@ -672,7 +690,64 @@ export class StaffService {
       ),
     );
     await this.access.publishSessionRevoked(userId, workspaceId, 'deleted', actor.userId);
+    await this.eraseProfile(cardId, membership.id, userId, workspaceId);
     return { ok: true };
+  }
+
+  /**
+   * Физическое стирание профиля (AR-213) — **перечислением, а не каскадом БД**:
+   * человек живёт в схеме ссылками по ЗНАЧЕНИЮ (`userId` строкой), внешних
+   * ключей на него нет, и «удалить пользователя» здесь означает пройти список
+   * таблиц. Список — утверждение, а не удобство: G-89 сверяет его с DMMF, и
+   * новая колонка с идентификатором человека роняет ворота, пока её не отнесли
+   * либо сюда, либо к записям школы.
+   *
+   * Учётка (`User`, `Teacher`, серверные сессии RP) стирается, только если это
+   * было ПОСЛЕДНЕЕ членство человека в инсталляции: иначе ФИО и логин — данные
+   * второй школы, и изоляция тенанта (AR-2) весомее полноты стирания в одной.
+   */
+  private async eraseProfile(cardId: string, membershipId: string, userId: string, workspaceId: string): Promise<void> {
+    await TenantContext.runAsSystem(async () => {
+      // ── контур доступа этой школы: вход, коды, ссылки, сессии ──
+      await this.prisma.activationToken.deleteMany({ where: { workspaceId, purpose: 'staff_activation', targetId: cardId } });
+      // токен ЧУЖОЙ карточки (привязка предмета, AR-87) остаётся школе — стирается
+      // след человека, который его отсканировал
+      await this.prisma.activationToken.updateMany({ where: { workspaceId, scannedBy: userId }, data: { scannedBy: null } });
+      await this.prisma.loginCode.deleteMany({ where: { workspaceId, userId } });
+      await this.prisma.bootstrapLink.deleteMany({ where: { workspaceId, userId } });
+      await this.prisma.bootstrapLink.updateMany({ where: { workspaceId, issuedBy: userId }, data: { issuedBy: null } });
+      await this.prisma.deviceLinkToken.deleteMany({ where: { workspaceId, approvedBy: userId } });
+      await this.prisma.appSession.deleteMany({ where: { workspaceId, userId } });
+      // киоск остаётся школе — стирается след человека, подтвердившего привязку
+      await this.prisma.device.updateMany({ where: { workspaceId, boundByUserId: userId }, data: { boundByUserId: null } });
+      // ── его рабочие данные в школе ──
+      await this.prisma.teacherBinding.deleteMany({ where: { workspaceId, teacherId: userId } });
+      await this.prisma.teacherPreference.deleteMany({ where: { workspaceId, teacherId: userId } });
+      // индивидуальное разрешение (AR-214, scope='user') адресовано ЕМУ и без
+      // него не значит ничего — держать строку было бы держать право
+      // человека, которого в школе больше нет; общие разрешения роли
+      // (scope='role') эту карточку не касаются и не трогаются
+      await this.prisma.schoolPermissionOverride.deleteMany({ where: { workspaceId, scope: 'user', subject: userId } });
+      // ── членство и карточка: должность освобождается вместе с профилем (AR-205) ──
+      await this.prisma.membership.deleteMany({ where: { id: membershipId } });
+      await this.prisma.staffCard.deleteMany({ where: { id: cardId } });
+      // ── учётка: только если её больше ничто не держит ──
+      // Держат три вещи: членство в другой школе, карточка родителя и запись
+      // ученика с той же учёткой (AR-151: «Мои дети» у штатной роли — это тот же
+      // человек). Стереть `User` под живой ссылкой значило бы оставить в школе
+      // карточку без имени — потерю данных ЧУЖОЙ роли того же человека.
+      const [elsewhere, asGuardian, asStudent] = await Promise.all([
+        this.prisma.membership.count({ where: { userId } }),
+        this.prisma.guardianCard.count({ where: { userId } }),
+        this.prisma.schoolStudent.count({ where: { userId } }),
+      ]);
+      if (elsewhere === 0 && asGuardian === 0 && asStudent === 0) {
+        await this.prisma.appSession.deleteMany({ where: { userId } });
+        await this.prisma.session.deleteMany({ where: { florusUserId: userId } });
+        await this.prisma.teacher.deleteMany({ where: { id: userId } });
+        await this.prisma.user.deleteMany({ where: { id: userId } });
+      }
+    });
   }
 
   // ─────────────── код входа и сессии (§11 строки 35, 37) ───────────────

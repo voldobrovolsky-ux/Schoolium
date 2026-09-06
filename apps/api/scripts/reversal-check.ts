@@ -1,14 +1,16 @@
 /**
- * G-43 (AR-89, AR-90, AR-78, AR-102, AR-182, AR-205) — **обратимость операций и
- * каскад удаления.**
+ * G-43 (AR-213, AR-89, AR-90, AR-78, AR-102, AR-182, AR-205) — **обратимость
+ * операций и каскад разрушения.**
  *
  *   · у КАЖДОЙ операции реестра есть обратная либо записанная причина её
  *     отсутствия; необратимых пять, и каждая необратима по построению;
- *   · сотрудник без истории удаляется, с историей — деактивируется, и
- *     деактивация обратима реактивацией;
+ *   · над сотрудником две разрушающие операции (AR-213), и различает их объём
+ *     потери данных: отзыв активации сохраняет всё и обратим «Вернуть доступ»,
+ *     удаление профиля стирает данные человека и проходит В ТОМ ЧИСЛЕ у
+ *     сотрудника с историей — его отметки остаются записью школы;
  *   · каскад: привязки сняты, покрытие упало, сетка `stale`, выставленные им
  *     отметки ОСТАЛИСЬ — `postedBy` историческая ссылка, а не живая связь;
- *   · последний активный модератор не удаляется и не деактивируется
+ *   · последнего активного модератора школа не теряет ни одной из двух операций
  *     (`LAST_MODERATOR`), последняя роль не снимается (`LAST_ROLE`);
  *   · роль модератора выдаётся и снимается той же кнопкой (AR-102);
  *   · лимит носителей роли (AR-205): по умолчанию завуч один — второй отклонён
@@ -60,11 +62,11 @@ async function main(): Promise<void> {
   const irreversible = reg.filter((r) => !r.back);
   check(irreversible.length === 5,
     `необратимых операций ${irreversible.length}: ${irreversible.map((r) => r.op).join(' · ')} — их пять, не три (AR-105)`);
-  for (const need of ['удалить класс', 'удалить предмет', 'удалить ученика', 'удалить сотрудника', 'снять роль', 'открепить педагога']) {
+  for (const need of ['удалить класс', 'удалить предмет', 'удалить ученика', 'удалить профиль сотрудника', 'снять роль', 'открепить педагога']) {
     check(reg.some((r) => r.op === need), `разрушающая операция «${need}» стоит в реестре СВОЕЙ строкой (AR-105)`);
   }
 
-  // ─── каскад удаления и деактивации сотрудника ───
+  // ─── две разрушающие операции над сотрудником: каскад и обратимость (AR-213) ───
   const s = await readySchool(b, 'Школа персонала');
   await ensurePastLesson(b, s.workspaceId);
   await inSchool(s.workspaceId, async () => {
@@ -79,15 +81,16 @@ async function main(): Promise<void> {
     check(marksBefore > 0, `педагог выставил отметок: ${marksBefore} — теперь у него есть история`);
 
     const card = await staff.get(s.teacher.cardId);
-    check(card.hasHistory, 'сервер вернул hasHistory: true — экран покажет «Деактивировать», а не «Удалить» (AR-89)');
+    check(card.hasHistory, 'сервер вернул hasHistory: true — им подтверждение назовёт объём потери (AR-105), а не подменит кнопку');
 
-    await refuses(() => staff.remove(s.teacher.cardId, s.moderator), 'STAFF_HAS_HISTORY',
-      'удаление сотрудника с историей отклонено гейтом контракта именованным кодом (AR-113)');
-
-    await staff.deactivate(s.teacher.cardId, s.moderator);
+    // ── операция 1: отзыв активации — данные целы, право снято, обратима ──
+    await staff.revokeActivation(s.teacher.cardId, s.moderator);
     await drain();
     const after = await staff.get(s.teacher.cardId);
-    check(after.deactivated, 'сотрудник деактивирован: доступ закрыт, карточка осталась');
+    check(after.deactivated, 'отзыв активации закрыл доступ: право взаимодействовать со школой снято (AR-213)');
+    check(!after.registered, 'карточка вернулась в «Не авторизованные» — тем же движением, а не второй кнопкой');
+    check(after.name === card.name && after.username === card.username,
+      'ФИО и логин на месте: отзыв активации не трогает ни одной записи о человеке');
     check((await b.prisma.mark.count()) === marksBefore,
       'выставленные им отметки остались — postedBy историческая ссылка, а не живая связь');
     check((await b.prisma.teacherBinding.count({ where: { teacherId: s.teacher.userId } })) === 0,
@@ -100,14 +103,14 @@ async function main(): Promise<void> {
 
     await staff.reactivate(s.teacher.cardId, s.moderator);
     await drain();
-    check(!(await staff.get(s.teacher.cardId)).deactivated, 'реактивация вернула доступ — деактивация обратима');
+    check(!(await staff.get(s.teacher.cardId)).deactivated, '«Вернуть доступ» вернул права — отзыв активации обратим');
 
     // ─── защита школы: последний модератор ───
     const modCard = await b.prisma.staffCard.findFirst({ where: { userId: s.moderator.userId } });
     await refuses(() => staff.remove(modCard!.id, s.moderator), 'LAST_MODERATOR',
-      'удаление единственного модератора отклонено — школа не остаётся без управления');
-    await refuses(() => staff.deactivate(modCard!.id, s.moderator), 'LAST_MODERATOR',
-      'деактивация единственного модератора отклонена');
+      'удаление профиля единственного модератора отклонено — школа не остаётся без управления');
+    await refuses(() => staff.revokeActivation(modCard!.id, s.moderator), 'LAST_MODERATOR',
+      'отзыв активации у единственного модератора отклонён — обе операции держит одно правило');
     await refuses(() => staff.removeRole(modCard!.id, 'moderator', s.moderator), 'LAST_MODERATOR',
       'снятие роли у единственного модератора отклонено (AR-102)');
 
@@ -159,45 +162,57 @@ async function main(): Promise<void> {
     check(third?.code === 'ROLE_LIMIT_REACHED' && third?.details?.count === 2 && third?.details?.limit === 2,
       `третий завуч при лимите 2 отклонён: ${third?.details?.count} из ${third?.details?.limit}`);
     // реактивация при занятом лимите: место второго занял третий — второй не воскресает
-    await staff.deactivate(second.card.id, s.moderator);
+    await staff.revokeActivation(second.card.id, s.moderator);
     await drain();
     const thirdOk = await staff.addCard({ role: 'deputy_academic', lastName: 'Третья', firstName: 'Анна' });
-    check(thirdOk.card.roles.includes('deputy_academic'), 'деактивация освобождает место в лимите — третий заведён');
+    check(thirdOk.card.roles.includes('deputy_academic'), 'отзыв активации освобождает место в лимите — третий заведён');
     await refuses(() => staff.reactivate(second.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
-      'реактивация при занятом лимите 2 отклонена — «деактивировать → завести → реактивировать» носителей сверх лимита не даёт');
+      'возврат доступа при занятом лимите 2 отклонён — «отозвать → завести → вернуть» носителей сверх лимита не даёт');
     // политика без ключа — дефолт 1: с одним живым завучем реактивация второго отклонена и при дефолте
-    await staff.deactivate(thirdOk.card.id, s.moderator);
+    await staff.revokeActivation(thirdOk.card.id, s.moderator);
     await drain();
     const reset = await admin.setPolicy({ sessionLimits: {}, roleLimits: {} }, s.moderator);
     check(reset.roleLimits.deputy_academic === undefined && reset.roleHolders.deputy_academic === 1,
       'лимит снят с политики — действует дефолт 1 (DEFAULT_ROLE_LIMITS), занято 1');
     await refuses(() => staff.reactivate(second.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
-      'при дефолте 1 и живом завуче реактивация второго отклонена');
+      'при дефолте 1 и живом завуче возврат доступа второму отклонён');
 
     await staff.remove(dep.card.id, s.moderator);
     await drain();
-    await refuses(() => staff.addCard({ role: 'deputy_academic', lastName: 'Повторова', firstName: 'Дарья' }), 'ROLE_LIMIT_REACHED',
-      'после удаления носителя карточка остаётся ПУСТЫМ СЛОТОМ — роль занята слотом, вторая карточка не заводится');
-    const refill = await staff.fillCard(dep.card.id, { lastName: 'Соловьёва', firstName: 'Ирина' });
+    check((await b.prisma.staffCard.count({ where: { id: dep.card.id } })) === 0,
+      'удаление профиля стирает и карточку — пустого слота-призрака, занимающего должность, не остаётся (AR-213)');
+    const refill = await staff.addCard({ role: 'deputy_academic', lastName: 'Соловьёва', firstName: 'Ирина' });
     check(refill.card.roles.includes('deputy_academic'),
-      'пустой слот зама заполняется заново через карточку (fillCard) — канал AR-60 живёт, лимит слот не проверяет');
+      'должность освободилась вместе с профилем — новый завуч заводится тут же (AR-213, AR-205)');
 
-    // ─── обратный переход: реактивация тоже перепроверяет лимит (AR-205) ───
-    await staff.deactivate(dep.card.id, s.moderator);
+    // ─── обратный переход: возврат доступа тоже перепроверяет лимит (AR-205) ───
+    await staff.revokeActivation(refill.card.id, s.moderator);
     await drain();
     const depB = await staff.addCard({ role: 'deputy_academic', lastName: 'Пятницкая', firstName: 'Анна' });
     check(depB.card.roles.includes('deputy_academic'),
-      'деактивация освобождает лимит — новый завуч заводится (AR-89, AR-205)');
-    await refuses(() => staff.reactivate(dep.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
-      'реактивация при занятой роли отклонена — путь «деактивировать → завести → реактивировать» двух завучей не даёт');
+      'отзыв активации освобождает лимит — новый завуч заводится (AR-205, AR-213)');
+    await refuses(() => staff.reactivate(refill.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
+      'возврат доступа при занятой роли отклонён — путь «отозвать → завести → вернуть» двух завучей не даёт');
 
     // ─── сотрудник без истории удаляется ───
     const fresh = await makeStaff(b, s, ['founder'], 'Кузнецов Пётр');
-    check(!(await staff.get(fresh.cardId)).hasHistory, 'у нового сотрудника истории нет — экран покажет «Удалить»');
+    check(!(await staff.get(fresh.cardId)).hasHistory, 'у нового сотрудника истории нет — подтверждение об отметках не говорит');
     await staff.remove(fresh.cardId, s.moderator);
     await drain();
     check((await b.prisma.membership.count({ where: { userId: fresh.userId } })) === 0,
       'сотрудник без привязок и без отметок удалён — обратной операции у этого нет по построению');
+
+    // ─── и сотрудник С ИСТОРИЕЙ удаляется тоже (AR-213 снял STAFF_HAS_HISTORY) ───
+    const marksKept = await b.prisma.mark.count();
+    check((await staff.get(s.teacher.cardId)).hasHistory, 'у педагога с отметками история есть — и она больше не запрещает удаление');
+    await staff.remove(s.teacher.cardId, s.moderator);
+    await drain();
+    check((await b.prisma.membership.count({ where: { userId: s.teacher.userId } })) === 0,
+      'членство педагога с историей стёрто — человека в школе больше нет');
+    check((await b.prisma.user.count({ where: { id: s.teacher.userId } })) === 0,
+      'учётка стёрта физически: это было последнее членство человека (AR-213)');
+    check((await b.prisma.mark.count()) === marksKept,
+      'выставленные им отметки остались в журнале — запись школы, а не данные человека (AR-213)');
   });
 
   await b.close();

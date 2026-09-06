@@ -476,7 +476,7 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 
 | Элемент | Тип | Поведение |
 |---|---|---|
-| `S-31.qr` | QR 240px | `POST /api/v1/staff/:id/activation-token`; одноразовый, привязан к карточке |
+| `S-31.qr` | QR 240px | `POST /api/v1/staff/:id/activation-token`; одноразовый, привязан к карточке · у карточки с отозванной активацией QR НЕ выпускается: сервер отвечает `ACCESS_REVOKED`, экран показывает «Доступ закрыт… откроет „Вернуть доступ“» (AR-213) |
 | `S-31.status` | строка | «Ожидание регистрации» → «Зарегистрирован: Иванова М. И.»; обновляется поллингом `GET /api/v1/staff/:id/activation-token` раз в 2 секунды, пока карточка открыта (AR-87) |
 | `S-31.plaque.name` | плашка | ФИО владельца карточки (AR-203) |
 | `S-31.plaque.username` | плашка | логин учётки; без учётки — «учётка не заведена» |
@@ -491,19 +491,19 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 | `S-31.btn.reissuePassword` | ghost | «Перевыпустить пароль» — новый случайный пароль, показ один раз (событие `staff.password.set.v1`, `generated: true`) | `staff.manage` |
 | `S-31.btn.setPassword` | secondary | «Задать пароль» → `M-32` (AR-203) | `staff.manage` |
 | `S-31.btn.addRole` | secondary | «Добавить роль» (`M-07`) — доступна **после** регистрации: учредитель+директор, зам+преподаватель, **и `moderator` любому сотруднику** — так в школе появляется второй модератор (AR-102), отдельной секции «Модераторы» на `S-30` нет; носителей роли больше лимита политики — `ROLE_LIMIT_REACHED` (AR-205) |
-| `S-31.btn.deleteStaff` | danger-текст | «Удалить сотрудника» — показывается, когда сервер вернул `hasHistory: false` (нет привязок и выставленных отметок) | `DELETE /api/v1/staff/:id` → `staff.member.deleted.v1` |
-| `S-31.btn.deactivateStaff` | danger-текст | «Деактивировать» — **заменяет** предыдущую при `hasHistory: true`; доступ закрывается, карточка и отметки остаются | `POST /api/v1/staff/:id/deactivate` → `staff.member.deactivated.v1` |
-| `S-31.btn.reactivateStaff` | secondary | «Вернуть доступ» — на деактивированной карточке | `POST /api/v1/staff/:id/reactivate` → `staff.member.reactivated.v1` |
-| `S-31.btn.removeRole` | текст-действие | «Снять» у каждой роли; последняя роль не снимается (`LAST_ROLE`) — для закрытия доступа есть деактивация; роль модератора у последнего модератора не снимается (`LAST_MODERATOR`) | `DELETE /api/v1/staff/:id/roles/:role` |
-| `S-31.badge.inactive` | бейдж | «доступ закрыт» на деактивированной карточке | — |
+| `S-31.btn.revokeActivation` | danger-текст | «Отозвать активацию» (AR-213) — на заполненной карточке, пока доступ не закрыт: **все данные сохраняются**, человек теряет право взаимодействовать со школой (сессии закрыты, ожидающие QR погашены, привязки к предметам сняты, карточка снова «не авторизована»). Подтверждение `M-13`, кнопка подтверждения `B-primary` — операция обратима | `POST /api/v1/staff/:id/revoke-activation` → `staff.member.deactivated.v1`, `subject.teacher.unbound.v1` ×N; отказ `LAST_MODERATOR` |
+| `S-31.btn.deleteStaff` | danger-текст | «Удалить профиль» (AR-213) — на любой заполненной карточке, в том числе у сотрудника С историей: данные человека стираются физически и обратной операции нет; отметки, уроки и колонки журнала остаются записями школы. Подтверждение `M-13`, кнопка подтверждения `B-danger` | `DELETE /api/v1/staff/:id` → `staff.member.deleted.v1`, `subject.teacher.unbound.v1` ×N; отказ `LAST_MODERATOR` |
+| `S-31.btn.reactivateStaff` | secondary | «Вернуть доступ» — на карточке с отозванной активацией; обратная операция к `S-31.btn.revokeActivation` (AR-213): человек входит заново по QR или коду | `POST /api/v1/staff/:id/reactivate` → `staff.member.reactivated.v1` |
+| `S-31.btn.removeRole` | текст-действие | «Снять» у каждой роли; последняя роль не снимается (`LAST_ROLE`) — для закрытия доступа есть отзыв активации; роль модератора у последнего модератора не снимается (`LAST_MODERATOR`) | `DELETE /api/v1/staff/:id/roles/:role` |
+| `S-31.badge.inactive` | бейдж | «доступ закрыт» на карточке с отозванной активацией | — |
 | `S-31.btn.loginCode` | primary | «QR и код для входа» — на **зарегистрированной** карточке; `POST /api/v1/staff/:id/login-code` → панель `S-31.loginCode` |
 | `S-31.loginCode` | панель | QR 240px **и** шесть цифр крупно рядом; подпись «Код живёт 5 минут, одноразовый»; таймер `S-31.timer.loginCode` | — |
 | `S-31.timer.loginCode` | таймер | «мм:сс» до `expiresAt` кода; по нулю панель гаснет | — |
-| `S-31.btn.revokeSessions` | danger-текст | «Закрыть активные сессии» — `POST /api/v1/staff/:id/sessions/revoke`; при деактивации и удалении выполняется автоматически (AR-92) |
+| `S-31.btn.revokeSessions` | danger-текст | «Закрыть активные сессии» — `POST /api/v1/staff/:id/sessions/revoke`: человек выходит из всех устройств и входит заново теми же кредами; прав в школе не теряет — этим он и отличается от `S-31.btn.revokeActivation` (AR-213). При отзыве активации и удалении профиля выполняется автоматически (AR-92) |
 | `S-31.btn.close` | secondary | «Закрыть» — **гасит QR** (правило AR-76) |
 | `S-31.select.linkTtl` | селект | срок ссылки: «24 ч \| 48 ч \| 7 дней», дефолт 48 ч (AR-204) | параметр `ttlHours` (24 \| 48 \| 168) | `staff.manage` |
 | `S-31.select.linkUses` | селект | число использований: «1 \| 3 \| 10 \| без лимита», дефолт «без лимита» (AR-204) | параметр `maxUses` (число либо `null`) | `staff.manage` |
-| `S-31.btn.loginLink` | secondary | «Ссылка для входа» — с параметрами `S-31.select.linkTtl` и `S-31.select.linkUses`; право `staff.manage` — модератор и администратор (AR-204 вытесняет AR-189 и AR-195) | `POST /api/v1/staff/:id/login-link` (`IssueLoginLinkDto`) → `S-31.loginLink` | у заполненной и у активированной карточки |
+| `S-31.btn.loginLink` | secondary | «Ссылка для входа» — с параметрами `S-31.select.linkTtl` и `S-31.select.linkUses`; право `staff.manage` — модератор и администратор (AR-204 вытесняет AR-189 и AR-195) | `POST /api/v1/staff/:id/login-link` (`IssueLoginLinkDto`) → `S-31.loginLink` | у заполненной и у активированной карточки; у карточки с отозванной активацией маршрута входа нет вовсе (AR-213) |
 | `S-31.loginLink` | блок | URL + QR 160px + «Скопировать»; «действует до …, использований N из M» либо «без лимита»; открытие после исчерпания — `LINK_EXHAUSTED`, перевыпуск той же кнопкой (AR-204) | — | — |
 | `S-31.activity` | блок | `GET /api/v1/staff/:id/activity` (право `staff.manage`): активирован, последняя активность, «живых сессий N из M»; адрес входа виден только `admin` (AR-194) | — | loading / error / данные |
 | `S-31.activity.session` | строка | устройство · «в приложении / в браузере» · канал входа · состояние — до пяти последних | — | — |
@@ -515,18 +515,22 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
   карточке администратора школы принимает только администратор (AR-211): у
   модератора кнопки видны, но сервер отвечает отказом с именем владельца
   карточки; `TOKEN_USED` при повторном скане — «Код уже использован, откройте
-  карточку заново»; `LAST_MODERATOR` при попытке удалить или деактивировать
-  единственного модератора школы; `ROLE_LIMIT_REACHED` при добавлении роли
+  карточку заново»; `LAST_MODERATOR` при попытке отозвать активацию у
+  единственного модератора школы либо удалить его профиль; `ROLE_LIMIT_REACHED` при добавлении роли
   (`M-07`) или возврате доступа, когда носителей роли в школе уже столько,
   сколько разрешает политика (AR-205); `LINK_EXHAUSTED` — человек открыл
   ссылку входа после исчерпания числа использований: «Ссылка использована 3 из
   3 раз — попросите выпустить новую» (показывается на экране открытия ссылки
   `/bootstrap/:token`, у которого своей секции в реестре нет).
-- **Каскад (AR-89):** удаление и деактивация снимают привязки сотрудника к
-  предметам (`subject.teacher.unbound.v1`), покрытие предметов падает, сетка
-  получает плашку `stale`. Выставленные им отметки остаются в журнале.
-- **Правило подмены кнопки** — то же, что у ученика: сервер отдаёт
-  `hasHistory: boolean`, экран показывает ровно одну кнопку из двух.
+- **Каскад (AR-213, сохраняет правило AR-89):** и отзыв активации, и удаление
+  профиля снимают привязки сотрудника к предметам
+  (`subject.teacher.unbound.v1`), покрытие предметов падает, сетка получает
+  плашку `stale`. Выставленные им отметки остаются в журнале, `postedBy` —
+  историческая ссылка.
+- **Правила подмены кнопки у персонала нет (AR-213):** обе операции стоят на
+  карточке одновременно и различаются объёмом потери данных, а не историей
+  сотрудника. `hasHistory` сервер по-прежнему отдаёт — им подтверждение `M-13`
+  называет действительный объём потери (AR-105).
 
 ---
 
@@ -538,6 +542,11 @@ AR-156) — фолбэк слетевшей сессии; отказ — `LOGIN_
 «Не авторизованные», а открытая сессия отозванного устройства получает
 `ACTIVATION_REVOKED` первым же запросом. Те же коды несут формы доступа
 ученика (`S-13`) и родителя (`S-14`).
+
+**Дельта AR-213 (номер релиза назначает владелец).** У персонала отзыв активации ещё и закрывает доступ:
+человек сохраняет все данные, но взаимодействовать со школой не может, пока
+`S-31.btn.reactivateStaff` не вернёт доступ. У ученика (`S-13`) и родителя
+(`S-14`) отзыв активации прежний — только сессии и статус карточки.
 
 ## M-32 · Задать пароль
 
@@ -1015,7 +1024,7 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | `S-62.devices.btn.grant` | secondary | «Выдать вход» у человека (дистанционная активация) — с дефолтами ссылки: 48 ч, без лимита использований (AR-204) | `POST /api/v1/staff/:id/login-link` → `S-62.devices.link` | только у штатной учётки с карточкой |
 | `S-62.devices.link` | блок | URL + QR + «Скопировать»; «действует до …, использований N из M» либо «без лимита» | — | — |
 | `S-62.devices.empty` | пустое | «В школе нет ни одной учётки» | → `/staff` | — |
-| `S-62.roles.matrix` | матрица | раздел «Разрешения» (AR-213): функции ВЫБРАННОГО раздела приложения × девять ролей, в ячейке — тумблер. `GET /api/v1/admin/permissions`: пакет роли из общего контракта со школьными отклонениями поверх него | тумблер → `PUT /api/v1/admin/permissions/role` | loading / error / ready |
+| `S-62.roles.matrix` | матрица | раздел «Разрешения» (AR-214): функции ВЫБРАННОГО раздела приложения × девять ролей, в ячейке — тумблер. `GET /api/v1/admin/permissions`: пакет роли из общего контракта со школьными отклонениями поверх него | тумблер → `PUT /api/v1/admin/permissions/role` | loading / error / ready |
 | `S-62.roles.legend` | подпись | что означают тумблер, ободок адресной правки, «общие» и «индивидуальные», замок кабинета администратора | — | — |
 | `S-62.perm.sections` | правый сайдбар | разделы приложения: Журнал · Расписание · Классы · Предметы · Персонал · Дневник · Кабинеты; выбранный задаёт содержимое рабочей области | — | выбор пережигает перезагрузку |
 | `S-62.perm.section` | пункт сайдбара | раздел приложения: иконка, название, число функций; `data-key`, активный — `aria-current` | выбирает раздел | — |
@@ -1180,9 +1189,9 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | `SWAP_CONFLICT` | S-43 | Перестановка невозможна: Иванова М. И. в этом слоте ведёт урок в другом классе |
 | `CLASS_HAS_MARKS` | S-12 | В классе есть выставленные отметки — класс не удаляется |
 | `STUDENT_HAS_MARKS` | S-12 | У ученика есть выставленные отметки — запись деактивируется, а не удаляется |
-| `STAFF_HAS_HISTORY` | S-31 | У сотрудника есть привязки к предметам или выставленные отметки — карточка деактивируется, а не удаляется |
-| `LAST_MODERATOR` | S-31 | Это единственный модератор школы — удалить или деактивировать его нельзя |
-| `LAST_ROLE` | S-31 | Это единственная роль сотрудника — снять её нельзя; чтобы закрыть доступ, деактивируйте карточку |
+| `STAFF_HAS_HISTORY` | S-31 (выведен из употребления, AR-213) | У сотрудника есть привязки к предметам или выставленные отметки — карточка деактивируется, а не удаляется |
+| `LAST_MODERATOR` | S-31 | Это единственный модератор школы — отозвать активацию или удалить профиль нельзя |
+| `LAST_ROLE` | S-31 | Это единственная роль сотрудника — снять её нельзя; чтобы закрыть доступ, отзовите активацию |
 | `CALENDAR_YEAR_MISSING` | S-42 | Нет производственного календаря на 2027 год — обратитесь к администратору платформы |
 | `LOGIN_CODE_INVALID` | S-05 | Неверный код |
 | `LOGIN_CODE_EXPIRED` | S-05 | Код истёк, попросите модератора открыть карточку заново |
@@ -1222,7 +1231,7 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | 1 | POST `/api/v1/auth/device-link/token` | S-01 | аноним | — | — |
 | 2 | POST `/api/v1/auth/device-link/approve` | S-80 (скан с телефона) | сессия якорного устройства | `staff.session.started.v1` (via: device_link) | `TOKEN_USED`, `LINK_CODE_EXPIRED`, `ACCESS_REVOKED` |
 | 3 | POST `/api/v1/auth/logout` | M-15 | сессия | — | — |
-| 4 | POST `/api/v1/staff/:id/activation-token` | S-31 | `staff.manage` | — | — |
+| 4 | POST `/api/v1/staff/:id/activation-token` | S-31 | `staff.manage` | — | `ACCESS_REVOKED` — активация карточки отозвана (AR-213): сначала «Вернуть доступ» |
 | 5 | POST `/api/v1/staff/join/:token` | S-03 | аноним (токен) | `staff.member.registered.v1`, `staff.session.started.v1` (только если страницу открыл сам сотрудник — AR-91) | `TOKEN_USED`, `TOKEN_EXPIRED`, `PHONE_TAKEN_IN_SCHOOL` (только при членстве **в этой** школе — AR-106) |
 | 6 | POST `/api/v1/staff/me/avatar` | S-04 | `staff.self.write` | — | — |
 | 7 | POST `/api/v1/staff/:id/roles` | S-31 (`M-07`) | `staff.manage` | — | `ROLE_LIMIT_REACHED` (AR-205) |
@@ -1252,9 +1261,9 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | 26 | DELETE `/api/v1/classes/:id` | S-12 | `contingent.write` | `contingent.class.deleted.v1`, `contingent.student.deleted.v1` ×N | `CLASS_HAS_MARKS` |
 | 27 | POST `/api/v1/students/:id/reactivate` | S-12 | `contingent.write` | `contingent.student.reactivated.v1` | — |
 | 28 | DELETE `/api/v1/subjects/:id` | S-21 | `subject.write` | `subject.card.deleted.v1` | — |
-| 29 | POST `/api/v1/staff/:id/deactivate` | S-31 | `staff.manage` | `staff.member.deactivated.v1`, `subject.teacher.unbound.v1` ×N | `LAST_MODERATOR` |
+| 29 | POST `/api/v1/staff/:id/revoke-activation` | S-31 | `staff.manage` | `staff.member.deactivated.v1`, `subject.teacher.unbound.v1` ×N | `LAST_MODERATOR` (AR-213 вытесняет `POST /staff/:id/deactivate`) |
 | 30 | POST `/api/v1/staff/:id/reactivate` | S-31 | `staff.manage` | `staff.member.reactivated.v1` | `ROLE_LIMIT_REACHED` — носителей роли уже по лимиту (AR-205) |
-| 31 | DELETE `/api/v1/staff/:id` | S-31 | `staff.manage` | `staff.member.deleted.v1`, `subject.teacher.unbound.v1` ×N | `LAST_MODERATOR`, `STAFF_HAS_HISTORY` |
+| 31 | DELETE `/api/v1/staff/:id` | S-31 | `staff.manage` | `staff.member.deleted.v1`, `subject.teacher.unbound.v1` ×N | `LAST_MODERATOR` (AR-213: `STAFF_HAS_HISTORY` больше не бросается) |
 | 32 | DELETE `/api/v1/staff/:id/roles/:role` | S-31 | `staff.manage` | — | — |
 | 33 | DELETE `/api/v1/staff/me/avatar` | M-15 | `staff.self.write` | — | — |
 | 34 | POST `/api/v1/schedule/generate/cancel` | S-42 | `schedule.build` | — | — |
@@ -1280,8 +1289,8 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 | 54 | POST `/api/v1/lessons/:id/cancel` | S-40 (`M-31`) | `lesson.cancel.self` | `schedule.lesson.reassigned.v1` либо `schedule.lesson.cancelled.v1` | `NOT_YOUR_LESSON`, `LESSON_ALREADY_HELD`, `LESSON_DETACHED`, `LESSON_CANCELLED` (AR-207) |
 | 55 | DELETE `/api/v1/lessons/:id/cancel` | S-40 (`S-40.btn.withdrawCancel`) | `lesson.cancel.self` \| `schedule.build` | `schedule.lesson.reassigned.v1` либо `schedule.lesson.restored.v1` | `NOT_YOUR_LESSON` (AR-207) |
 | 56 | POST `/api/v1/lessons/:id/substitute` | S-40 | `schedule.build` | `schedule.lesson.reassigned.v1` | `SUBSTITUTE_BUSY`, `LESSON_ALREADY_HELD` (AR-207) |
-| 57 | PUT `/api/v1/admin/permissions/role` | S-62 | `school.admin` | `school.permission.set.v1` (scope: role) | `PERMISSION_LOCKED` — `school.admin` у роли `admin` (AR-213) |
-| 58 | PUT `/api/v1/admin/permissions/users/:userId` | S-62 | `school.admin` | `school.permission.set.v1` (scope: user) | `PERMISSION_LOCKED`, `ACCESS_REVOKED` — человек не из этой школы (AR-213) |
+| 57 | PUT `/api/v1/admin/permissions/role` | S-62 | `school.admin` | `school.permission.set.v1` (scope: role) | `PERMISSION_LOCKED` — `school.admin` у роли `admin` (AR-214) |
+| 58 | PUT `/api/v1/admin/permissions/users/:userId` | S-62 | `school.admin` | `school.permission.set.v1` (scope: user) | `PERMISSION_LOCKED`, `ACCESS_REVOKED` — человек не из этой школы (AR-214) |
 
 Вне HTTP: **bootstrap школы** (AR-93) — консольная операция платформы
 `npm run school:bootstrap -- --phone=… --school=…`: создаёт школу, пользователя и
@@ -1326,12 +1335,12 @@ N-го урока вместо общей позиции `meal` (`buildDayRows` 
 человек отмечает СВОЙ скан своей сессией, а не ведёт школу. Права из каталога
 она не несёт по той же причине, что `POST /auth/logout` и
 `DELETE /auth/sessions/:sid`; в воротах G-10 у неё строка whitelist с причиной.
-Мутаций школы в 1.1.1 — 38; пакет 04.09 добавляет строки 7а и 49–56, разрешения (AR-213) — 57 и 58.
+Мутаций школы в 1.1.1 — 38; пакет 04.09 добавляет строки 7а и 49–56, разрешения (AR-214) — 57 и 58.
 
 ## 10. Чего на экранах нет (не додумывать)
 
-Массового удаления нет: удаление и деактивация — по одной записи из её карточки
-(AR-89). Всё остальное, чего нет:
+Массового удаления нет: удаление профиля и отзыв активации — по одной записи из
+её карточки (AR-213, AR-105). Всё остальное, чего нет:
 
 Поиск и фильтры в списках (кроме фильтра карты устройств `S-62.devices.search` —
 карта на всю школу без него нечитаема, AR-187) · сортировка таблиц по клику · массовое выделение ·

@@ -270,29 +270,36 @@ if (Array.isArray(st.reversals) && st.reversals.length) {
   else bad('операции вне таблицы обратимости: ' + missing.join(', '));
   // Второй детектор L-9: разрушающая операция опаснее создающей, и именно её
   // легче забыть — она попадает в реестр только как «обратная» к созданию.
-  const destructive = ['удалить класс','удалить предмет','удалить ученика','удалить сотрудника','снять роль','открепить педагога'];
+  const destructive = ['удалить класс','удалить предмет','удалить ученика','удалить профиль сотрудника','снять роль','открепить педагога'];
   const gone = destructive.filter((n) => !st.reversals.some(([op]) => op === n));
   if (!gone.length) ok('каждая разрушающая операция версии присутствует в таблице обратимости своей строкой');
   else bad('разрушающие операции вне таблицы обратимости: ' + gone.join(', '));
 } else bad('таблица обратимости не объявлена: reversals отсутствует в states.mjs');
 
-// ---------- P13. Удаление сотрудника: каскад и защита школы ----------
-console.log('P13. Удаление и деактивация сотрудника (AR-89)');
+// ---------- P13. Две операции над сотрудником: каскад и защита школы ----------
+console.log('P13. Отзыв активации и удаление профиля сотрудника (AR-213)');
 if (typeof st.staffRemoval === 'function') {
   const school = { moderators: 1 };
-  const one = st.staffRemoval({ roles:['moderator'], hasHistory:false }, school);
-  if (one.code === 'LAST_MODERATOR') ok('последний модератор не удаляется — школа не остаётся без управления');
-  else bad('последнего модератора можно удалить: ' + JSON.stringify(one));
-  const teacher = st.staffRemoval({ roles:['teacher'], hasHistory:true }, { moderators:2 });
-  if (teacher.action === 'deactivate' && teacher.keepsMarks) ok('педагог с историей деактивируется, отметки остаются на месте');
-  else bad('педагог с историей удаляется вместе с историей: ' + JSON.stringify(teacher));
-  const fresh = st.staffRemoval({ roles:['teacher'], hasHistory:false }, { moderators:2 });
+  const one = st.staffRemoval({ roles:['moderator'], hasHistory:false }, school, 'delete');
+  const oneRevoke = st.staffRemoval({ roles:['moderator'], hasHistory:false }, school, 'revoke');
+  if (one.code === 'LAST_MODERATOR' && oneRevoke.code === 'LAST_MODERATOR')
+    ok('последнего модератора не удаляют и не отзывают — школа не остаётся без управления');
+  else bad('последнего модератора можно лишить доступа: ' + JSON.stringify({ one, oneRevoke }));
+  const revoke = st.staffRemoval({ roles:['teacher'], hasHistory:true }, { moderators:2 }, 'revoke');
+  if (revoke.action === 'revoke' && revoke.keepsProfile && revoke.keepsMarks && revoke.reversal)
+    ok('отзыв активации сохраняет профиль и отметки и назван обратимым («вернуть доступ»)');
+  else bad('отзыв активации теряет данные либо необратим: ' + JSON.stringify(revoke));
+  const withHistory = st.staffRemoval({ roles:['teacher'], hasHistory:true }, { moderators:2 }, 'delete');
+  if (withHistory.action === 'delete' && !withHistory.keepsProfile && withHistory.keepsMarks)
+    ok('педагог с историей удаляется: профиль стёрт, отметки остались записью школы (AR-213)');
+  else bad('удаление педагога с историей описано неверно: ' + JSON.stringify(withHistory));
+  const fresh = st.staffRemoval({ roles:['teacher'], hasHistory:false }, { moderators:2 }, 'delete');
   if (fresh.action === 'delete' && fresh.unbinds && fresh.staleSchedule)
-    ok('педагог без истории удаляется: привязки сняты, сетка помечена устаревшей');
-  else bad('удаление педагога без истории не описано каскадом: ' + JSON.stringify(fresh));
-  const secondMod = st.staffRemoval({ roles:['moderator'], hasHistory:false }, { moderators:2 });
+    ok('удаление профиля тянет каскад: привязки сняты, сетка помечена устаревшей');
+  else bad('удаление профиля не описано каскадом: ' + JSON.stringify(fresh));
+  const secondMod = st.staffRemoval({ roles:['moderator'], hasHistory:false }, { moderators:2 }, 'delete');
   if (secondMod.action === 'delete') ok('второй модератор удаляется — правило защищает школу, а не должность'); else bad('второй модератор защищён ошибочно');
-} else bad('правила удаления сотрудника не объявлены: staffRemoval отсутствует в states.mjs');
+} else bad('правила разрушающих операций над сотрудником не объявлены: staffRemoval отсутствует в states.mjs');
 
 // ---------- P14. Маршруты входа без SMS: якорная сессия и привязка устройств ----------
 console.log('P14. Как сотрудник попадает в кабинет (AR-94: без SMS)');

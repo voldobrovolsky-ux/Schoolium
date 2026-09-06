@@ -192,7 +192,7 @@ export const ROLE_PERMISSIONS: Record<SchoolRole, SchoolPermission[]> = {
   student: [...PROJECTION_PERMISSIONS],
 };
 
-// ─────────────── разделы приложения и функции разделов (AR-213) ───────────────
+// ─────────────── разделы приложения и функции разделов (AR-214) ───────────────
 
 /**
  * Право, названное словами раздела. Матрица разрешений `S-62` показывает не
@@ -225,7 +225,7 @@ export const PERMISSION_LABELS: Record<SchoolPermission, string> = {
  * Разделы приложения в порядке навигации (AR-81) плюс дневник-проекция и
  * кабинеты. Каждое из девятнадцати прав версии принадлежит ровно одному
  * разделу: раздел — это то, что человек видит в меню, а функция — то, что он
- * в разделе делает. Полнота и однократность проверяются `G-89`.
+ * в разделе делает. Полнота и однократность проверяются `G-90`.
  */
 export const APP_SECTIONS = [
   { key: 'journal', label: 'Журнал', hint: 'отметки, темы уроков', permissions: ['journal.read', 'journal.mark.post', 'journal.topic.set'] },
@@ -244,7 +244,7 @@ export const APP_SECTIONS = [
 
 export type AppSectionKey = (typeof APP_SECTIONS)[number]['key'];
 
-// ─────────────── правка разрешений администратором (AR-213) ───────────────
+// ─────────────── правка разрешений администратором (AR-214) ───────────────
 
 /**
  * Право, которое администратор не может снять НИ роли `admin`, НИ себе:
@@ -262,7 +262,7 @@ export const isLockedRoleGrant = (role: SchoolRole, permission: SchoolPermission
   role === LOCKED_ADMIN_ROLE && permission === LOCKED_ADMIN_PERMISSION;
 
 /**
- * Отклонение пакета роли (AR-213): `true` — право выдано сверх пакета, `false` —
+ * Отклонение пакета роли (AR-214): `true` — право выдано сверх пакета, `false` —
  * снято. Ключ отсутствует — действует пакет роли из `ROLE_PERMISSIONS`.
  */
 export type PermissionOverrides = Partial<Record<SchoolPermission, boolean>>;
@@ -396,6 +396,9 @@ export const ERROR_CODES = [
   // AR-113: подмена кнопки решает сервер, но гейт живёт в контракте — между
   // открытием карточки и нажатием педагог мог поставить отметку.
   'STUDENT_HAS_MARKS',
+  // AR-212 вывел этот код из употребления у персонала: удаляется и сотрудник с
+  // историей. Код остаётся в контракте — реестр кодов журнал, а не текущее
+  // состояние (тот же порядок, что у кодов СанПиН, AR-199).
   'STAFF_HAS_HISTORY',
   // 1.5.0 — пакет 04.09 (AR-199…AR-207), девять кодов
   // AR-201: карточка одна на пару «предмет × класс», дубль по ключу имени
@@ -416,7 +419,7 @@ export const ERROR_CODES = [
   'LESSON_ALREADY_HELD',
   'LESSON_CANCELLED',
   'SUBSTITUTE_BUSY',
-  // AR-213: замок `school.admin` у роли администратора — снятие закрыло бы
+  // AR-214: замок `school.admin` у роли администратора — снятие закрыло бы
   // кабинет, из которого его снимают, и вернуть право стало бы некому
   'PERMISSION_LOCKED',
 ] as const;
