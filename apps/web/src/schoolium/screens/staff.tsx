@@ -79,6 +79,15 @@ export function StaffScreen({ openId }: { openId?: string }) {
   const { toast, showToast } = useToast();
   const mobile = useIsMobile();
   const mayManage = can("staff.manage");
+  /*
+   * Рельс и таблицы видят ТОЛЬКО завуч, модератор и администратор (правка
+   * владельца 2026-09-06). Это ведущие школы: завуч ставит нормы, модератор
+   * ведёт предметы и педагогов, администратор — оба. Учредителю, директору,
+   * заму по ВР и педагогу штатное расписание школы не показывается вовсе —
+   * недоступное не «серое», а отсутствует (AR-69), поэтому нет и полосы
+   * рельса, а не пустая панель без строк.
+   */
+  const maySeeWorkforce = can("school.oversee") || can("school.manage") || can("school.admin");
 
   if (state.status === "loading") return <Skeletons count={6} />;
   if (state.status === "error") return <ErrorState message={state.message} onRetry={reload} />;
@@ -118,10 +127,10 @@ export function StaffScreen({ openId }: { openId?: string }) {
         ) : null}
       </div>
 
-      {/* AR-212: рельс справа стоит всегда, таблица занимает место карточек. */}
-      <div className="sch-staff-layout">
+      {/* AR-212: рельс справа стоит у ведущих школы, таблица занимает место карточек. */}
+      <div className={maySeeWorkforce ? "sch-staff-layout" : "sch-staff-layout sch-staff-layout--norail"}>
         <div className="sch-staff-main">
-          {view ? (
+          {view && maySeeWorkforce ? (
             <>
               <h2 className="sch-section-title">{workforceTitle(view)}</h2>
               <WorkforceTables
@@ -216,7 +225,7 @@ export function StaffScreen({ openId }: { openId?: string }) {
             </div>
           )}
         </div>
-        <WorkforceRail view={view} onOpen={setView} onClose={() => setView(null)} />
+        {maySeeWorkforce ? <WorkforceRail view={view} onOpen={setView} onClose={() => setView(null)} /> : null}
       </div>
 
       {open ? <StaffCardModal card={open} subjects={subjState} onClose={() => navigate("/staff")} onChanged={reload} /> : null}

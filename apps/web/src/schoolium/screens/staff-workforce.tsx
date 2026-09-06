@@ -37,7 +37,7 @@ import {
 } from "@edustore/shared";
 import { api, SchoolApiError } from "../api";
 import { Button, EmptyState, ErrorState, Skeletons } from "../ui";
-import { Icon } from "../icons";
+import { Icon, type IconName } from "../icons";
 import "./staff-workforce.css";
 
 /** Что открыто вместо карточек. `null` — карточки. */
@@ -50,6 +50,22 @@ export function workforceTitle(view: NonNullable<WorkforceView>): string {
 }
 
 // ─────────────────────────── правый рельс ───────────────────────────
+
+/**
+ * Иконка ступени (правка владельца 2026-09-06: «значки младшей, средней и
+ * старшей школ должны идти на одной вертикали со значком штатного расписания
+ * и почасовой нагрузки»). Вложенность ступеней в «Штатное расписание» больше
+ * не показывается отступом — её несёт сама иконка и приглушённая подпись;
+ * шеврон-заглушка у подстрок снят: три строки без своего значка на общей
+ * вертикали читались бы как одна и та же кнопка.
+ *
+ * Ряд читается возрастом: яблоко → книга → шапочка выпускника.
+ */
+const LEVEL_ICONS: Record<SchoolLevelKey, IconName> = {
+  primary: "apple",
+  middle: "subjects",
+  senior: "student",
+};
 
 /**
  * Тонкий рельс справа: 44px в покое, раскрывается наведением и — для
@@ -128,6 +144,7 @@ export function WorkforceRail({
                 <RailRow
                   key={l.key}
                   testId={`S-30.rail.level.${l.key}`}
+                  icon={LEVEL_ICONS[l.key]}
                   label={l.title}
                   sub
                   active={view?.kind === "staffing" && view.level === l.key}
@@ -159,7 +176,7 @@ function RailRow({
   onClick,
 }: {
   testId: string;
-  icon?: "checklist" | "activity";
+  icon: IconName;
   label: string;
   active?: boolean;
   expanded?: boolean;
@@ -179,7 +196,7 @@ function RailRow({
       onClick={onClick}
     >
       <span className="sch-rail-mark" aria-hidden="true">
-        <Icon name={icon ?? "chevronRight"} size={18} />
+        <Icon name={icon} size={18} />
       </span>
       <span className="sch-rail-label">{label}</span>
       {expanded !== undefined ? (
@@ -449,7 +466,7 @@ function StaffingTable({
                     <td>
                       {canBind ? (
                         <select
-                          className="sch-input sch-wf-select"
+                          className={r.teacherId ? "sch-input sch-wf-select" : "sch-input sch-wf-select sch-wf-select--empty"}
                           data-testid="S-30.staffing.select.teacher"
                           data-subject-id={r.subjectId}
                           aria-label={`Преподаватель: ${r.subjectName}, ${c.label} класс`}
@@ -575,10 +592,15 @@ function HoursCell({
     }
   }, [row.hoursPerWeek]);
 
+  // Не правится — и не притворяется полем: рамки нет, единица подписью та же,
+  // чтобы столбец читался одинаково у обеих ролей.
   if (!editable)
     return (
-      <span className="sch-wf-hours-ro" title={row.bindingId ? undefined : "Часы ставятся после назначения педагога"}>
-        {row.hoursPerWeek || "—"}
+      <span className="sch-wf-hoursbox sch-wf-hoursbox--ro" title={row.bindingId ? undefined : "Часы ставятся после назначения педагога"}>
+        <span className="sch-wf-hours-ro">{row.hoursPerWeek || "—"}</span>
+        <span className="sch-wf-unit" aria-hidden="true">
+          ч
+        </span>
       </span>
     );
 
@@ -588,21 +610,34 @@ function HoursCell({
     if (weekly !== row.hoursPerWeek) onSave(row.bindingId as string, weekly);
   };
 
+  /*
+   * Поле в рамке с единицей «ч» (правка владельца 2026-09-06: «выдели окошки с
+   * цифрами, чтобы пользователь понимал, что туда можно вложить данные»).
+   * Рамку и подложку несёт ОБЁРТКА, а не сам `input`: единица должна стоять
+   * внутри той же рамки, что и число, иначе она читается как отдельная колонка.
+   * Поле внутри — без своей рамки и фона, фокус подсвечивает обёртку целиком.
+   */
   return (
-    <input
-      className="sch-input sch-wf-hours"
-      data-testid="S-30.staffing.input.hours"
-      data-binding-id={row.bindingId ?? ""}
-      inputMode="numeric"
-      disabled={busy}
-      aria-label={`Часов в неделю: ${row.subjectName}`}
-      value={text}
-      onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-    />
+    <span className="sch-wf-hoursbox">
+      <input
+        className="sch-wf-hours"
+        data-testid="S-30.staffing.input.hours"
+        data-binding-id={row.bindingId ?? ""}
+        inputMode="numeric"
+        disabled={busy}
+        placeholder="0"
+        aria-label={`Часов в неделю: ${row.subjectName}`}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+      />
+      <span className="sch-wf-unit" aria-hidden="true">
+        ч
+      </span>
+    </span>
   );
 }
 

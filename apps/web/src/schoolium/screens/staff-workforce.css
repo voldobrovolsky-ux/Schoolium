@@ -21,6 +21,10 @@
   align-items: start;
 }
 
+/* Роли без рельса (AR-212) не платят за него полосой справа: карточки стоят
+   на всю ширину, как до пакета. */
+.sch-staff-layout--norail { grid-template-columns: minmax(0, 1fr); gap: 0; }
+
 .sch-staff-main { min-width: 0; }
 
 /* ─────────────────────────── рельс ─────────────────────────── */
@@ -134,7 +138,11 @@
 .sch-rail-row--active { background: var(--c-brand-violet-100); color: var(--c-brand-violet-700); font-weight: var(--fw-medium); }
 
 .sch-rail-mark { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: 0 0 20px; }
+/* Ступень отличается от своей ветки НЕ отступом (значки стоят на одной
+   вертикали — правка владельца 2026-09-06), а тоном значка и весом подписи. */
+.sch-rail-row--sub { color: var(--c-ink-secondary); }
 .sch-rail-row--sub .sch-rail-mark { color: var(--c-ink-muted); }
+.sch-rail-row--sub.sch-rail-row--active .sch-rail-mark { color: inherit; }
 
 /* Подпись прячется в свёрнутом рельсе шириной, а не `display: none`: строка
    остаётся кнопкой и остаётся достижимой с клавиатуры (фокус её раскрывает). */
@@ -155,7 +163,7 @@
 [data-anim="off"] .sch-rail-label { transition: none; }
 
 .sch-rail-chev { display: inline-flex; flex: 0 0 auto; color: var(--c-ink-muted); }
-.sch-rail-sub { display: flex; flex-direction: column; gap: 2px; padding-left: var(--sp-12); }
+.sch-rail-sub { display: flex; flex-direction: column; gap: 2px; }
 
 /* ─────────────────────────── таблицы ─────────────────────────── */
 
@@ -170,7 +178,7 @@
 .sch-table--wf tbody tr:hover td { box-shadow: none; }
 
 .sch-wf-col-subject { width: 42%; }
-.sch-wf-col-hours { width: 140px; }
+.sch-wf-col-hours { width: 132px; }
 .sch-wf-col-act { width: 52px; }
 .sch-wf-col-fio { width: 220px; }
 .sch-wf-col-total { width: 88px; }
@@ -193,9 +201,68 @@
 .sch-wf-classname { font-weight: var(--fw-semibold); }
 .sch-wf-classmeta { color: var(--c-ink-secondary); font-weight: var(--fw-regular); font-variant-numeric: tabular-nums; }
 
-.sch-wf-hours { width: 84px; text-align: right; font-variant-numeric: tabular-nums; }
-.sch-wf-hours-ro { display: inline-block; min-width: 84px; font-variant-numeric: tabular-nums; }
-.sch-wf-select { width: 100%; max-width: 320px; }
+/*
+ * Окошко часов (правка владельца 2026-09-06): рамку, подложку и фокус несёт
+ * ОБЁРТКА, а единица «ч» стоит внутри неё — иначе она читается как соседняя
+ * колонка, а не как часть значения. Само поле внутри — без рамки и фона.
+ */
+.sch-wf-hoursbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  height: var(--ctl-h);
+  width: 92px;
+  padding: 0 var(--sp-8);
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-surface-canvas);
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+[data-anim="off"] .sch-wf-hoursbox { transition: none; }
+
+.sch-wf-hoursbox:hover { border-color: var(--c-brand-violet-500); background: var(--c-surface-card); }
+/* Фокус подсвечивает окошко целиком: кольцо на самом `input` внутри рамки
+   рисовало бы вторую рамку внутри первой. */
+.sch-wf-hoursbox:focus-within {
+  border-color: var(--c-border-focus);
+  background: var(--c-surface-card);
+  box-shadow: 0 0 0 3px var(--c-brand-violet-100);
+}
+
+.sch-wf-hours {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-ink-primary);
+  font-family: inherit;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.sch-wf-hours:focus { outline: none; }
+.sch-wf-hours::placeholder { color: var(--c-ink-muted); font-weight: var(--fw-regular); }
+.sch-wf-hours:disabled { color: var(--c-state-disabled-ink); }
+.sch-wf-unit { flex: 0 0 auto; color: var(--c-ink-muted); font-size: var(--fs-sm); }
+
+/* Читаемое значение роли без права правки: то же место и та же единица, но
+   без рамки — поле, в которое нельзя писать, не должно выглядеть полем. */
+.sch-wf-hoursbox--ro { border-color: transparent; background: transparent; }
+.sch-wf-hoursbox--ro:hover { border-color: transparent; background: transparent; }
+.sch-wf-hours-ro { flex: 1 1 auto; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Селект педагога — такое же явное поле: рамка сильнее дефолтной, чтобы
+   столбец читался как «сюда можно нажать», а не как подпись. */
+.sch-wf-select { width: 100%; max-width: 320px; border-color: var(--c-border-strong); }
+.sch-wf-select:hover { border-color: var(--c-brand-violet-500); }
+/* Ячейка без педагога — та же рамка приглушённым текстом: пустое место не
+   объясняет, что выбор ещё не сделан. */
+.sch-wf-select--empty { color: var(--c-ink-muted); }
 
 .sch-wf-add td { background: var(--c-surface-canvas); }
 .sch-wf-addform { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
@@ -231,9 +298,11 @@
 /* ─────────────────────────── телефон ─────────────────────────── */
 
 /*
- * На телефоне наведения нет, и рельс шириной в палец бесполезен: полоса
- * уезжает под контент, а панель разворачивается на всю ширину нажатием на
- * корешок (`--pinned`). Мишень корешка — 44px (§4).
+ * На телефоне наведения нет, и тонкой полосы там не бывает: панель стоит
+ * ВВЕРХУ раздела «Персонал» во всю ширину и сразу раскрытой (правка владельца
+ * 2026-09-06). Корешок там не нужен — сворачивать нечего, панель и так
+ * распахнута; вместе с разделом она и пропадает, потому что живёт внутри его
+ * экрана, а не в оболочке.
  */
 @media (max-width: 767px) {
   .sch-staff-layout { grid-template-columns: minmax(0, 1fr); }
@@ -245,10 +314,16 @@
   .sch-rail:hover .sch-rail-panel,
   .sch-rail--pinned .sch-rail-panel { width: 100%; }
   .sch-rail-label { opacity: 1; }
-  .sch-rail-spine, .sch-rail-close { width: var(--tap-min); height: var(--tap-min); }
+  .sch-rail-close { width: var(--tap-min); height: var(--tap-min); }
   .sch-rail-row { min-height: var(--tap-min); }
-  /* Свёрнутый рельс на телефоне — только шапка со списком разделов: список
-     скрывается, пока панель не прижата нажатием. */
-  .sch-rail:not(.sch-rail--pinned) .sch-rail-list { display: none; }
+  /* Корешок — жест десктопа; на телефоне он прячет то, что просили показать. */
+  .sch-rail-spine { display: none; }
+  .sch-rail--table:has(:focus-visible) .sch-rail-spine { display: none; }
+  /* Шапка нужна только ради крестика: без открытой таблицы она пустая полоса. */
+  .sch-rail:not(.sch-rail--table) .sch-rail-head { display: none; }
   .sch-wf-col-fio { width: auto; }
+  /* Окошко часов на телефоне — мишень 48 (`ctl-h-mobile`), шрифт 16, иначе
+     iOS приближает страницу на фокусе (AR-198). */
+  .sch-wf-hoursbox { height: var(--ctl-h-mobile); width: 104px; }
+  .sch-wf-hours { font-size: var(--fs-lg); }
 }
