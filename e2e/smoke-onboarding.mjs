@@ -734,12 +734,14 @@ async function main() {
     // Модератор видит активацию на своей карточке — поллинг раз в 2 секунды (AR-87).
     await page.waitForSelector('[data-testid="S-31.btn.loginCode"]', { timeout: 20_000 });
     await hasAll(page, ['S-31.btn.loginCode', 'S-31.btn.addRole']);
-    // Подмену «удалить» → «деактивировать» решает СЕРВЕР (AR-89): на экране
-    // ровно одна из двух кнопок, и обе сразу — дефект.
+    // Разрушающих операций над человеком ровно две, и стоят они рядом (AR-212):
+    // «Отозвать активацию» (данные целы, право снято) и «Удалить профиль»
+    // (данные стёрты). Прежняя подмена «удалить» ↔ «деактивировать» снята.
     const del = await page.locator('[data-testid="S-31.btn.deleteStaff"]').count();
-    const deact = await page.locator('[data-testid="S-31.btn.deactivateStaff"]').count();
-    if (del + deact === 1) console.log(`    ✅ ровно одна кнопка из пары «удалить/деактивировать» (${del ? 'удалить' : 'деактивировать'})`);
-    else { console.error(`    ❌ кнопок пары «удалить/деактивировать» на экране ${del + deact}, должна быть одна`); failures++; }
+    const revoke = await page.locator('[data-testid="S-31.btn.revokeActivation"]').count();
+    const gone = await page.locator('[data-testid="S-31.btn.deactivateStaff"]').count();
+    if (del === 1 && revoke === 1 && gone === 0) console.log('    ✅ пара «Отозвать активацию» + «Удалить профиль» на экране, кнопки «Деактивировать» больше нет (AR-212)');
+    else { console.error(`    ❌ группа «Доступ»: удалить=${del}, отозвать=${revoke}, деактивировать=${gone}; ждали 1/1/0`); failures++; }
     await shot(page, 'S-31-activated');
 
     // Плашки учётки (AR-203): ФИО, логин, маска пароля; ФИО и логин правятся
@@ -801,8 +803,7 @@ async function main() {
     // M-13 — подтверждение разрушающего действия: открыть и ОТМЕНИТЬ. Реестр
     // требует показать модалку, а не удалить сотрудника: удалённый педагог
     // унёс бы с собой привязку к предмету и всё, что после неё.
-    const destructive = del ? 'S-31.btn.deleteStaff' : 'S-31.btn.deactivateStaff';
-    await click(page, destructive);
+    await click(page, 'S-31.btn.deleteStaff');
     await page.waitForSelector('[data-testid="M-13"]', { timeout: 20_000 });
     await modalOpen(page, 'M-13');
     await shot(page, 'M-13-confirm');
@@ -811,7 +812,7 @@ async function main() {
 
     await click(page, 'S-31.btn.close');
     await modalClosed(page, 'M-06');
-    console.log('    · `S-31.badge.inactive` требует деактивированной карточки — вне пути онбординга, доказан G-52');
+    console.log('    · `S-31.badge.inactive` требует карточки с отозванной активацией — вне пути онбординга, доказан G-52');
 
     // ── S-21/S-22 · карточка предмета и QR привязки ──
     console.log('▶ S-21/S-22 · привязка педагога');

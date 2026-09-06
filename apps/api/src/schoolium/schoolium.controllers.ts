@@ -516,7 +516,12 @@ export class StaffController {
     return this.svc.setPassword(id, body ?? {}, actorOf(req));
   }
 
-  /** `S-31.btn.revokeActivation` (AR-153): «просканировал не тот». */
+  /**
+   * §11 строка 29 · `S-31.btn.revokeActivation` — «Отозвать активацию»
+   * (AR-212): данные сохраняются, право взаимодействовать со школой снимается;
+   * обратная — `reactivate`. Вытесняет `POST :id/deactivate`: две операции,
+   * которые человек не мог различить на экране, сведены в одну.
+   */
   @RequirePermission('staff.manage')
   @Post(':id/revoke-activation')
   revokeActivation(@Req() req: Req0, @Param('id') id: string) {
@@ -552,21 +557,14 @@ export class StaffController {
     return this.svc.removeRole(id, role, actorOf(req));
   }
 
-  /** §11 строка 29 · `S-31.btn.deactivateStaff`. */
-  @RequirePermission('staff.manage')
-  @Post(':id/deactivate')
-  deactivate(@Req() req: Req0, @Param('id') id: string) {
-    return this.svc.deactivate(id, actorOf(req));
-  }
-
-  /** §11 строка 30 · `S-31.btn.reactivateStaff`. */
+  /** §11 строка 30 · `S-31.btn.reactivateStaff` — «Вернуть доступ» (AR-212). */
   @RequirePermission('staff.manage')
   @Post(':id/reactivate')
   reactivate(@Req() req: Req0, @Param('id') id: string) {
     return this.svc.reactivate(id, actorOf(req));
   }
 
-  /** §11 строка 31 · `S-31.btn.deleteStaff`. */
+  /** §11 строка 31 · `S-31.btn.deleteStaff` — «Удалить профиль» (AR-212): стирание физически, отказ только `LAST_MODERATOR`. */
   @RequirePermission('staff.manage')
   @Delete(':id')
   remove(@Req() req: Req0, @Param('id') id: string) {

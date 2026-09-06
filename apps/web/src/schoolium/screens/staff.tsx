@@ -18,6 +18,15 @@
  * код с таймером, ссылка входа с параметрами срока и числа открытий — AR-204),
  * роли, предметы педагога, активность, профиль, доступ. Читают все штатные
  * роли (`staff.read`), действуют модератор и администратор (`staff.manage`).
+ *
+ * Группа «Доступ» (AR-212): разрушающих операций над человеком две, и стоят они
+ * рядом, потому что различает их объём потери данных, а не история сотрудника.
+ * «Отозвать активацию» сохраняет все данные и снимает право взаимодействовать со
+ * школой (обратна кнопке «Вернуть доступ»), «Удалить профиль» стирает данные
+ * физически и обратной не имеет. Прежняя пара «Отозвать активацию» +
+ * «Деактивировать» выглядела на экране одинаково, а различал её невидимый флаг
+ * членства — правки владельца 2026-09-06. Третья кнопка группы, «Закрыть
+ * активные сессии», прав не трогает: человек входит заново теми же кредами.
  */
 import { useEffect, useId, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
@@ -737,7 +746,7 @@ function StaffCardModal({
   const [registeredName, setRegisteredName] = useState<string | null>(null);
   const [loginCode, setLoginCode] = useState<{ code: string; expiresAt: string } | null>(null);
   const [addRole, setAddRole] = useState<DOMRect | null>(null);
-  const [confirm, setConfirm] = useState<null | "delete" | "deactivate">(null);
+  const [confirm, setConfirm] = useState<null | "delete" | "revoke">(null);
   const [editing, setEditing] = useState(false);
   const [pwdAnchor, setPwdAnchor] = useState<DOMRect | null>(null);
   const { toast, showToast } = useToast();
@@ -753,7 +762,9 @@ function StaffCardModal({
   // QR активации выпускается при открытии ЗАПОЛНЕННОЙ карточки (AR-161);
   // закрытие карточки его гасит. У карточки без учётки QR не существует.
   useEffect(() => {
-    if (cur.registered || !cur.filled || !mayManage) return;
+    // У карточки с отозванной активацией QR не выпускается: сервер откажет
+    // `ACCESS_REVOKED`, и правильно — сначала «Вернуть доступ» (AR-212).
+    if (cur.registered || !cur.filled || cur.deactivated || !mayManage) return;
     api
       .activationToken(cur.id)
       .then((t) => {
@@ -761,7 +772,7 @@ function StaffCardModal({
         setFullName(t.fullName ?? null);
       })
       .catch(() => undefined);
-  }, [cur.id, cur.registered, cur.filled, mayManage]);
+  }, [cur.id, cur.registered, cur.filled, cur.deactivated, mayManage]);
 
   usePolling(
     async () => {
@@ -776,12 +787,12 @@ function StaffCardModal({
       }
     },
     ACCESS_PARAMS.pollIntervalMs,
-    cur.filled && !cur.registered && mayManage && status === "waiting",
+    cur.filled && !cur.registered && !cur.deactivated && mayManage && status === "waiting",
   );
 
   const close = () => {
     // `S-31.btn.close` гасит QR: код не переживает встречу (AR-76).
-    if (cur.filled && !cur.registered && mayManage) void api.closeCard(cur.id).catch(() => undefined);
+    if (cur.filled && !cur.registered && !cur.deactivated && mayManage) void api.closeCard(cur.id).catch(() => undefined);
     onClose();
   };
 
@@ -884,7 +895,12 @@ function StaffCardModal({
             {mayManage ? (
               <section className="sch-m06-group">
                 <h3 className="sch-section-title">Вход</h3>
-                {!cur.registered ? (
+                {/* У карточки с отозванной активацией маршрутов входа нет вовсе:
+                    ни QR, ни кода — сначала «Вернуть доступ» (AR-212). */}
+                {cur.deactivated ? (
+                  <p className="sch-muted">Доступ закрыт: активация отозвана. Маршруты входа откроет «Вернуть доступ» в группе «Доступ»</p>
+                ) : null}
+                {!cur.registered && !cur.deactivated ? (
                   <div className="sch-qr">
                     {/* Именной QR (AR-161): над кодом — ФИО, сканирует названный человек. */}
                     <h3 data-testid="S-31.qr.fullName" style={{ margin: 0 }}>
@@ -933,9 +949,14 @@ function StaffCardModal({
                   </div>
                 ) : null}
                 {/* Ссылка входа с параметрами (AR-204): у заполненной и у
-                    активированной карточки; выдают модератор и администратор. */}
-                <LoginLinkControls busy={loginLink.busy} onIssue={loginLink.issue} />
-                {loginLink.link ? <LoginLinkBox link={loginLink.link} /> : null}
+                    активированной карточки; выдают модератор и администратор.
+                    У карточки с отозванной активацией маршрута входа нет (AR-212). */}
+                {cur.deactivated ? null : (
+                  <>
+                    <LoginLinkControls busy={loginLink.busy} onIssue={loginLink.issue} />
+                    {loginLink.link ? <LoginLinkBox link={loginLink.link} /> : null}
+                  </>
+                )}
               </section>
             ) : null}
 
@@ -989,37 +1010,24 @@ function StaffCardModal({
                       Вернуть доступ
                     </Button>
                   ) : null}
+                  {/* Выход из устройств — не потеря прав: человек входит заново
+                      теми же кредами. Этим и отличается от отзыва (AR-212). */}
                   {cur.registered ? (
-                    <>
-                      <Button
-                        kind="danger"
-                        testId="S-31.btn.revokeSessions"
-                        onClick={() => act(() => api.revokeSessions(cur.id))}
-                      >
-                        Закрыть активные сессии
-                      </Button>
-                      {/* «Просканировал не тот» (AR-153): сессии чужого устройства
-                          закрываются, карточка возвращается в «Не авторизованные». */}
-                      <Button
-                        kind="danger"
-                        testId="S-31.btn.revokeActivation"
-                        onClick={() => act(() => api.revokeStaffActivation(cur.id))}
-                      >
-                        Отозвать активацию
-                      </Button>
-                    </>
-                  ) : null}
-                  {/* Подмену решает СЕРВЕР: ровно одна кнопка из двух (AR-89);
-                      у деактивированной карточки вместо них «Вернуть доступ». */}
-                  {cur.deactivated ? null : cur.hasHistory ? (
-                    <Button kind="danger" testId="S-31.btn.deactivateStaff" onClick={() => setConfirm("deactivate")}>
-                      Деактивировать
+                    <Button kind="danger" testId="S-31.btn.revokeSessions" onClick={() => act(() => api.revokeSessions(cur.id))}>
+                      Закрыть активные сессии
                     </Button>
-                  ) : (
-                    <Button kind="danger" testId="S-31.btn.deleteStaff" onClick={() => setConfirm("delete")}>
-                      Удалить сотрудника
+                  ) : null}
+                  {/* Разрушающих операций над человеком ровно две, и различает их
+                      объём потери данных, а не история сотрудника (AR-212):
+                      отзыв сохраняет всё и обратим, удаление стирает и нет. */}
+                  {cur.deactivated ? null : (
+                    <Button kind="danger" testId="S-31.btn.revokeActivation" onClick={() => setConfirm("revoke")}>
+                      Отозвать активацию
                     </Button>
                   )}
+                  <Button kind="danger" testId="S-31.btn.deleteStaff" onClick={() => setConfirm("delete")}>
+                    Удалить профиль
+                  </Button>
                 </div>
               </section>
             ) : null}
@@ -1100,20 +1108,23 @@ function StaffCardModal({
                       setConfirm(null);
                     }
                   } else {
-                    await act(() => api.deactivateStaff(cur.id));
+                    await act(() => api.revokeStaffActivation(cur.id));
                     setConfirm(null);
                   }
                 }}
               >
-                {confirm === "delete" ? "Удалить" : "Деактивировать"}
+                {confirm === "delete" ? "Удалить профиль" : "Отозвать активацию"}
               </Button>
             </div>
           }
         >
+          {/* Объём потери называется действительный (AR-105): у удаления —
+              что стирается и что остаётся, у отзыва — чем он обратим. */}
           <p>
             {confirm === "delete"
-              ? `Удалить ${cur.name}? Обратной операции нет.`
-              : `Деактивировать ${cur.name}? Привязки к предметам снимутся, отметки останутся.`}
+              ? `Удалить профиль: ${cur.name}. Учётка, вход и привязки к предметам стираются без возможности восстановления.` +
+                (cur.hasHistory ? " Выставленные им отметки остаются в журнале." : "")
+              : `Отозвать активацию: ${cur.name}. Доступ в школу закроется, привязки к предметам снимутся. Данные сохранятся — доступ возвращается кнопкой «Вернуть доступ».`}
           </p>
         </Modal>
       ) : null}

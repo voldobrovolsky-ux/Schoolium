@@ -210,6 +210,8 @@ export const api = {
   // задаётся (пусто — сервер генерирует) и показывается один раз.
   updateStaffAccount: (id: string, dto: UpdateStaffAccountDto) => call<StaffCardDto>("PUT", `${V1}/staff/${id}/account`, dto),
   setStaffPassword: (id: string, dto: SetStaffPasswordDto) => call<CredentialsDto>("POST", `${V1}/staff/${id}/password`, dto),
+  // AR-212: «Отозвать активацию» — данные сохраняются, право взаимодействовать
+  // со школой снимается; обратная — `reactivateStaff` («Вернуть доступ»).
   revokeStaffActivation: (id: string) => call<StaffCardDto>("POST", `${V1}/staff/${id}/revoke-activation`),
   usernameFree: (u: string) => call<{ free: boolean }>("GET", `${V1}/staff/username-free?u=${encodeURIComponent(u)}`),
   activationToken: (id: string) => call<ActivationTokenDto>("POST", `${V1}/staff/${id}/activation-token`),
@@ -217,8 +219,8 @@ export const api = {
   closeCard: (id: string) => call<{ ok: boolean }>("POST", `${V1}/staff/${id}/close`),
   addRole: (id: string, role: SchoolRole) => call<StaffCardDto>("POST", `${V1}/staff/${id}/roles`, { role }),
   removeRole: (id: string, role: SchoolRole) => call<StaffCardDto>("DELETE", `${V1}/staff/${id}/roles/${role}`),
-  deactivateStaff: (id: string) => call<StaffCardDto>("POST", `${V1}/staff/${id}/deactivate`),
   reactivateStaff: (id: string) => call<StaffCardDto>("POST", `${V1}/staff/${id}/reactivate`),
+  // AR-212: «Удалить профиль» — стирание данных человека, обратной нет.
   deleteStaff: (id: string) => call<{ ok: boolean }>("DELETE", `${V1}/staff/${id}`),
   loginCode: (id: string) => call<{ code: string; expiresAt: string }>("POST", `${V1}/staff/${id}/login-code`),
   revokeSessions: (id: string) => call<{ ok: boolean; revoked: number }>("POST", `${V1}/staff/${id}/sessions/revoke`),

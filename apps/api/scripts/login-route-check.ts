@@ -101,20 +101,20 @@ async function main(): Promise<void> {
   }
   check(reuseCode === 'LOGIN_CODE_INVALID', `повторный ввод того же кода → ${reuseCode}: код одноразов`);
 
-  // ─── клетка 5: деактивация закрывает ВСЕ маршруты немедленно ───
+  // ─── клетка 5: отзыв активации закрывает ВСЕ маршруты немедленно (AR-212) ───
   const foreignCard = await sys(() => b.prisma.staffCard.findFirst({ where: { userId: foreign.userId } }));
-  await inSchool(school.workspaceId, () => staff.deactivate(foreignCard!.id, school.moderator));
+  await inSchool(school.workspaceId, () => staff.revokeActivation(foreignCard!.id, school.moderator));
   await drain();
   check((await sessions.read(byCode.session.token)) === null,
-    'деактивация отозвала живую сессию немедленно — доступ уволенного не живёт 90 дней (AR-92)');
+    'отзыв активации отозвал живую сессию немедленно — доступ уволенного не живёт 90 дней (AR-92, AR-212)');
   let revoked = 'нет отказа';
   try {
     const c2 = await inSchool(school.workspaceId, () => staff.issueLoginCode(foreignCard!.id));
-    await access.verifyLoginCode(c2.code, 'попытка после деактивации');
+    await access.verifyLoginCode(c2.code, 'попытка после отзыва активации');
   } catch (e) {
     revoked = (e as { response?: { code?: string } }).response?.code ?? 'ошибка';
   }
-  check(revoked === 'ACCESS_REVOKED', `деактивированному новый маршрут не выдаётся → ${revoked}`);
+  check(revoked === 'ACCESS_REVOKED', `человеку с отозванной активацией новый маршрут не выдаётся → ${revoked}`);
 
   // ─── клетка 6: адресное завершение убивает ровно одну сессию ───
   const s1 = await sessions.issue({ userId: own.userId, workspaceId: school.workspaceId, roles: ['teacher'], deviceHint: 'телефон', via: 'unknown' });
