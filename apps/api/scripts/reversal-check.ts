@@ -1,10 +1,10 @@
 /**
- * G-43 (AR-212, AR-89, AR-90, AR-78, AR-102, AR-182, AR-205) — **обратимость
+ * G-43 (AR-213, AR-89, AR-90, AR-78, AR-102, AR-182, AR-205) — **обратимость
  * операций и каскад разрушения.**
  *
  *   · у КАЖДОЙ операции реестра есть обратная либо записанная причина её
  *     отсутствия; необратимых пять, и каждая необратима по построению;
- *   · над сотрудником две разрушающие операции (AR-212), и различает их объём
+ *   · над сотрудником две разрушающие операции (AR-213), и различает их объём
  *     потери данных: отзыв активации сохраняет всё и обратим «Вернуть доступ»,
  *     удаление профиля стирает данные человека и проходит В ТОМ ЧИСЛЕ у
  *     сотрудника с историей — его отметки остаются записью школы;
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
     check(reg.some((r) => r.op === need), `разрушающая операция «${need}» стоит в реестре СВОЕЙ строкой (AR-105)`);
   }
 
-  // ─── две разрушающие операции над сотрудником: каскад и обратимость (AR-212) ───
+  // ─── две разрушающие операции над сотрудником: каскад и обратимость (AR-213) ───
   const s = await readySchool(b, 'Школа персонала');
   await ensurePastLesson(b, s.workspaceId);
   await inSchool(s.workspaceId, async () => {
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     await staff.revokeActivation(s.teacher.cardId, s.moderator);
     await drain();
     const after = await staff.get(s.teacher.cardId);
-    check(after.deactivated, 'отзыв активации закрыл доступ: право взаимодействовать со школой снято (AR-212)');
+    check(after.deactivated, 'отзыв активации закрыл доступ: право взаимодействовать со школой снято (AR-213)');
     check(!after.registered, 'карточка вернулась в «Не авторизованные» — тем же движением, а не второй кнопкой');
     check(after.name === card.name && after.username === card.username,
       'ФИО и логин на месте: отзыв активации не трогает ни одной записи о человеке');
@@ -180,17 +180,17 @@ async function main(): Promise<void> {
     await staff.remove(dep.card.id, s.moderator);
     await drain();
     check((await b.prisma.staffCard.count({ where: { id: dep.card.id } })) === 0,
-      'удаление профиля стирает и карточку — пустого слота-призрака, занимающего должность, не остаётся (AR-212)');
+      'удаление профиля стирает и карточку — пустого слота-призрака, занимающего должность, не остаётся (AR-213)');
     const refill = await staff.addCard({ role: 'deputy_academic', lastName: 'Соловьёва', firstName: 'Ирина' });
     check(refill.card.roles.includes('deputy_academic'),
-      'должность освободилась вместе с профилем — новый завуч заводится тут же (AR-212, AR-205)');
+      'должность освободилась вместе с профилем — новый завуч заводится тут же (AR-213, AR-205)');
 
     // ─── обратный переход: возврат доступа тоже перепроверяет лимит (AR-205) ───
     await staff.revokeActivation(refill.card.id, s.moderator);
     await drain();
     const depB = await staff.addCard({ role: 'deputy_academic', lastName: 'Пятницкая', firstName: 'Анна' });
     check(depB.card.roles.includes('deputy_academic'),
-      'отзыв активации освобождает лимит — новый завуч заводится (AR-205, AR-212)');
+      'отзыв активации освобождает лимит — новый завуч заводится (AR-205, AR-213)');
     await refuses(() => staff.reactivate(refill.card.id, s.moderator), 'ROLE_LIMIT_REACHED',
       'возврат доступа при занятой роли отклонён — путь «отозвать → завести → вернуть» двух завучей не даёт');
 
@@ -202,7 +202,7 @@ async function main(): Promise<void> {
     check((await b.prisma.membership.count({ where: { userId: fresh.userId } })) === 0,
       'сотрудник без привязок и без отметок удалён — обратной операции у этого нет по построению');
 
-    // ─── и сотрудник С ИСТОРИЕЙ удаляется тоже (AR-212 снял STAFF_HAS_HISTORY) ───
+    // ─── и сотрудник С ИСТОРИЕЙ удаляется тоже (AR-213 снял STAFF_HAS_HISTORY) ───
     const marksKept = await b.prisma.mark.count();
     check((await staff.get(s.teacher.cardId)).hasHistory, 'у педагога с отметками история есть — и она больше не запрещает удаление');
     await staff.remove(s.teacher.cardId, s.moderator);
@@ -210,9 +210,9 @@ async function main(): Promise<void> {
     check((await b.prisma.membership.count({ where: { userId: s.teacher.userId } })) === 0,
       'членство педагога с историей стёрто — человека в школе больше нет');
     check((await b.prisma.user.count({ where: { id: s.teacher.userId } })) === 0,
-      'учётка стёрта физически: это было последнее членство человека (AR-212)');
+      'учётка стёрта физически: это было последнее членство человека (AR-213)');
     check((await b.prisma.mark.count()) === marksKept,
-      'выставленные им отметки остались в журнале — запись школы, а не данные человека (AR-212)');
+      'выставленные им отметки остались в журнале — запись школы, а не данные человека (AR-213)');
   });
 
   await b.close();

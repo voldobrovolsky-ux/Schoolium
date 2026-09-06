@@ -1,5 +1,5 @@
 /**
- * G-89 (AR-212, AR-2) — **стирание профиля перечислением.**
+ * G-89 (AR-213, AR-2) — **стирание профиля перечислением.**
  *
  * «Удалить профиль» обещает человеку, что его данных в системе не осталось.
  * Обещание такого рода нельзя доказать разглядыванием кода: человек живёт в
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
   const sessions = b.get(SchoolSessionService);
   const drain = () => TenantContext.runAsSystem(() => b.outbox.drain());
 
-  console.log('G-89 · стирание профиля перечислением (AR-212)\n');
+  console.log('G-89 · стирание профиля перечислением (AR-213)\n');
 
   // ─── 1. статически: каждая колонка-идентификатор отнесена к списку ───
   const columns = identityColumns();
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
   );
   await drain();
   check((await TenantContext.runAsSystem(() => b.prisma.user.count({ where: { id: userId } }))) === 0,
-    'последнее членство ушло — учётка стёрта физически: ФИО, логин и хэш пароля (AR-212)');
+    'последнее членство ушло — учётка стёрта физически: ФИО, логин и хэш пароля (AR-213)');
   check((await TenantContext.runAsSystem(() => b.prisma.membership.count({ where: { userId } }))) === 0,
     'членств не осталось ни в одной школе');
   for (const c of ACCOUNT_WIDE) check((await rows(c, userId)) === 0, `стёрто вместе с учёткой: ${c} — ${ERASED[c]}`);

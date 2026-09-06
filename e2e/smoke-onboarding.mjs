@@ -734,13 +734,13 @@ async function main() {
     // Модератор видит активацию на своей карточке — поллинг раз в 2 секунды (AR-87).
     await page.waitForSelector('[data-testid="S-31.btn.loginCode"]', { timeout: 20_000 });
     await hasAll(page, ['S-31.btn.loginCode', 'S-31.btn.addRole']);
-    // Разрушающих операций над человеком ровно две, и стоят они рядом (AR-212):
+    // Разрушающих операций над человеком ровно две, и стоят они рядом (AR-213):
     // «Отозвать активацию» (данные целы, право снято) и «Удалить профиль»
     // (данные стёрты). Прежняя подмена «удалить» ↔ «деактивировать» снята.
     const del = await page.locator('[data-testid="S-31.btn.deleteStaff"]').count();
     const revoke = await page.locator('[data-testid="S-31.btn.revokeActivation"]').count();
     const gone = await page.locator('[data-testid="S-31.btn.deactivateStaff"]').count();
-    if (del === 1 && revoke === 1 && gone === 0) console.log('    ✅ пара «Отозвать активацию» + «Удалить профиль» на экране, кнопки «Деактивировать» больше нет (AR-212)');
+    if (del === 1 && revoke === 1 && gone === 0) console.log('    ✅ пара «Отозвать активацию» + «Удалить профиль» на экране, кнопки «Деактивировать» больше нет (AR-213)');
     else { console.error(`    ❌ группа «Доступ»: удалить=${del}, отозвать=${revoke}, деактивировать=${gone}; ждали 1/1/0`); failures++; }
     await shot(page, 'S-31-activated');
 

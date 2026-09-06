@@ -518,7 +518,7 @@ export class StaffController {
 
   /**
    * §11 строка 29 · `S-31.btn.revokeActivation` — «Отозвать активацию»
-   * (AR-212): данные сохраняются, право взаимодействовать со школой снимается;
+   * (AR-213): данные сохраняются, право взаимодействовать со школой снимается;
    * обратная — `reactivate`. Вытесняет `POST :id/deactivate`: две операции,
    * которые человек не мог различить на экране, сведены в одну.
    */
@@ -557,14 +557,14 @@ export class StaffController {
     return this.svc.removeRole(id, role, actorOf(req));
   }
 
-  /** §11 строка 30 · `S-31.btn.reactivateStaff` — «Вернуть доступ» (AR-212). */
+  /** §11 строка 30 · `S-31.btn.reactivateStaff` — «Вернуть доступ» (AR-213). */
   @RequirePermission('staff.manage')
   @Post(':id/reactivate')
   reactivate(@Req() req: Req0, @Param('id') id: string) {
     return this.svc.reactivate(id, actorOf(req));
   }
 
-  /** §11 строка 31 · `S-31.btn.deleteStaff` — «Удалить профиль» (AR-212): стирание физически, отказ только `LAST_MODERATOR`. */
+  /** §11 строка 31 · `S-31.btn.deleteStaff` — «Удалить профиль» (AR-213): стирание физически, отказ только `LAST_MODERATOR`. */
   @RequirePermission('staff.manage')
   @Delete(':id')
   remove(@Req() req: Req0, @Param('id') id: string) {

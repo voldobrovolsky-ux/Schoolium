@@ -387,6 +387,27 @@ export type SchoolState = (typeof SCHOOL_STATES)[number];
 
 export type Sex = 'm' | 'f';
 
+/**
+ * Ступени школы (AR-212) — три группы параллелей, которыми владелец ведёт
+ * «Штатное расписание». Границы — `[дефолт]` по документу владельца «Штатное
+ * расписание 26/27» (младшая 1–3, средняя 4–6, старшая 7 и выше), решение
+ * обратимое: меняются здесь одной строкой, второго места, где ступень
+ * определяется, нет. Параллель вне границ ступени не получает — такой класс
+ * виден в «Почасовой нагрузке», но своей таблицы «Штатного расписания» у него
+ * нет, и это видно как пустая ступень, а не как молча пропавший класс.
+ */
+export const SCHOOL_LEVELS = [
+  { key: 'primary', title: 'Младшая школа', from: 1, to: 3 },
+  { key: 'middle', title: 'Средняя школа', from: 4, to: 6 },
+  { key: 'senior', title: 'Старшая школа', from: 7, to: 11 },
+] as const;
+
+export type SchoolLevelKey = (typeof SCHOOL_LEVELS)[number]['key'];
+
+/** Ступень параллели; `null` — параллель вне объявленных границ. */
+export const levelOfParallel = (parallel: number): SchoolLevelKey | null =>
+  SCHOOL_LEVELS.find((l) => parallel >= l.from && parallel <= l.to)?.key ?? null;
+
 export interface ClassDto {
   id: string;
   parallel: number;
@@ -875,6 +896,16 @@ export interface SetTermsDto {
 export const SCHOOL_YEAR_WEEKS = 34;
 export const weeklyOfYear = (hoursPerYear: number): number =>
   hoursPerYear > 0 ? Math.max(1, Math.round(hoursPerYear / SCHOOL_YEAR_WEEKS)) : 0;
+
+/**
+ * Обратная конверсия (AR-212). «Штатное расписание» персонала (`S-30`) ведётся
+ * НЕДЕЛЬНЫМИ часами — так его ведёт владелец в своей таблице, — а хранится
+ * годовая норма (AR-180): второго хранимого поля часов не заводится, недельное
+ * остаётся производным. Множитель тот же `SCHOOL_YEAR_WEEKS`, поэтому пара
+ * обратима: `weeklyOfYear(yearOfWeekly(n)) === n` для целых `n >= 0`.
+ */
+export const yearOfWeekly = (hoursPerWeek: number): number =>
+  hoursPerWeek > 0 ? Math.round(hoursPerWeek) * SCHOOL_YEAR_WEEKS : 0;
 
 /** Ввод норм — ГОДОВЫМИ часами (AR-180); недельные — производная `weeklyOfYear`. */
 export interface LoadEntryDto {

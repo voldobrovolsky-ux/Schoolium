@@ -101,12 +101,12 @@ async function main(): Promise<void> {
   }
   check(reuseCode === 'LOGIN_CODE_INVALID', `повторный ввод того же кода → ${reuseCode}: код одноразов`);
 
-  // ─── клетка 5: отзыв активации закрывает ВСЕ маршруты немедленно (AR-212) ───
+  // ─── клетка 5: отзыв активации закрывает ВСЕ маршруты немедленно (AR-213) ───
   const foreignCard = await sys(() => b.prisma.staffCard.findFirst({ where: { userId: foreign.userId } }));
   await inSchool(school.workspaceId, () => staff.revokeActivation(foreignCard!.id, school.moderator));
   await drain();
   check((await sessions.read(byCode.session.token)) === null,
-    'отзыв активации отозвал живую сессию немедленно — доступ уволенного не живёт 90 дней (AR-92, AR-212)');
+    'отзыв активации отозвал живую сессию немедленно — доступ уволенного не живёт 90 дней (AR-92, AR-213)');
   let revoked = 'нет отказа';
   try {
     const c2 = await inSchool(school.workspaceId, () => staff.issueLoginCode(foreignCard!.id));

@@ -277,7 +277,7 @@ if (Array.isArray(st.reversals) && st.reversals.length) {
 } else bad('таблица обратимости не объявлена: reversals отсутствует в states.mjs');
 
 // ---------- P13. Две операции над сотрудником: каскад и защита школы ----------
-console.log('P13. Отзыв активации и удаление профиля сотрудника (AR-212)');
+console.log('P13. Отзыв активации и удаление профиля сотрудника (AR-213)');
 if (typeof st.staffRemoval === 'function') {
   const school = { moderators: 1 };
   const one = st.staffRemoval({ roles:['moderator'], hasHistory:false }, school, 'delete');
@@ -291,7 +291,7 @@ if (typeof st.staffRemoval === 'function') {
   else bad('отзыв активации теряет данные либо необратим: ' + JSON.stringify(revoke));
   const withHistory = st.staffRemoval({ roles:['teacher'], hasHistory:true }, { moderators:2 }, 'delete');
   if (withHistory.action === 'delete' && !withHistory.keepsProfile && withHistory.keepsMarks)
-    ok('педагог с историей удаляется: профиль стёрт, отметки остались записью школы (AR-212)');
+    ok('педагог с историей удаляется: профиль стёрт, отметки остались записью школы (AR-213)');
   else bad('удаление педагога с историей описано неверно: ' + JSON.stringify(withHistory));
   const fresh = st.staffRemoval({ roles:['teacher'], hasHistory:false }, { moderators:2 }, 'delete');
   if (fresh.action === 'delete' && fresh.unbinds && fresh.staleSchedule)

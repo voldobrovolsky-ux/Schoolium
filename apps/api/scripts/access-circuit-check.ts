@@ -133,21 +133,21 @@ async function main(): Promise<void> {
     check(memberships.length === 1, 'создано одно членство — принадлежность школе выражается членством (AR-154)');
     check(memberships[0]?.activatedAt !== null, 'активация проставила activatedAt — карточка ушла из «Не авторизованных»');
 
-    // Отзыв активации у персонала (AR-212, вытесняет AR-153): сессии закрыты,
+    // Отзыв активации у персонала (AR-213, вытесняет AR-153): сессии закрыты,
     // карточка снова не авторизована И право взаимодействовать со школой снято —
     // прежде это были две кнопки, неразличимые на экране.
     const actor = { userId: 'op-moderator', roles: ['moderator'] } as never;
     // токен выпущен ДО отзыва — проверяем, что отзыв гасит уже выданный маршрут
     const spare = await staff.createActivationToken(card.id);
     const revoked = await staff.revokeActivation(card.id, actor);
-    check(revoked.registered === false, 'отзыв активации вернул карточку в «Не авторизованные» (AR-212)');
-    check(revoked.deactivated === true, 'отзыв активации закрыл доступ: право взаимодействовать со школой снято (AR-212)');
-    check((await sessions.read(joined.sessionToken!)) === null, 'сессия чужого устройства закрыта отзывом (AR-212)');
+    check(revoked.registered === false, 'отзыв активации вернул карточку в «Не авторизованные» (AR-213)');
+    check(revoked.deactivated === true, 'отзыв активации закрыл доступ: право взаимодействовать со школой снято (AR-213)');
+    check((await sessions.read(joined.sessionToken!)) === null, 'сессия чужого устройства закрыта отзывом (AR-213)');
     const stale = await staff
       .activate(spare.token, { openedByOtherSession: false, deviceHint: 'телефон сотрудника' })
       .then(() => 'нет отказа', (e: { response?: { code?: string } }) => e.response?.code ?? 'ошибка');
     check(stale === 'TOKEN_EXPIRED' || stale === 'ACCESS_REVOKED',
-      `выданный до отзыва QR больше не пускает → ${stale}: отзыв гасит ожидающие токены (AR-212)`);
+      `выданный до отзыва QR больше не пускает → ${stale}: отзыв гасит ожидающие токены (AR-213)`);
     const denied = await staff
       .createActivationToken(card.id)
       .then(() => 'нет отказа', (e: { response?: { code?: string } }) => e.response?.code ?? 'ошибка');
@@ -157,9 +157,9 @@ async function main(): Promise<void> {
     await staff.reactivate(card.id, actor);
     const again = await staff.createActivationToken(card.id);
     const re = await staff.activate(again.token, { openedByOtherSession: false, deviceHint: 'телефон сотрудника' });
-    check(re.sessionToken !== null, 'после «Вернуть доступ» повторная активация проходит — отзыв обратим и не удаление (AR-212)');
+    check(re.sessionToken !== null, 'после «Вернуть доступ» повторная активация проходит — отзыв обратим и не удаление (AR-213)');
     const alive = await TenantContext.runAsSystem(() => b.prisma.user.findUnique({ where: { id: user!.id } }));
-    check(alive !== null, 'учётка, ФИО и логин на месте — отзыв активации данных не трогает (AR-212)');
+    check(alive !== null, 'учётка, ФИО и логин на месте — отзыв активации данных не трогает (AR-213)');
   });
 
   // ─── 5. юзернейм уникален на инсталляцию (AR-154) ───
