@@ -78,7 +78,7 @@ const AUDITED: Record<string, { categories: string[]; subject: (p: Record<string
   [SCHOOL_EVENTS.lessonReassigned]: { categories: ['process'], subject: () => undefined },
   [SCHOOL_EVENTS.lessonRestored]: { categories: ['process'], subject: () => undefined },
   [SCHOOL_EVENTS.classGroupsChanged]: { categories: ['process'], subject: () => undefined },
-  // ─── Schoolium 1.6.0: разрешения правит администратор (AR-212) ───
+  // ─── Schoolium 1.6.0: разрешения правит администратор (AR-213) ───
   // Право, выданное или снятое человеку, — запись о человеке: субъект строки
   // есть у индивидуальной правки и отсутствует у правки роли.
   [SCHOOL_EVENTS.permissionSet]: { categories: ['identity'], subject: (p) => p.userId as string | undefined },

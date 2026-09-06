@@ -1567,7 +1567,7 @@ async function main() {
     await mobileInvariants(page, 'S-62 · устройства');
     await shot(page, 'S-62-devices');
 
-    // Разрешения (AR-212): матрица правится тумблером, и правка ДЕЙСТВУЕТ —
+    // Разрешения (AR-213): матрица правится тумблером, и правка ДЕЙСТВУЕТ —
     // экран доказывает это не «кнопку нажали», а ответом `GET /admin/permissions`.
     await page.goto(`${WEB}/admin/roles`);
     await page.waitForSelector('[data-testid="S-62.roles.matrix"]', { timeout: 20_000 });
@@ -1633,8 +1633,13 @@ async function main() {
     // Выбранный человек — в самом верху раздела: чья это роль, видно сразу.
     await page.waitForSelector('[data-testid="S-62.perm.who"]', { timeout: 20_000 });
     await has(page, 'S-62.perm.user', 'матрица одного человека');
+    /* Выбор человека закрывает полоску — переход 180 мс. Мишени меряются
+       ПОСЛЕ него: во время закрытия узел ещё `visibility: visible`
+       (снимается только по завершении), но его `transform: scale(0.98)`
+       ещё в пути — измерение застало бы кнопку закрытия на 44×0.98 ≈ 43px и
+       обвинило бы раскладку в том, чего на отдохнувшем кадре нет. */
+    await page.waitForTimeout(300);
     await mobileInvariants(page, 'S-62 · разрешения');
-    await page.waitForTimeout(300); // полоска закрылась — снимок после перехода
     await shot(page, 'S-62-perm-individual');
 
     // Сеть: реестр пуст у свежей школы; сеть и устройство заводятся одной

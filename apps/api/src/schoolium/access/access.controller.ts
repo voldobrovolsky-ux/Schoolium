@@ -203,7 +203,7 @@ export class MeController {
     if (!u?.workspaceId || !u.roles?.length) throw new SchoolError('ACCESS_REVOKED');
     const roles = u.roles as SchoolRole[];
     const catalog = await this.authz.resolveForRoles(roles);
-    /* Права отвечает СЕРВЕР, и он отвечает те же, которыми гейтит (AR-212):
+    /* Права отвечает СЕРВЕР, и он отвечает те же, которыми гейтит (AR-213):
        школьная правка `S-62` накладывается здесь тем же резолвером, что и в
        `PermissionGuard`. Иначе кнопка осталась бы на экране после снятия
        права и упиралась бы в 403 при нажатии. */

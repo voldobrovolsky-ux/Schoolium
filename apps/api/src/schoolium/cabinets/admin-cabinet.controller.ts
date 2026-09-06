@@ -75,7 +75,7 @@ export class AdminCabinetController {
     return this.svc.setPolicy(body, actorOf(req));
   }
 
-  // ─── разрешения (AR-212): общие по ролям и индивидуальные по людям ───
+  // ─── разрешения (AR-213): общие по ролям и индивидуальные по людям ───
 
   /** `S-62.perm.matrix`: действующие права каждой роли школы и их отличия от пакета версии. */
   @RequirePermission('school.admin')

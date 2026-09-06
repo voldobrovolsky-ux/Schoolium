@@ -192,7 +192,7 @@ export const ROLE_PERMISSIONS: Record<SchoolRole, SchoolPermission[]> = {
   student: [...PROJECTION_PERMISSIONS],
 };
 
-// ─────────────── разделы приложения и функции разделов (AR-212) ───────────────
+// ─────────────── разделы приложения и функции разделов (AR-213) ───────────────
 
 /**
  * Право, названное словами раздела. Матрица разрешений `S-62` показывает не
@@ -225,7 +225,7 @@ export const PERMISSION_LABELS: Record<SchoolPermission, string> = {
  * Разделы приложения в порядке навигации (AR-81) плюс дневник-проекция и
  * кабинеты. Каждое из девятнадцати прав версии принадлежит ровно одному
  * разделу: раздел — это то, что человек видит в меню, а функция — то, что он
- * в разделе делает. Полнота и однократность проверяются `G-86`.
+ * в разделе делает. Полнота и однократность проверяются `G-89`.
  */
 export const APP_SECTIONS = [
   { key: 'journal', label: 'Журнал', hint: 'отметки, темы уроков', permissions: ['journal.read', 'journal.mark.post', 'journal.topic.set'] },
@@ -244,7 +244,7 @@ export const APP_SECTIONS = [
 
 export type AppSectionKey = (typeof APP_SECTIONS)[number]['key'];
 
-// ─────────────── правка разрешений администратором (AR-212) ───────────────
+// ─────────────── правка разрешений администратором (AR-213) ───────────────
 
 /**
  * Право, которое администратор не может снять НИ роли `admin`, НИ себе:
@@ -262,7 +262,7 @@ export const isLockedRoleGrant = (role: SchoolRole, permission: SchoolPermission
   role === LOCKED_ADMIN_ROLE && permission === LOCKED_ADMIN_PERMISSION;
 
 /**
- * Отклонение пакета роли (AR-212): `true` — право выдано сверх пакета, `false` —
+ * Отклонение пакета роли (AR-213): `true` — право выдано сверх пакета, `false` —
  * снято. Ключ отсутствует — действует пакет роли из `ROLE_PERMISSIONS`.
  */
 export type PermissionOverrides = Partial<Record<SchoolPermission, boolean>>;
@@ -416,7 +416,7 @@ export const ERROR_CODES = [
   'LESSON_ALREADY_HELD',
   'LESSON_CANCELLED',
   'SUBSTITUTE_BUSY',
-  // AR-212: замок `school.admin` у роли администратора — снятие закрыло бы
+  // AR-213: замок `school.admin` у роли администратора — снятие закрыло бы
   // кабинет, из которого его снимают, и вернуть право стало бы некому
   'PERMISSION_LOCKED',
 ] as const;
@@ -538,6 +538,27 @@ export type SchoolState = (typeof SCHOOL_STATES)[number];
 // ─────────────────────────── контингент ───────────────────────────
 
 export type Sex = 'm' | 'f';
+
+/**
+ * Ступени школы (AR-212) — три группы параллелей, которыми владелец ведёт
+ * «Штатное расписание». Границы — `[дефолт]` по документу владельца «Штатное
+ * расписание 26/27» (младшая 1–3, средняя 4–6, старшая 7 и выше), решение
+ * обратимое: меняются здесь одной строкой, второго места, где ступень
+ * определяется, нет. Параллель вне границ ступени не получает — такой класс
+ * виден в «Почасовой нагрузке», но своей таблицы «Штатного расписания» у него
+ * нет, и это видно как пустая ступень, а не как молча пропавший класс.
+ */
+export const SCHOOL_LEVELS = [
+  { key: 'primary', title: 'Младшая школа', from: 1, to: 3 },
+  { key: 'middle', title: 'Средняя школа', from: 4, to: 6 },
+  { key: 'senior', title: 'Старшая школа', from: 7, to: 11 },
+] as const;
+
+export type SchoolLevelKey = (typeof SCHOOL_LEVELS)[number]['key'];
+
+/** Ступень параллели; `null` — параллель вне объявленных границ. */
+export const levelOfParallel = (parallel: number): SchoolLevelKey | null =>
+  SCHOOL_LEVELS.find((l) => parallel >= l.from && parallel <= l.to)?.key ?? null;
 
 export interface ClassDto {
   id: string;
@@ -1027,6 +1048,16 @@ export interface SetTermsDto {
 export const SCHOOL_YEAR_WEEKS = 34;
 export const weeklyOfYear = (hoursPerYear: number): number =>
   hoursPerYear > 0 ? Math.max(1, Math.round(hoursPerYear / SCHOOL_YEAR_WEEKS)) : 0;
+
+/**
+ * Обратная конверсия (AR-212). «Штатное расписание» персонала (`S-30`) ведётся
+ * НЕДЕЛЬНЫМИ часами — так его ведёт владелец в своей таблице, — а хранится
+ * годовая норма (AR-180): второго хранимого поля часов не заводится, недельное
+ * остаётся производным. Множитель тот же `SCHOOL_YEAR_WEEKS`, поэтому пара
+ * обратима: `weeklyOfYear(yearOfWeekly(n)) === n` для целых `n >= 0`.
+ */
+export const yearOfWeekly = (hoursPerWeek: number): number =>
+  hoursPerWeek > 0 ? Math.round(hoursPerWeek) * SCHOOL_YEAR_WEEKS : 0;
 
 /** Ввод норм — ГОДОВЫМИ часами (AR-180); недельные — производная `weeklyOfYear`. */
 export interface LoadEntryDto {

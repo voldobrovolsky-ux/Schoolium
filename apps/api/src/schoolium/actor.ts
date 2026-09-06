@@ -10,7 +10,7 @@ export interface SchoolActor {
   name: string;
   /**
    * Действующие права запроса — резолв `PermissionGuard` со школьными правками
-   * (AR-212). Пусто у негейченного роута: там `actorHas` падает обратно на
+   * (AR-213). Пусто у негейченного роута: там `actorHas` падает обратно на
    * пакет ролей версии.
    */
   permissions?: SchoolPermission[];
