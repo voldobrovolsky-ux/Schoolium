@@ -1,0 +1,303 @@
+/*
+ * `S-62` · раздел «Разрешения» (AR-212): две панели одной раскладки — рабочая
+ * область и правый сайдбар разделов, — и всплывающая полоска уровня.
+ *
+ * Раскладка занимает высоту окна и НЕ растит страницу: скроллов ровно два —
+ * матрица и список разделов, — и заголовок раздела с именем человека остаётся
+ * на экране, пока администратор щёлкает тумблерами. Страница, уезжающая под
+ * курсором, здесь стоила бы промаха по чужой ячейке.
+ *
+ * Цвета — только токенами (G-37, AR-42). Состояние тумблера кодируется не
+ * цветом: положение ручки — знак, цвет — подсказка (AR-80).
+ */
+
+/* Раздел разрешений — единственная страница кабинета шире колонки 1200px:
+   девять ролей рядом с сайдбаром разделов в неё не помещаются, и упереть их в
+   горизонтальную прокрутку на широком мониторе значило бы прятать половину
+   матрицы при свободном месте справа. Ограничение снимается ТОЛЬКО под этим
+   разделом; браузер без `:has()` получает прежнюю колонку и прокрутку — сетка
+   ниже рассчитана так, чтобы девять ролей помещались и в неё. */
+.sch-page:has(> .sch-perm) { max-width: none; }
+
+/* Вычет: топбар 64 + отступы контента 24/32 + шапка страницы 60 + субнав 68. */
+.sch-perm {
+  --perm-offset: 248px;
+  --perm-side: 244px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--perm-side);
+  gap: var(--sp-20);
+  align-items: stretch;
+  height: calc(100dvh - var(--perm-offset));
+  min-height: 460px;
+}
+
+/* ─── рабочая область ─── */
+.sch-perm-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-16);
+}
+.sch-perm-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-16);
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.sch-perm-title { display: flex; align-items: flex-start; gap: var(--sp-12); min-width: 0; }
+.sch-perm-icon {
+  display: inline-flex; width: 40px; height: 40px; flex: 0 0 auto;
+  align-items: center; justify-content: center;
+  border-radius: var(--r-card);
+  background: var(--c-brand-violet-050); color: var(--c-brand-violet-700);
+}
+.sch-perm-title h2 {
+  margin: 0;
+  font-family: var(--font-display); font-size: var(--fs-h2); font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em; line-height: 1.2;
+}
+.sch-perm-hint { margin: var(--sp-4) 0 0; font-size: var(--fs-sm); color: var(--c-ink-secondary); }
+
+/* Чья это роль — в самом верху раздела: тумблер без имени владельца читается
+   как общий, и снятое одному человеку право выглядело бы снятым у всех. */
+.sch-perm-who {
+  display: flex; align-items: center; gap: var(--sp-12); min-width: 0;
+  padding: var(--sp-8) var(--sp-16) var(--sp-8) var(--sp-8);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-pill);
+  background: var(--c-surface-card); box-shadow: var(--sh-card);
+}
+.sch-perm-who-text { display: flex; flex-direction: column; min-width: 0; }
+.sch-perm-who-name { font-weight: var(--fw-semibold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sch-perm-who-roles {
+  font-size: var(--fs-xs); color: var(--c-ink-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
+}
+
+/* ─── матрица ─── */
+/* Не растягивается: пустая белая плита под тремя функциями выглядела бы
+   недогруженной. Высоту раздела держат сайдбар и легенда, прижатая к низу. */
+.sch-perm-scroll {
+  flex: 0 1 auto; min-height: 0; overflow: auto;
+  border: 1px solid var(--c-border-default); border-radius: var(--r-card);
+  background: var(--c-surface-card); box-shadow: var(--sh-card);
+}
+.sch-perm-grid {
+  display: grid;
+  grid-template-columns: minmax(164px, 1.1fr) repeat(var(--perm-cols), minmax(78px, 1fr));
+}
+/* `max-content` здесь был бы дефектом: он растит колонку функции под самое
+   длинное название («Выставление и снятие отметок»), и девять ролей уезжают за
+   правый край на любой ширине. Минимум колонок задан в `minmax`, и он же
+   включает горизонтальную прокрутку там, где раскладка действительно узка. */
+.sch-perm-scroll--one { max-width: 620px; }
+.sch-perm-grid--one { grid-template-columns: minmax(240px, 1fr) 140px; }
+/* Строка боксов не создаёт: она группирует ячейки ради наведения, а колонки
+   остаются колонками сетки. */
+.sch-perm-row { display: contents; }
+
+.sch-perm-cell {
+  display: flex; align-items: center; min-width: 0;
+  padding: var(--sp-12) var(--sp-16);
+  border-bottom: 1px solid var(--c-border-default);
+  background: var(--c-surface-card);
+}
+.sch-perm-cell--switch { justify-content: center; padding-left: 0; padding-right: 0; }
+.sch-perm-cell--head { flex-direction: column; align-items: flex-start; gap: 2px; }
+.sch-perm-fn { font-weight: var(--fw-medium); }
+.sch-perm-code, .sch-perm-src { font-size: var(--fs-xs); color: var(--c-ink-muted); }
+.sch-perm-src { color: var(--c-ink-secondary); }
+
+/* Шапка колонок и первая колонка закреплены: имя роли и имя функции остаются
+   на экране, когда матрица уезжает вбок или вниз. */
+.sch-perm-cell--col,
+.sch-perm-cell--corner {
+  position: sticky; top: 0; z-index: 2;
+  justify-content: center; text-align: center;
+  padding: var(--sp-8) var(--sp-4);
+  background: var(--c-surface-canvas);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  color: var(--c-ink-secondary); line-height: 1.25;
+  border-bottom: 1px solid var(--c-border-strong);
+}
+/* Только угловая ячейка капителью: имя роли в верхнем регистре шире на треть,
+   и девять колонок перестали бы помещаться в ширину страницы. */
+.sch-perm-cell--corner { text-transform: uppercase; letter-spacing: 0.04em; padding-left: var(--sp-16); }
+.sch-perm-cell--corner, .sch-perm-cell--head { position: sticky; left: 0; z-index: 1; }
+.sch-perm-cell--corner { z-index: 3; justify-content: flex-start; text-align: left; }
+.sch-perm-row:last-child .sch-perm-cell { border-bottom: 0; }
+.sch-perm-row:hover .sch-perm-cell { background: var(--c-brand-violet-050); }
+
+/* ─── пустое состояние индивидуальных ─── */
+.sch-perm-empty {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-8); text-align: center;
+  border: 1px dashed var(--c-border-strong); border-radius: var(--r-card);
+  background: var(--c-surface-card);
+}
+.sch-perm-empty p { margin: 0; font-family: var(--font-display); font-size: var(--fs-lg); font-weight: var(--fw-semibold); }
+.sch-perm-empty-icon {
+  display: inline-flex; width: 56px; height: 56px; align-items: center; justify-content: center;
+  border-radius: var(--r-pill); background: var(--c-surface-canvas); color: var(--c-ink-muted);
+}
+.sch-perm-empty .sch-btn { margin-top: var(--sp-8); }
+
+/* Легенда — под матрицей: она объясняет знаки тумблера, и её место рядом с
+   ними, а не в отдельном разделе справки. */
+.sch-perm-legend {
+  flex: 0 0 auto; margin: auto 0 0;
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--sp-4) var(--sp-16); font-size: var(--fs-sm);
+}
+.sch-perm-legend dt { margin: 0; font-weight: var(--fw-medium); }
+.sch-perm-legend dd { margin: 0; color: var(--c-ink-secondary); }
+
+/* ─── правый сайдбар разделов ─── */
+.sch-perm-side {
+  position: relative; /* якорь вылетающей полоски */
+  display: flex; flex-direction: column; min-height: 0; gap: var(--sp-8);
+  padding: var(--sp-12);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-card);
+  background: var(--c-surface-card); box-shadow: var(--sh-card);
+}
+.sch-perm-side-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-8);
+  padding-left: var(--sp-8); flex: 0 0 auto;
+}
+.sch-perm-side-title {
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  color: var(--c-ink-secondary); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sch-perm-nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
+.sch-perm-nav-item {
+  display: flex; align-items: center; gap: var(--sp-12); width: 100%;
+  padding: var(--sp-8) var(--sp-12); min-height: var(--ctl-h);
+  border: 0; border-radius: var(--r-md); background: transparent;
+  font: inherit; color: var(--c-ink-primary); text-align: left; cursor: pointer;
+}
+.sch-perm-nav-item:hover { background: var(--c-surface-canvas); }
+.sch-perm-nav-item[aria-current] { background: var(--c-brand-violet-100); color: var(--c-brand-violet-900); font-weight: var(--fw-semibold); }
+.sch-perm-nav-icon { display: inline-flex; flex: 0 0 auto; color: var(--c-ink-secondary); }
+.sch-perm-nav-item[aria-current] .sch-perm-nav-icon { color: var(--c-brand-violet-700); }
+.sch-perm-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-perm-nav-count { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--c-ink-muted); font-variant-numeric: tabular-nums; }
+.sch-perm-nav-item[aria-current] .sch-perm-nav-count { color: var(--c-brand-violet-700); }
+
+/* Подвал сайдбара: уровень, который правится сейчас. Полоска закрыта почти
+   всегда, и без этой строки «общие» и «индивидуальные» различались бы только
+   по памяти открывавшего. */
+.sch-perm-side-foot {
+  flex: 0 0 auto; margin-top: auto; padding: var(--sp-8) var(--sp-12) var(--sp-4);
+  border-top: 1px solid var(--c-border-default);
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.sch-perm-side-foot-label {
+  font-size: var(--fs-xs); color: var(--c-ink-muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sch-perm-side-foot-value {
+  font-size: var(--fs-sm); font-weight: var(--fw-medium); color: var(--c-ink-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ─── полоска уровня разрешений ───
+   Вылетает из-под иконки настроек ВЛЕВО, поверх матрицы: это переключатель
+   режима, а не восьмой раздел, и место в списке разделов заняло бы неверно.
+   Закрытая — `visibility: hidden`: иначе она осталась бы в порядке обхода
+   табом, невидимая глазу. */
+.sch-perm-panel {
+  position: absolute; top: var(--sp-8); right: 52px; z-index: 5;
+  display: flex; flex-direction: column; gap: var(--sp-8);
+  padding: var(--sp-8);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-card);
+  background: var(--c-surface-card); box-shadow: var(--sh-pop);
+  visibility: hidden; opacity: 0;
+  transform: translateX(12px) scale(0.98); transform-origin: right top;
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 0.18s;
+}
+.sch-perm-panel[data-open] {
+  visibility: visible; opacity: 1; transform: none;
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s;
+}
+.sch-perm-panel[data-shape="individual"] { width: 296px; max-height: 420px; }
+
+.sch-perm-strip { display: flex; align-items: center; gap: var(--sp-4); }
+.sch-perm-strip-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-8); white-space: nowrap;
+  height: var(--ctl-h); padding: 0 var(--sp-12);
+  border: 0; border-radius: var(--r-md); background: transparent;
+  font: inherit; font-size: var(--fs-sm); color: var(--c-ink-primary); cursor: pointer;
+}
+.sch-perm-strip-btn:hover { background: var(--c-surface-canvas); }
+.sch-perm-strip-btn[aria-current] { background: var(--c-brand-violet-100); color: var(--c-brand-violet-900); font-weight: var(--fw-medium); }
+
+/* Та же полоска в режиме человека — строка поиска: превращение, а не второй
+   элемент; список людей раскрывается под ней. */
+.sch-perm-search {
+  display: flex; align-items: center; gap: var(--sp-4);
+  height: var(--ctl-h); padding: 0 var(--sp-8) 0 var(--sp-4);
+  border: 1px solid var(--c-border-default); border-radius: var(--r-md);
+  background: var(--c-surface-canvas); flex: 0 0 auto;
+}
+.sch-perm-search:focus-within { border-color: var(--c-border-focus); background: var(--c-surface-card); }
+.sch-perm-back {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  width: 28px; height: 28px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--c-ink-secondary); cursor: pointer;
+}
+.sch-perm-back:hover { background: var(--c-brand-violet-100); color: var(--c-brand-violet-700); }
+.sch-perm-search-icon { display: inline-flex; flex: 0 0 auto; color: var(--c-ink-muted); }
+.sch-perm-search-input {
+  flex: 1 1 auto; min-width: 0; height: 100%;
+  border: 0; background: transparent; font: inherit; font-size: var(--fs-sm); color: var(--c-ink-primary);
+}
+.sch-perm-search-input:focus { outline: none; }
+
+.sch-perm-users { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
+.sch-perm-user {
+  display: flex; align-items: center; gap: var(--sp-8); width: 100%;
+  padding: var(--sp-8); border: 0; border-radius: var(--r-md); background: transparent;
+  font: inherit; text-align: left; color: var(--c-ink-primary); cursor: pointer;
+}
+.sch-perm-user:hover { background: var(--c-surface-canvas); }
+.sch-perm-user[aria-current] { background: var(--c-brand-violet-100); }
+.sch-perm-user-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.sch-perm-user-name { font-size: var(--fs-sm); font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sch-perm-user-roles { font-size: var(--fs-xs); color: var(--c-ink-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── мобайл: карточка на функцию, сайдбар — лентой над ней ─── */
+.sch-perm-cards { display: flex; flex-direction: column; gap: var(--sp-12); }
+.sch-perm-card { display: flex; flex-direction: column; gap: var(--sp-4); }
+.sch-perm-card-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-12);
+  min-height: var(--tap-min); border-top: 1px solid var(--c-border-default); font-size: var(--fs-sm);
+}
+
+@media (max-width: 767px) {
+  .sch-perm {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "side" "main";
+    height: auto; min-height: 0;
+  }
+  .sch-perm-main { grid-area: main; }
+  .sch-perm-side { grid-area: side; }
+  /* Разделы — горизонтальной лентой: правый сайдбар на 390px съел бы экран. */
+  .sch-perm-nav { flex-direction: row; overflow-x: auto; gap: var(--sp-4); scrollbar-width: none; }
+  .sch-perm-nav::-webkit-scrollbar { display: none; }
+  /* Мишени телефона (§6): пункт ленты, кнопка возврата и поле поиска — не
+     меньше 44px; на десктопе те же элементы живут в плотной сетке 36px. */
+  .sch-perm-nav-item { width: auto; flex: 0 0 auto; min-height: var(--tap-min); }
+  .sch-perm-back { width: var(--tap-min); height: var(--tap-min); }
+  .sch-perm-search { height: var(--ctl-h-mobile); }
+  .sch-perm-user { min-height: var(--tap-min); }
+  .sch-perm-nav-count { display: none; }
+  .sch-perm-panel { right: var(--sp-8); left: var(--sp-8); width: auto; }
+  .sch-perm-panel[data-shape="individual"] { width: auto; max-height: 60dvh; }
+  .sch-perm-strip { flex-direction: column; align-items: stretch; }
+  .sch-perm-strip-btn { min-height: var(--ctl-h-mobile); }
+  .sch-perm-scroll { border: 0; background: transparent; box-shadow: none; overflow: visible; }
+  .sch-perm-who-roles { max-width: 60vw; }
+  .sch-perm-legend { grid-template-columns: minmax(0, 1fr); margin: 0; }
+  .sch-perm-side-foot { display: none; }
+}

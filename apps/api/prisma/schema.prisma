@@ -1767,6 +1767,28 @@ model SchoolAccessPolicy {
   updatedAt      DateTime  @updatedAt
 }
 
+/// Отклонение школы от пакета прав версии (AR-212). Пакеты `ROLE_PERMISSIONS`
+/// остаются каноном и пересеваются на старте (`syncAuthzCatalog`); школьная
+/// правка живёт ЗДЕСЬ и накладывается поверх — иначе boot-sync стирал бы её
+/// каждым рестартом. `scope`: `role` (общие разрешения роли) | `user`
+/// (индивидуальные разрешения человека). `subject` — ключ роли либо `User.id`.
+/// `allowed` = true — право выдано сверх пакета, false — снято; строки нет —
+/// действует пакет. Под tenant-guard: правка школы A школе B не видна.
+model SchoolPermissionOverride {
+  id          String   @id @default(cuid())
+  workspaceId String
+  scope       String // role | user
+  subject     String // SchoolRole | User.id
+  permission  String // SchoolPermission
+  allowed     Boolean
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, scope, subject, permission])
+  @@index([workspaceId, scope, subject])
+}
+
 // ─────────────────── пакет 04.09 1.5.0 — педагог (AR-206, AR-207) ───────────────────
 // Две таблицы под tenant-guard. Ссылки на уроки и людей — по ЗНАЧЕНИЮ, без FK:
 // граница модулей пересекается контрактом, как у всего контура (AR-2).

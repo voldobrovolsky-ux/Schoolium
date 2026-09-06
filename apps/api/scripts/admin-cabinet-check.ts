@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     }
   }
   const adminMut = routes.filter((r) => r.ctrl === 'AdminCabinetController' && MUTATIONS.has(r.method));
-  check(adminMut.length === 9, `мутаций кабинета администратора: ${adminMut.length} (§11 строки 40–48 без ссылки входа — её несёт StaffController)`);
+  check(adminMut.length === 11, `мутаций кабинета администратора: ${adminMut.length} (§11 строки 40–48 и 57–58 без ссылки входа — её несёт StaffController)`);
   check(adminMut.every((r) => r.perm === 'school.admin'),
     `каждая мутация /v1/admin гейчена school.admin: ${adminMut.map((r) => r.route).join(', ')}`);
   const adminReads = routes.filter((r) => r.ctrl === 'AdminCabinetController' && !MUTATIONS.has(r.method));

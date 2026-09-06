@@ -197,8 +197,8 @@ async function main(): Promise<void> {
     check(Boolean(markEntry), 'отметка администратора в чужом уроке записана в аудит с его идентичностью');
   });
 
-  // ─── 5. все 32 события версии аудируются (25 + семь пакета 04.09) ───
-  check(EVENT_CONTRACT.length === 32, `в контракте ${EVENT_CONTRACT.length} события (22 + 3 кабинета + 7 пакета 04.09 = 32)`);
+  // ─── 5. все 33 события версии аудируются (25 + семь пакета 04.09 + разрешения) ───
+  check(EVENT_CONTRACT.length === 33, `в контракте ${EVENT_CONTRACT.length} события (22 + 3 кабинета + 7 пакета 04.09 + 1 разрешений = 33)`);
   const missing = EVENT_CONTRACT.filter((r) => !AUDITED_TYPES.includes(r.type));
   check(missing.length === 0, missing.length === 0
     ? `все ${EVENT_CONTRACT.length} события версии попадают в аудит-леджер`

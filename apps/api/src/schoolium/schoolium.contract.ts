@@ -53,6 +53,10 @@ export const SCHOOL_EVENTS = {
   accountUpdated: 'staff.account.updated.v1',
   passwordSet: 'staff.password.set.v1',
   classGroupsChanged: 'contingent.class.regrouped.v1',
+  // 1.6.0 — разрешения правит администратор школы (AR-212). Событие одно на
+  // оба уровня (`role` и `user`): различает их поле `scope` в payload. Как и
+  // всё в кабинете администратора — «только аудит» (AR-88).
+  permissionSet: 'school.permission.set.v1',
 } as const;
 
 export type SchoolEventType = (typeof SCHOOL_EVENTS)[keyof typeof SCHOOL_EVENTS];
@@ -139,6 +143,22 @@ export interface LoginLinkIssuedV1 {
 export interface PolicySetV1 {
   sessionLimits: Record<string, number | null>;
   roleLimits: Record<string, number | null>;
+}
+/**
+ * Правка разрешений администратором школы (AR-212). `scope: 'role'` — общие
+ * разрешения роли (`subject` = ключ роли), `scope: 'user'` — индивидуальные
+ * (`subject` = `userId`, он же субъект строки леджера). `allowed: null` —
+ * личное отклонение снято, человек вернулся к пакету своих ролей;
+ * `reverted` — правка совпала с каноном версии и строка отклонения удалена.
+ */
+export interface PermissionSetV1 {
+  scope: 'role' | 'user';
+  subject: string;
+  /** Заполнен только у `scope: 'user'` — по нему аудит находит субъекта ПДн. */
+  userId?: string;
+  permission: string;
+  allowed: boolean | null;
+  reverted: boolean;
 }
 /** Реестр Wi-Fi сетей и корпоративных устройств школы (AR-186). */
 export interface RegistryChangedV1 {
@@ -229,6 +249,8 @@ export const EVENT_CONTRACT: EventContractRow[] = [
   { type: SCHOOL_EVENTS.accountUpdated, publisher: 'staff', subscribers: [], reaction: 'нет подписчика (только аудит): кто и какие поля учётки изменил с карточки (AR-203)' },
   { type: SCHOOL_EVENTS.passwordSet, publisher: 'staff', subscribers: [], reaction: 'нет подписчика (только аудит): кто задал пароль и был ли он сгенерирован; сам пароль в событии не едет (AR-156)' },
   { type: SCHOOL_EVENTS.classGroupsChanged, publisher: 'contingent', subscribers: ['schedule'], reaction: 'сетка → stale (число групп меняет укладку)' },
+  // 1.6.0 (AR-212): разрешения школы
+  { type: SCHOOL_EVENTS.permissionSet, publisher: 'administration', subscribers: [], reaction: 'нет подписчика (только аудит): кто, кому и какое разрешение выдал или снял; действует со следующего запроса — резолв читает таблицу отклонений, а не событие' },
 ];
 
 /**
@@ -275,6 +297,8 @@ export const AUDIT_LABELS: Record<SchoolEventType, { action: string; object: str
   [SCHOOL_EVENTS.accountUpdated]: { action: 'изменена учётка сотрудника', object: 'сотрудник' },
   [SCHOOL_EVENTS.passwordSet]: { action: 'задан пароль сотрудника', object: 'сотрудник' },
   [SCHOOL_EVENTS.classGroupsChanged]: { action: 'изменено число групп класса', object: 'класс' },
+  // 1.6.0 (AR-212)
+  [SCHOOL_EVENTS.permissionSet]: { action: 'изменены разрешения', object: 'разрешение' },
 };
 
 /**

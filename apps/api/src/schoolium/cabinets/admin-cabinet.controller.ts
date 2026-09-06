@@ -1,10 +1,17 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
-import type { SetAccessPolicyDto, UpsertAssetDto, UpsertNetworkDto } from '@edustore/shared';
+import type {
+  SetAccessPolicyDto,
+  SetRolePermissionDto,
+  SetUserPermissionDto,
+  UpsertAssetDto,
+  UpsertNetworkDto,
+} from '@edustore/shared';
 import { RequirePermission } from '../../common/authz/require-permission.decorator';
 import type { SessionUser } from '../../common/auth/flor.service';
 import { actorOf } from '../actor';
 import { AdminCabinetService } from './admin-cabinet.service';
+import { PermissionsService } from './permissions.service';
 
 type Req0 = Request & { user?: SessionUser; sessionId?: string };
 
@@ -16,7 +23,10 @@ type Req0 = Request & { user?: SessionUser; sessionId?: string };
  */
 @Controller('v1/admin')
 export class AdminCabinetController {
-  constructor(private readonly svc: AdminCabinetService) {}
+  constructor(
+    private readonly svc: AdminCabinetService,
+    private readonly permissions: PermissionsService,
+  ) {}
 
   @RequirePermission('school.admin')
   @Get('overview')
@@ -63,6 +73,42 @@ export class AdminCabinetController {
   @Put('policy')
   setPolicy(@Req() req: Req0, @Body() body: SetAccessPolicyDto) {
     return this.svc.setPolicy(body, actorOf(req));
+  }
+
+  // ─── разрешения (AR-212): общие по ролям и индивидуальные по людям ───
+
+  /** `S-62.perm.matrix`: действующие права каждой роли школы и их отличия от пакета версии. */
+  @RequirePermission('school.admin')
+  @Get('permissions')
+  permissionMatrix() {
+    return this.permissions.matrix();
+  }
+
+  /** Один тумблер общих разрешений: роль × право. Действует немедленно — гейт читает ту же таблицу. */
+  @RequirePermission('school.admin')
+  @Put('permissions/role')
+  setRolePermission(@Req() req: Req0, @Body() body: SetRolePermissionDto) {
+    return this.permissions.setRolePermission(body, actorOf(req));
+  }
+
+  /** Люди школы для «индивидуальных»: подстрока по ФИО и юзернейму. */
+  @RequirePermission('school.admin')
+  @Get('permissions/users')
+  permissionUsers(@Query('q') q?: string) {
+    return this.permissions.users(q ?? null);
+  }
+
+  @RequirePermission('school.admin')
+  @Get('permissions/users/:userId')
+  userPermissions(@Param('userId') userId: string) {
+    return this.permissions.userPermissions(userId);
+  }
+
+  /** Один тумблер индивидуальных разрешений; `allowed: null` — возврат к пакету ролей. */
+  @RequirePermission('school.admin')
+  @Put('permissions/users/:userId')
+  setUserPermission(@Req() req: Req0, @Param('userId') userId: string, @Body() body: SetUserPermissionDto) {
+    return this.permissions.setUserPermission(userId, body, actorOf(req));
   }
 
   /** `S-62.audit`: последние 200 строк леджера школы — все действующие, не только свои. */

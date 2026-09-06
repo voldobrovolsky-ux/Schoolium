@@ -477,6 +477,43 @@ select.sch-input { padding-right: var(--sp-8); }
 .sch-badge--warning { background: var(--c-mark-m3-bg); color: var(--c-mark-m3-ink); }
 .sch-badge--danger { background: var(--c-mark-m2-bg); color: var(--c-mark-m2-ink); }
 
+/* Тумблер (AR-212) — состояние, а не команда. Знак состояния — ПОЛОЖЕНИЕ
+   ручки, цвет только подкрепляет его (AR-80): дорожка включённого залита,
+   выключенного — нет, и различить их можно без цвета. `data-tone="own"` —
+   состояние задано адресно (правка школы поверх пакета роли), и об этом
+   говорит ободок, а не другой оттенок. */
+.sch-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: var(--tap-min); padding: 0;
+  border: 0; background: none; cursor: pointer; color: inherit;
+}
+.sch-toggle-track {
+  position: relative; display: block; width: 36px; height: 20px;
+  border-radius: var(--r-pill);
+  background: var(--c-state-disabled-bg);
+  box-shadow: inset 0 0 0 1px var(--c-border-strong);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.sch-toggle-thumb {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: var(--r-pill); background: var(--c-surface-page);
+  box-shadow: var(--sh-card);
+  transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sch-toggle[aria-checked='true'] .sch-toggle-track {
+  background: var(--c-brand-violet-600); box-shadow: inset 0 0 0 1px var(--c-brand-violet-700);
+}
+.sch-toggle[aria-checked='true'] .sch-toggle-thumb { transform: translateX(16px); }
+.sch-toggle:hover:not(:disabled) .sch-toggle-track { box-shadow: inset 0 0 0 1px var(--c-brand-violet-500); }
+.sch-toggle:focus-visible { outline: 2px solid var(--c-border-focus); outline-offset: 2px; border-radius: var(--r-pill); }
+.sch-toggle:disabled { cursor: not-allowed; }
+.sch-toggle:disabled .sch-toggle-track { opacity: 0.55; }
+.sch-toggle[data-busy] { cursor: progress; }
+.sch-toggle[data-busy] .sch-toggle-track { opacity: 0.6; }
+/* Адресная правка школы: ободок вокруг дорожки — виден и на включённом, и на
+   выключенном, и не спорит с заливкой состояния. */
+.sch-toggle[data-tone='own'] .sch-toggle-track { outline: 2px solid var(--c-brand-pink-500); outline-offset: 2px; }
+
 /* ─── общие блоки кабинетов (AR-186): плитки, разделы, копирование ─── */
 
 .sch-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--sp-12); margin-bottom: var(--sp-24); }

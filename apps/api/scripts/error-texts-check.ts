@@ -95,6 +95,9 @@ const SAMPLE: Record<ErrorCode, Record<string, unknown>> = {
   LESSON_ALREADY_HELD: { date: '14.09', time: '09:00' },
   LESSON_CANCELLED: {},
   SUBSTITUTE_BUSY: { teacher: 'Петров П. П.', classLabel: '6А' },
+  // Текст без подстановок: объект отказа один и назван словами — право
+  // «Кабинет администратора» у роли администратора (AR-212).
+  PERMISSION_LOCKED: {},
 };
 
 /** Строки §9, чей текст объявлен НЕ показываемым пользователю. */

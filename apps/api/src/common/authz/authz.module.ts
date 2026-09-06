@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthzService } from './authz.service';
+import { SchoolPermissionsService } from './school-permissions.service';
 
 /**
  * Authz-слой (§5.1): права как данные. Глобальный — резолвер доступа доступен везде
@@ -9,7 +10,7 @@ import { AuthzService } from './authz.service';
 @Global()
 @Module({
   imports: [PrismaModule],
-  providers: [AuthzService],
-  exports: [AuthzService],
+  providers: [AuthzService, SchoolPermissionsService],
+  exports: [AuthzService, SchoolPermissionsService],
 })
 export class AuthzModule {}

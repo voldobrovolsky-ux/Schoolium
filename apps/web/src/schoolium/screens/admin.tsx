@@ -52,6 +52,7 @@ import { api, SchoolApiError } from "../api";
 import { useAsync, useIsMobile } from "../hooks";
 import { Icon, type IconName } from "../icons";
 import { ADMIN_SECTIONS, navigate, type AdminSection } from "../router";
+import { PermissionsSection } from "./permissions";
 import { useMe, useSession } from "../session";
 import {
   Avatar,
@@ -93,7 +94,7 @@ const REVOKE_LABELS = SESSION_REVOKE_REASON_LABELS;
 const SECTION_ITEMS: { key: AdminSection; label: string; icon: IconName }[] = [
   { key: "overview", label: "Обзор", icon: "dashboard" },
   { key: "devices", label: "Устройства", icon: "monitor" },
-  { key: "roles", label: "Роли", icon: "shield" },
+  { key: "roles", label: "Разрешения", icon: "shield" },
   { key: "network", label: "Сеть", icon: "wifi" },
   { key: "audit", label: "Аудит", icon: "doc" },
   { key: "policy", label: "Политики", icon: "lock" },
@@ -136,7 +137,7 @@ export function AdminScreen({ section }: { section: string }) {
       />
       {active === "overview" ? <OverviewSection /> : null}
       {active === "devices" ? <DevicesSection /> : null}
-      {active === "roles" ? <RolesSection /> : null}
+      {active === "roles" ? <PermissionsSection /> : null}
       {active === "network" ? <NetworkSection /> : null}
       {active === "audit" ? <AuditSection /> : null}
       {active === "policy" ? <PolicySection /> : null}
@@ -522,107 +523,6 @@ function ConnectionsModal({ user, onClose }: { user: AdminDeviceUserDto; onClose
           : null}
       </div>
     </Modal>
-  );
-}
-
-// ─────────────────────────── роли (AR-35) ───────────────────────────
-
-const PERMISSION_GROUPS: { label: string; codes: readonly SchoolPermission[] }[] = [
-  { label: "изменения", codes: MUTATION_PERMISSIONS },
-  { label: "чтение", codes: READ_PERMISSIONS },
-  { label: "проекции", codes: PROJECTION_PERMISSIONS },
-  { label: "надзор", codes: OVERSIGHT_PERMISSIONS },
-];
-
-function RolesSection() {
-  const mobile = useIsMobile();
-  return (
-    <div className="sch-adm-section">
-      <p className="sch-adm-hint">
-        Матрица собрана из пакета прав в коде и здесь только читается: право роли меняется решением, а не кнопкой.
-      </p>
-      {/* На мобайле — карточка на роль, а не таблица (§6): семнадцать колонок
-          на 390px читаются только скроллом, а карточка перечисляет права роли
-          по тем же группам. Контейнер тот же — реестр называет матрицу. */}
-      {mobile ? (
-        <div className="sch-list" data-testid="S-62.roles.matrix">
-          {SCHOOL_ROLES.map((role) => {
-            const groups = PERMISSION_GROUPS.map((g) => ({
-              label: g.label,
-              codes: g.codes.filter((code) => ROLE_PERMISSIONS[role].includes(code)),
-            })).filter((g) => g.codes.length > 0);
-            return (
-              <div key={role} className="sch-card sch-adm-role">
-                <div className="sch-card-title">{ROLE_LABELS[role]}</div>
-                {groups.length === 0 ? <span className="sch-muted">прав нет</span> : null}
-                {groups.map((g) => (
-                  <div key={g.label} className="sch-adm-role-group">
-                    <span className="sch-adm-role-group-label">{g.label}</span>
-                    <span className="sch-adm-role-codes">{g.codes.join(", ")}</span>
-                  </div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-      <div className="sch-tablewrap">
-        <table className="sch-table sch-adm-matrix" data-testid="S-62.roles.matrix">
-          <thead>
-            <tr>
-              <th rowSpan={2}>Роль</th>
-              {PERMISSION_GROUPS.map((g) => (
-                <th key={g.label} colSpan={g.codes.length} className="sch-adm-group sch-adm-group-start">
-                  {g.label}
-                </th>
-              ))}
-            </tr>
-            <tr>
-              {PERMISSION_GROUPS.flatMap((g) =>
-                g.codes.map((code, i) => (
-                  <th key={code} className={i === 0 ? "sch-adm-perm sch-adm-group-start" : "sch-adm-perm"}>
-                    {/* Поворачивается внутренний span, а не th: рамка группы остаётся на неповёрнутой ячейке. */}
-                    <span>{code}</span>
-                  </th>
-                )),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {SCHOOL_ROLES.map((role) => (
-              <tr key={role}>
-                <td>{ROLE_LABELS[role]}</td>
-                {PERMISSION_GROUPS.flatMap((g) =>
-                  g.codes.map((code, i) => {
-                    const yes = ROLE_PERMISSIONS[role].includes(code);
-                    return (
-                      <td
-                        key={code}
-                        className={`sch-adm-cell${yes ? " sch-adm-cell--yes" : ""}${i === 0 ? " sch-adm-group-start" : ""}`}
-                        title={`${ROLE_LABELS[role]}, ${code}: ${yes ? "есть" : "нет"}`}
-                      >
-                        {yes ? <Icon name="check" size={18} /> : null}
-                      </td>
-                    );
-                  }),
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      )}
-      <dl className="sch-adm-legend" data-testid="S-62.roles.legend">
-        <dt>school.admin</dt>
-        <dd>кабинет администратора: сеть, устройства, права, аудит, политики</dd>
-        <dt>school.manage</dt>
-        <dd>кабинет модератора: классы, предметы, персонал, расписание</dd>
-        <dt>school.oversee</dt>
-        <dd>кабинет завуча: сводки готовности без единой мутации</dd>
-        <dt>*.read</dt>
-        <dd>чтение разделов — у всех штатных ролей; diary.read — проекция ученика и родителя</dd>
-      </dl>
-    </div>
   );
 }
 

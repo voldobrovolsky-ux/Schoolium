@@ -34,6 +34,7 @@ import {
 // 1.3.0 (AR-186): три кабинета — модератора (S-60), администратора (S-62), завуча (S-61)
 import { ModeratorCabinetController } from './cabinets/moderator-cabinet.controller';
 import { AdminCabinetService } from './cabinets/admin-cabinet.service';
+import { PermissionsService } from './cabinets/permissions.service';
 import { AdminCabinetController } from './cabinets/admin-cabinet.controller';
 import { DeputyCabinetService } from './cabinets/deputy-cabinet.service';
 import { DeputyCabinetController } from './cabinets/deputy-cabinet.controller';
@@ -89,6 +90,7 @@ import { DeputyCabinetController } from './cabinets/deputy-cabinet.controller';
     JournalContractService,
     JournalProjection,
     AdminCabinetService,
+    PermissionsService,
     DeputyCabinetService,
   ],
   exports: [

@@ -43,6 +43,23 @@ export const ROLE_LABELS: Record<SchoolRole, string> = {
   student: 'Ученик',
 };
 
+/**
+ * Короткое имя роли — для заголовка колонки, где полное не помещается
+ * (матрица разрешений `S-62`). Полное имя остаётся в `title` ячейки: короткое
+ * не заменяет роль, а называет ту же роль в узком месте.
+ */
+export const ROLE_SHORT_LABELS: Record<SchoolRole, string> = {
+  founder: 'Учредитель',
+  director: 'Директор',
+  deputy_academic: 'Зам. по УР',
+  deputy_upbringing: 'Зам. по ВР',
+  teacher: 'Учитель',
+  moderator: 'Модератор',
+  admin: 'Админ',
+  parent: 'Родитель',
+  student: 'Ученик',
+};
+
 /** Штатные роли — те, чьи карточки живут на экране «Персонал» (`S-30`). */
 export const STAFF_ROLES: SchoolRole[] = [
   'founder',
@@ -175,6 +192,141 @@ export const ROLE_PERMISSIONS: Record<SchoolRole, SchoolPermission[]> = {
   student: [...PROJECTION_PERMISSIONS],
 };
 
+// ─────────────── разделы приложения и функции разделов (AR-212) ───────────────
+
+/**
+ * Право, названное словами раздела. Матрица разрешений `S-62` показывает не
+ * коды, а функции: «Журнал · выставление отметок», а не `journal.mark.post` —
+ * администратор школы читает интерфейс, а не пакет прав.
+ */
+export const PERMISSION_LABELS: Record<SchoolPermission, string> = {
+  'journal.read': 'Просмотр',
+  'journal.mark.post': 'Выставление и снятие отметок',
+  'journal.topic.set': 'Тема урока',
+  'schedule.read': 'Просмотр',
+  'schedule.build': 'Сборка расписания',
+  'schedule.load.write': 'Годовые нормы часов',
+  'schedule.preference.self': 'Свои рабочие дни',
+  'lesson.cancel.self': 'Отмена своего урока',
+  'classes.read': 'Просмотр',
+  'contingent.write': 'Ведение классов и контингента',
+  'subjects.read': 'Просмотр',
+  'subject.write': 'Ведение предметов и привязок',
+  'staff.read': 'Просмотр',
+  'staff.manage': 'Ведение карточек и ролей',
+  'staff.self.write': 'Правка своего профиля',
+  'diary.read': 'Просмотр дневника и средних',
+  'school.admin': 'Кабинет администратора',
+  'school.manage': 'Кабинет модератора',
+  'school.oversee': 'Кабинет завуча',
+};
+
+/**
+ * Разделы приложения в порядке навигации (AR-81) плюс дневник-проекция и
+ * кабинеты. Каждое из девятнадцати прав версии принадлежит ровно одному
+ * разделу: раздел — это то, что человек видит в меню, а функция — то, что он
+ * в разделе делает. Полнота и однократность проверяются `G-86`.
+ */
+export const APP_SECTIONS = [
+  { key: 'journal', label: 'Журнал', hint: 'отметки, темы уроков', permissions: ['journal.read', 'journal.mark.post', 'journal.topic.set'] },
+  {
+    key: 'schedule',
+    label: 'Расписание',
+    hint: 'сетка, нормы часов, замены',
+    permissions: ['schedule.read', 'schedule.build', 'schedule.load.write', 'schedule.preference.self', 'lesson.cancel.self'],
+  },
+  { key: 'classes', label: 'Классы', hint: 'классы, группы, контингент', permissions: ['classes.read', 'contingent.write'] },
+  { key: 'subjects', label: 'Предметы', hint: 'карточки предметов и привязки', permissions: ['subjects.read', 'subject.write'] },
+  { key: 'staff', label: 'Персонал', hint: 'карточки сотрудников и роли', permissions: ['staff.read', 'staff.manage', 'staff.self.write'] },
+  { key: 'diary', label: 'Дневник', hint: 'проекция ученика и родителя', permissions: ['diary.read'] },
+  { key: 'cabinets', label: 'Кабинеты', hint: 'администратор, модератор, завуч', permissions: ['school.admin', 'school.manage', 'school.oversee'] },
+] as const satisfies readonly { key: string; label: string; hint: string; permissions: readonly SchoolPermission[] }[];
+
+export type AppSectionKey = (typeof APP_SECTIONS)[number]['key'];
+
+// ─────────────── правка разрешений администратором (AR-212) ───────────────
+
+/**
+ * Право, которое администратор не может снять НИ роли `admin`, НИ себе:
+ * снятое `school.admin` закрывает кабинет, из которого его снимали, и вернуть
+ * его будет некому — школа осталась бы без администратора без единого способа
+ * это исправить. Замок стоит на сервере (`PERMISSION_LOCKED`), интерфейс его
+ * только отражает.
+ */
+export const LOCKED_ADMIN_PERMISSION: SchoolPermission = 'school.admin';
+
+/** Роль, у которой замок действует: у остальных `school.admin` снимается свободно. */
+export const LOCKED_ADMIN_ROLE: SchoolRole = 'admin';
+
+export const isLockedRoleGrant = (role: SchoolRole, permission: SchoolPermission): boolean =>
+  role === LOCKED_ADMIN_ROLE && permission === LOCKED_ADMIN_PERMISSION;
+
+/**
+ * Отклонение пакета роли (AR-212): `true` — право выдано сверх пакета, `false` —
+ * снято. Ключ отсутствует — действует пакет роли из `ROLE_PERMISSIONS`.
+ */
+export type PermissionOverrides = Partial<Record<SchoolPermission, boolean>>;
+
+/** Пакет роли плюс отклонения школы — в порядке `SCHOOL_PERMISSIONS`. */
+export function applyOverrides(base: readonly SchoolPermission[], overrides: PermissionOverrides): SchoolPermission[] {
+  const set = new Set<SchoolPermission>(base);
+  for (const code of SCHOOL_PERMISSIONS) {
+    const v = overrides[code];
+    if (v === true) set.add(code);
+    if (v === false) set.delete(code);
+  }
+  return SCHOOL_PERMISSIONS.filter((c) => set.has(c));
+}
+
+/** Действующие права роли в школе: пакет версии плюс отклонения. */
+export function effectiveRolePermissions(role: SchoolRole, overrides: PermissionOverrides): SchoolPermission[] {
+  const eff = applyOverrides(ROLE_PERMISSIONS[role], overrides);
+  return isLockedRoleGrant(role, LOCKED_ADMIN_PERMISSION) && !eff.includes(LOCKED_ADMIN_PERMISSION)
+    ? [...eff, LOCKED_ADMIN_PERMISSION]
+    : eff;
+}
+
+/** Матрица разрешений школы: действующие права каждой роли (`S-62.perm`). */
+export interface PermissionMatrixDto {
+  /** Действующие права роли — пакет версии с наложенными отклонениями школы. */
+  grants: Record<SchoolRole, SchoolPermission[]>;
+  /** Что именно отклонено от пакета: интерфейс отмечает такие тумблеры. */
+  overrides: Record<SchoolRole, PermissionOverrides>;
+}
+
+/** `PUT /v1/admin/permissions/role` — один тумблер, одна запись. */
+export interface SetRolePermissionDto {
+  role: SchoolRole;
+  permission: SchoolPermission;
+  allowed: boolean;
+}
+
+/** Человек школы в поиске «индивидуальных» разрешений. */
+export interface PermissionUserDto {
+  userId: string;
+  name: string;
+  username: string | null;
+  avatarUrl: string | null;
+  roles: SchoolRole[];
+  deactivated: boolean;
+}
+
+/** Разрешения одного человека: роли, их пакет и личные отклонения. */
+export interface UserPermissionsDto {
+  user: PermissionUserDto;
+  /** Объединение действующих пакетов ролей человека — без его личных отклонений. */
+  base: SchoolPermission[];
+  /** Что человек может на самом деле: `base` с наложенными личными отклонениями. */
+  effective: SchoolPermission[];
+  overrides: PermissionOverrides;
+}
+
+/** `PUT /v1/admin/permissions/user/:userId` — `allowed: null` возвращает право к пакету ролей. */
+export interface SetUserPermissionDto {
+  permission: SchoolPermission;
+  allowed: boolean | null;
+}
+
 // ─────────────────────────── отметки (6 значений, AR-79) ───────────────────────────
 
 /** Порядок фиксирован — таким он показывается в `S-52`. */
@@ -264,6 +416,9 @@ export const ERROR_CODES = [
   'LESSON_ALREADY_HELD',
   'LESSON_CANCELLED',
   'SUBSTITUTE_BUSY',
+  // AR-212: замок `school.admin` у роли администратора — снятие закрыло бы
+  // кабинет, из которого его снимают, и вернуть право стало бы некому
+  'PERMISSION_LOCKED',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

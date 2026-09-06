@@ -16,6 +16,11 @@ import type {
   AdminOverviewDto,
   AdminSessionDto,
   DeputyCabinetDto,
+  PermissionMatrixDto,
+  PermissionUserDto,
+  SetRolePermissionDto,
+  SetUserPermissionDto,
+  UserPermissionsDto,
   IncidentResultDto,
   IssueLoginLinkDto,
   LoginLinkDto,
@@ -331,6 +336,14 @@ export const api = {
   adminPolicy: () => call<AccessPolicyDto>("GET", `${V1}/admin/policy`),
   setAdminPolicy: (dto: SetAccessPolicyDto) => call<AccessPolicyDto>("PUT", `${V1}/admin/policy`, dto),
   adminAudit: () => call<SchoolAuditEntryDto[]>("GET", `${V1}/admin/audit`),
+  // Разрешения `S-62` (AR-212): матрица ролей, люди школы и личные отклонения.
+  permissionMatrix: () => call<PermissionMatrixDto>("GET", `${V1}/admin/permissions`),
+  setRolePermission: (dto: SetRolePermissionDto) => call<PermissionMatrixDto>("PUT", `${V1}/admin/permissions/role`, dto),
+  permissionUsers: (q?: string | null) =>
+    call<PermissionUserDto[]>("GET", `${V1}/admin/permissions/users${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  userPermissions: (userId: string) => call<UserPermissionsDto>("GET", `${V1}/admin/permissions/users/${userId}`),
+  setUserPermission: (userId: string, dto: SetUserPermissionDto) =>
+    call<UserPermissionsDto>("PUT", `${V1}/admin/permissions/users/${userId}`, dto),
   networks: () => call<SchoolNetworkDto[]>("GET", `${V1}/admin/networks`),
   createNetwork: (dto: UpsertNetworkDto) => call<SchoolNetworkDto>("POST", `${V1}/admin/networks`, dto),
   updateNetwork: (id: string, dto: UpsertNetworkDto) => call<SchoolNetworkDto>("PUT", `${V1}/admin/networks/${id}`, dto),

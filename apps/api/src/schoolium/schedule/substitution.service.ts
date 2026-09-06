@@ -34,9 +34,15 @@ const parseDay = (s: string): Date => new Date(`${s}T00:00:00.000Z`);
 /** Свободный текст причины читают только штатные роли с одним из этих прав (AR-207). */
 const REASON_READERS: SchoolPermission[] = ['staff.manage', 'schedule.build', 'school.oversee'];
 
-/** Право действующего — по пакету его ролей из контракта (тот же источник, что у каталога). */
-export const actorHas = (actor: Pick<SchoolActor, 'roles'>, code: SchoolPermission): boolean =>
-  actor.roles.some((r) => (ROLE_PERMISSIONS[r] ?? []).includes(code));
+/**
+ * Право действующего. Сперва — резолв запроса (`PermissionGuard`, AR-212): он
+ * уже учёл школьные правки `S-62`. Пакет ролей из контракта остаётся запасным
+ * ответом там, где резолва нет (негейченный роут, не-HTTP вызов).
+ */
+export const actorHas = (actor: Pick<SchoolActor, 'roles' | 'permissions'>, code: SchoolPermission): boolean =>
+  actor.permissions
+    ? actor.permissions.includes(code)
+    : actor.roles.some((r) => (ROLE_PERMISSIONS[r] ?? []).includes(code));
 
 type Lesson = {
   id: string;

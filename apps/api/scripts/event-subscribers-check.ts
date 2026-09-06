@@ -41,8 +41,8 @@ async function main(): Promise<void> {
   console.log('G-50 · у каждого события назван подписчик и реакция (AR-108)\n');
 
   const spec = specTable();
-  check(spec.length === 32, `в таблице контрактов ${spec.length} событий (версия обещает 32)`);
-  check(EVENT_CONTRACT.length === 32, `в исполняемом реестре ${EVENT_CONTRACT.length} событий`);
+  check(spec.length === 33, `в таблице контрактов ${spec.length} событий (версия обещает 33)`);
+  check(EVENT_CONTRACT.length === 33, `в исполняемом реестре ${EVENT_CONTRACT.length} событий`);
 
   // ─── ни одной пустой клетки ───
   const emptyCells = spec.filter((r) => !r.publisher || !r.subscriber || !r.reaction);

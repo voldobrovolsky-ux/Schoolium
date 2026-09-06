@@ -83,6 +83,8 @@ const TEXTS: Record<ErrorCode, (d: D) => string> = {
   LESSON_ALREADY_HELD: (d) => `Урок ${n(d, 'date')} в ${n(d, 'time')} уже начался — отменить нельзя`,
   LESSON_CANCELLED: () => 'Урок отменён — отметки в него не ставятся',
   SUBSTITUTE_BUSY: (d) => `${n(d, 'teacher')} в этом слоте ведёт урок в ${n(d, 'classLabel')}`,
+  PERMISSION_LOCKED: () =>
+    'Кабинет администратора нельзя закрыть самому себе: право «Кабинет администратора» у роли администратора снять нельзя',
 };
 
 /** HTTP-статус отказа: 409 у конфликтов состояния, 410 у погасших ссылок, 403 у отзыва доступа, иначе 400. */
@@ -115,6 +117,7 @@ const STATUS: Partial<Record<ErrorCode, HttpStatus>> = {
   SUBSTITUTE_BUSY: HttpStatus.CONFLICT,
   LINK_EXHAUSTED: HttpStatus.GONE,
   NOT_YOUR_LESSON: HttpStatus.FORBIDDEN,
+  PERMISSION_LOCKED: HttpStatus.FORBIDDEN,
 };
 
 /** Отказ версии: код + человекочитаемая причина с объектом и цифрами + requestId. */

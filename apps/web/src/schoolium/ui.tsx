@@ -681,6 +681,57 @@ export function CopyField({ value, label, testId }: { value: string; label?: str
   );
 }
 
+/**
+ * Тумблер — переключатель состояния, а не отправка формы: нажатие меняет
+ * состояние немедленно, кнопки «Сохранить» рядом нет. Отсюда три требования,
+ * которых нет у кнопки:
+ *
+ *   · `role="switch"` с `aria-checked` — читалка называет состояние, а не
+ *     «кнопка»; клавиатура работает штатной активацией `button`;
+ *   · `aria-label` обязателен: тумблер в ячейке матрицы стоит без подписи
+ *     рядом, и «включено» без имени права — не сообщение;
+ *   · `busy` держит запрос в полёте, `disabled` — «нельзя вовсе»; это разные
+ *     состояния, и выглядят они по-разному (AR-80: цвет не единственный знак).
+ */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  disabled,
+  busy,
+  testId,
+  tone,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: string;
+  disabled?: boolean;
+  busy?: boolean;
+  testId?: string;
+  /** `own` — состояние задано адресно, а не унаследовано: тумблер помечается. */
+  tone?: 'default' | 'own';
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      disabled={disabled || busy}
+      data-testid={testId}
+      data-busy={busy ? '' : undefined}
+      data-tone={tone && tone !== 'default' ? tone : undefined}
+      className="sch-toggle"
+      onClick={() => onChange(!checked)}
+    >
+      <span className="sch-toggle-track">
+        <span className="sch-toggle-thumb" />
+      </span>
+    </button>
+  );
+}
+
 /** Точка состояния рядом со словом: «в сети», «завершена». Слово обязательно. */
 export function StatusDot({ tone }: { tone: BadgeTone }) {
   return <span className={`sch-dot sch-dot--${tone}`} aria-hidden="true" />;

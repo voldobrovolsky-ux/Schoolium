@@ -1567,12 +1567,75 @@ async function main() {
     await mobileInvariants(page, 'S-62 · устройства');
     await shot(page, 'S-62-devices');
 
-    // Роли: матрица прав — чтение каталога из пакета контрактов (AR-35).
+    // Разрешения (AR-212): матрица правится тумблером, и правка ДЕЙСТВУЕТ —
+    // экран доказывает это не «кнопку нажали», а ответом `GET /admin/permissions`.
     await page.goto(`${WEB}/admin/roles`);
     await page.waitForSelector('[data-testid="S-62.roles.matrix"]', { timeout: 20_000 });
-    await hasAll(page, ['S-62.roles.matrix', 'S-62.roles.legend']);
-    await mobileInvariants(page, 'S-62 · роли');
+    await hasAll(page, ['S-62.roles.matrix', 'S-62.roles.legend', 'S-62.perm.sections', 'S-62.perm.btn.mode', 'S-62.perm.level']);
+    // Разделы приложения стоят в правом сайдбаре, и их ровно семь.
+    const sections = await page.locator('[data-testid="S-62.perm.section"]').count();
+    if (sections === 7) console.log('    ✅ разделы приложения в правом сайдбаре: 7');
+    else { console.error(`    ❌ разделов в сайдбаре ${sections}, ожидалось 7`); failures++; }
+    /* Девять ролей — девять колонок на десктопе и девять строк карточки на
+       телефоне (`75-adaptive.md` §6): раскладки разные, утверждение одно —
+       матрица показывает ВСЕ роли, а не половину из них. */
+    const roleSel = MOBILE
+      ? '[data-testid="S-62.roles.matrix"] .sch-perm-card:first-child .sch-perm-card-row'
+      : '[data-testid="S-62.roles.matrix"] .sch-perm-cell--col';
+    const cols = await page.locator(roleSel).count();
+    if (cols === 9) console.log(`    ✅ ролей в матрице: 9 (${MOBILE ? 'строк карточки' : 'колонок'})`);
+    else { console.error(`    ❌ ролей в матрице ${cols}, ожидалось 9`); failures++; }
+
+    /* Тумблер меняет разрешение НА СЕРВЕРЕ, а не только на экране. Ячейка
+       адресуется парой «роль × право», а не порядковым номером: номер зависит
+       от порядка колонок, и проверка щёлкала бы одну ячейку, а сверяла другую. */
+    const CELL = '[data-role="founder"][data-perm="journal.mark.post"] [data-testid="S-62.perm.toggle"]';
+    const cell = page.locator(CELL).first();
+    const was = await cell.getAttribute('aria-checked');
+    /* Щелчок применяется оптимистично, поэтому «aria-checked сменился» ещё не
+       значит «сервер записал»: ждём ОТВЕТ мутации, иначе следующее чтение
+       обгоняет запись и проверка доказывает состояние гонки, а не контракта. */
+    const clickAndSettle = async () => {
+      const [res] = await Promise.all([
+        page.waitForResponse((r) => r.url().includes('/api/v1/admin/permissions/role') && r.request().method() === 'PUT', { timeout: 20_000 }),
+        cell.click(),
+      ]);
+      if (!res.ok()) throw new Error(`PUT /admin/permissions/role → ${res.status()}`);
+      return res.json();
+    };
+    const matrixAfter = await clickAndSettle();
+    const serverHas = (matrixAfter.grants.founder ?? []).includes('journal.mark.post');
+    if (serverHas === (was === 'false')) console.log(`    ✅ тумблер изменил разрешение НА СЕРВЕРЕ: founder journal.mark.post = ${serverHas}`);
+    else { console.error('    ❌ тумблер щёлкнул, а сервер остался при своём'); failures++; }
     await shot(page, 'S-62-roles');
+    // …и возвращается ровно туда же, откуда его сняли: правка обратима (AR-90).
+    const back = await clickAndSettle();
+    if ((back.grants.founder ?? []).includes('journal.mark.post') === (was === 'true')) {
+      console.log('    ✅ обратный щелчок вернул разрешение к исходному');
+    } else { console.error('    ❌ обратный щелчок не вернул разрешение'); failures++; }
+    const nowChecked = await cell.getAttribute('aria-checked');
+    if (nowChecked === was) console.log('    ✅ экран сошёлся с сервером после отката');
+    else { console.error(`    ❌ экран показывает ${nowChecked}, сервер вернул исходное ${was}`); failures++; }
+
+    // Полоска уровня: иконка настроек в углу сайдбара, две мишени.
+    await click(page, 'S-62.perm.btn.mode');
+    await page.waitForSelector('[data-testid="S-62.perm.panel"][data-open]', { timeout: 20_000 });
+    await hasAll(page, ['S-62.perm.btn.common', 'S-62.perm.btn.individual']);
+    await page.waitForTimeout(300); // переход полоски 180 мс — снимок после него
+    await shot(page, 'S-62-perm-strip');
+    // «Индивидуальные» превращают полоску в поиск со списком людей.
+    await click(page, 'S-62.perm.btn.individual');
+    await page.waitForSelector('[data-testid="S-62.perm.search"]', { timeout: 20_000 });
+    await hasAll(page, ['S-62.perm.users', 'S-62.perm.user.item']);
+    await page.waitForTimeout(300);
+    await shot(page, 'S-62-perm-users');
+    await page.locator('[data-testid="S-62.perm.user.item"]').first().click();
+    // Выбранный человек — в самом верху раздела: чья это роль, видно сразу.
+    await page.waitForSelector('[data-testid="S-62.perm.who"]', { timeout: 20_000 });
+    await has(page, 'S-62.perm.user', 'матрица одного человека');
+    await mobileInvariants(page, 'S-62 · разрешения');
+    await page.waitForTimeout(300); // полоска закрылась — снимок после перехода
+    await shot(page, 'S-62-perm-individual');
 
     // Сеть: реестр пуст у свежей школы; сеть и устройство заводятся одной
     // формой M-27 (§3) — два вида записей, два прохода.

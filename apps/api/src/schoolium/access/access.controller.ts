@@ -5,6 +5,7 @@ import { Public } from '../../common/auth/public.decorator';
 import type { SessionUser } from '../../common/auth/flor.service';
 import { SCHOOL_COOKIE, schoolCookieOptions, SchoolSessionService } from '../../common/auth/school-session.service';
 import { AuthzService } from '../../common/authz/authz.service';
+import { SchoolPermissionsService } from '../../common/authz/school-permissions.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { TenantContext } from '../../common/tenant/tenant-context';
 import { AccessService, type SessionClient } from './access.service';
@@ -184,6 +185,7 @@ export class SchoolAuthController {
 export class MeController {
   constructor(
     private readonly authz: AuthzService,
+    private readonly school: SchoolPermissionsService,
     private readonly prisma: PrismaService,
     private readonly state: SchoolStateService,
   ) {}
@@ -200,7 +202,12 @@ export class MeController {
     const u = req.user;
     if (!u?.workspaceId || !u.roles?.length) throw new SchoolError('ACCESS_REVOKED');
     const roles = u.roles as SchoolRole[];
-    const access = await this.authz.resolveForRoles(roles);
+    const catalog = await this.authz.resolveForRoles(roles);
+    /* Права отвечает СЕРВЕР, и он отвечает те же, которыми гейтит (AR-212):
+       школьная правка `S-62` накладывается здесь тем же резолвером, что и в
+       `PermissionGuard`. Иначе кнопка осталась бы на экране после снятия
+       права и упиралась бы в 403 при нажатии. */
+    const permissions = await this.school.resolve(u.workspaceId, u.florusUserId, roles, catalog.permissions);
     const [user, ws] = await TenantContext.runAsSystem(() =>
       Promise.all([
         this.prisma.user.findUnique({ where: { id: u.florusUserId } }),
@@ -214,8 +221,8 @@ export class MeController {
       workspaceId: u.workspaceId,
       schoolName: ws?.name ?? '',
       roles,
-      permissions: access.permissions as MeDto['permissions'],
-      startScreen: startScreenFor(access.permissions),
+      permissions: permissions as MeDto['permissions'],
+      startScreen: startScreenFor(permissions),
       schoolState: await this.state.resolve(u.workspaceId),
     };
   }
