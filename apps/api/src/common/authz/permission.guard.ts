@@ -13,7 +13,7 @@ import type { SessionUser } from '../auth/flor.service';
  *
  * Доступ считается в два слоя. Каталог (`RolePackage`) даёт канон версии — глобальная
  * reference-data вне тенант-изоляции, читается до TenantInterceptor. Поверх него, у сессии
- * Schoolium с известной школой, ложатся школьные разрешения `S-62` (AR-213): администратор
+ * Schoolium с известной школой, ложатся школьные разрешения `S-62` (AR-214): администратор
  * снял право тумблером — роут закрывается, а не только исчезает кнопка. Оба слоя читаются
  * явным `workspaceId` из сессии, поэтому порядок с TenantInterceptor по-прежнему не важен.
  *
@@ -41,7 +41,7 @@ export class PermissionGuard implements CanActivate {
       ? await this.authz.resolveForRoles(req.user.roles)
       : await this.authz.resolveAccess(req.user.role, req.user.subRole);
     // Сессия Schoolium с известной школой проходит через школьные разрешения
-    // (AR-213): тумблер `S-62` обязан закрывать роут, а не только прятать кнопку.
+    // (AR-214): тумблер `S-62` обязан закрывать роут, а не только прятать кнопку.
     const permissions =
       req.user.roles?.length && req.user.workspaceId
         ? await this.school.resolve(req.user.workspaceId, req.user.florusUserId, req.user.roles, access.permissions)

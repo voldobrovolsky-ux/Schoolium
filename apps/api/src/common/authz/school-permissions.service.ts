@@ -21,7 +21,7 @@ export const isSchoolPermission = (v: string): v is SchoolPermission =>
   (SCHOOL_PERMISSIONS as readonly string[]).includes(v);
 
 /**
- * Читающая сторона школьных разрешений (AR-213) — ОДНА на всех, кто спрашивает
+ * Читающая сторона школьных разрешений (AR-214) — ОДНА на всех, кто спрашивает
  * «что может этот человек»: гейт роутов (`PermissionGuard`), `GET /v1/me` и
  * кабинет администратора `S-62`. Пишущая сторона живёт в
  * `schoolium/cabinets/permissions.service.ts` и опирается на эту же.

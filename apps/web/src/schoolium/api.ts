@@ -338,7 +338,7 @@ export const api = {
   adminPolicy: () => call<AccessPolicyDto>("GET", `${V1}/admin/policy`),
   setAdminPolicy: (dto: SetAccessPolicyDto) => call<AccessPolicyDto>("PUT", `${V1}/admin/policy`, dto),
   adminAudit: () => call<SchoolAuditEntryDto[]>("GET", `${V1}/admin/audit`),
-  // Разрешения `S-62` (AR-213): матрица ролей, люди школы и личные отклонения.
+  // Разрешения `S-62` (AR-214): матрица ролей, люди школы и личные отклонения.
   permissionMatrix: () => call<PermissionMatrixDto>("GET", `${V1}/admin/permissions`),
   setRolePermission: (dto: SetRolePermissionDto) => call<PermissionMatrixDto>("PUT", `${V1}/admin/permissions/role`, dto),
   permissionUsers: (q?: string | null) =>

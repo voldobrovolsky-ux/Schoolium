@@ -1568,7 +1568,7 @@ async function main() {
     await mobileInvariants(page, 'S-62 · устройства');
     await shot(page, 'S-62-devices');
 
-    // Разрешения (AR-213): матрица правится тумблером, и правка ДЕЙСТВУЕТ —
+    // Разрешения (AR-214): матрица правится тумблером, и правка ДЕЙСТВУЕТ —
     // экран доказывает это не «кнопку нажали», а ответом `GET /admin/permissions`.
     await page.goto(`${WEB}/admin/roles`);
     await page.waitForSelector('[data-testid="S-62.roles.matrix"]', { timeout: 20_000 });

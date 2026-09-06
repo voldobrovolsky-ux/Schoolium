@@ -99,7 +99,7 @@ export const TENANT_COLUMN: Record<string, string> = {
   SchoolNetwork: 'workspaceId',
   SchoolAsset: 'workspaceId',
   SchoolAccessPolicy: 'workspaceId',
-  // ─── Schoolium 1.6.0: школьные отклонения от пакетов прав (AR-213) ───
+  // ─── Schoolium 1.6.0: школьные отклонения от пакетов прав (AR-214) ───
   SchoolPermissionOverride: 'workspaceId',
   // ─── Schoolium 1.5.0: предпочтения педагога (AR-206) и замены уроков (AR-207) ───
   TeacherPreference: 'workspaceId',

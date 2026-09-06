@@ -35,7 +35,7 @@ const parseDay = (s: string): Date => new Date(`${s}T00:00:00.000Z`);
 const REASON_READERS: SchoolPermission[] = ['staff.manage', 'schedule.build', 'school.oversee'];
 
 /**
- * Право действующего. Сперва — резолв запроса (`PermissionGuard`, AR-213): он
+ * Право действующего. Сперва — резолв запроса (`PermissionGuard`, AR-214): он
  * уже учёл школьные правки `S-62`. Пакет ролей из контракта остаётся запасным
  * ответом там, где резолва нет (негейченный роут, не-HTTP вызов).
  */
